@@ -7,7 +7,12 @@
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "noEmit": true
+    "noEmit": true,
+    "types": ["vite/client"],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@syncrohws/shared-types": ["../../packages/shared-types/src/index.ts"]
+    }
   },
   "include": ["src"]
 }

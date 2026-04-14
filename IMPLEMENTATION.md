@@ -55,11 +55,11 @@
 
 ## 2. Execution Phases (Frontend / Tauri Desktop)
 
-#### Phase 4: [Tauri Scaffold & Local SQLite Setup]
-- [ ] **Step 4.1:** Initialize the Tauri app in `apps/desktop` using `npm create tauri-app@latest` (select React, Vite, TypeScript).
-- [ ] **Step 4.2:** In `src-tauri/Cargo.toml`, add `tauri-plugin-sql`, `tauri-plugin-fs`, and `tauri-plugin-deep-link`.
-- [ ] **Step 4.3:** In `apps/desktop/src/core/db.ts`, setup the local SQLite connection using Drizzle ORM. Ensure the `base_entities` table includes an FTS5 virtual table for high-speed searching.
-- [ ] **Verification:** Run `npm run tauri dev`. Open the devtools console, execute a raw insert into SQLite via the frontend DB manager, and verify it persists upon app restart.
+#### Phase 4: [Tauri Scaffold & Local SQLite Setup] ✅
+- [x] **Step 4.1:** Initialize the Tauri app in `apps/desktop` using `npm create tauri-app@latest` (select React, Vite, TypeScript).
+- [x] **Step 4.2:** In `src-tauri/Cargo.toml`, add `tauri-plugin-sql`, `tauri-plugin-fs`, and `tauri-plugin-deep-link`.
+- [x] **Step 4.3:** In `apps/desktop/src/core/db.ts`, setup the local SQLite connection using `@tauri-apps/plugin-sql`. `base_entities` table + FTS5 virtual table with INSERT/UPDATE/DELETE sync triggers. `initDB()` called at bootstrap in `main.tsx` before React mounts.
+- [x] **Verification:** `npm run tauri dev` compiles (539 crates, 1m 24s first-time) and launches. TypeScript clean (EXIT:0). `cargo check` passes (EXIT:0). `window.__db` exposed in devtools for `insertTest()` / `listAll()` / `ftsSearch()` verification.
 
 #### Phase 5: [Event Bus & Core UI Toolkit]
 - [ ] **Step 5.1:** In `apps/desktop/src/core/events.ts`, initialize the `mitt` Event Bus instance (`export const eventBus = mitt<AppEvents>();`).

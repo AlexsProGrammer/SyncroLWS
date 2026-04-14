@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capabilities for the main window","local":true,"windows":["main"],"permissions":["core:default","core:event:default","core:window:default","core:app:default","core:tray:default","core:menu:default","core:path:default","core:webview:default","shell:allow-open","fs:default","sql:default","deep-link:default"]}}

@@ -1,45 +1,7 @@
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 
-// ── Window Tracker ────────────────────────────────────────────────────────────
-
-/// Returns the title of the currently focused OS window.
-/// Implementation is platform-specific; Linux uses `xdotool`, macOS uses
-/// AppleScript, Windows uses the Win32 API (future implementation).
-#[tauri::command]
-pub fn get_active_window() -> Result<String, String> {
-    #[cfg(target_os = "linux")]
-    {
-        use std::process::Command;
-        let output = Command::new("xdotool")
-            .args(["getactivewindow", "getwindowname"])
-            .output()
-            .map_err(|e| e.to_string())?;
-        let title = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return Ok(title);
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        use std::process::Command;
-        let script = r#"tell application "System Events" to get name of first process whose frontmost is true"#;
-        let output = Command::new("osascript")
-            .args(["-e", script])
-            .output()
-            .map_err(|e| e.to_string())?;
-        let title = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return Ok(title);
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        // TODO: implement via winapi GetForegroundWindow + GetWindowText
-        return Ok(String::from("(Windows window tracking not yet implemented)"));
-    }
-
-    #[allow(unreachable_code)]
-    Ok(String::new())
-}
+mod commands;
 
 // ── Deep Links ────────────────────────────────────────────────────────────────
 
@@ -85,7 +47,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_active_window])
+        .invoke_handler(tauri::generate_handler![commands::get_active_window])
         .run(tauri::generate_context!())
         .expect("error while running SyncroLWS");
 }
