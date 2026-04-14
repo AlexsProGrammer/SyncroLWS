@@ -34,22 +34,22 @@
 
 ## 2. Execution Phases (Backend / Server)
 
-#### Phase 1: [Backend Infrastructure & Database State]
-- [ ] **Step 1.1:** Initialize a Node.js project in `apps/backend` and install `drizzle-orm`, `pg`, `express`, and `@trpc/server`.
-- [ ] **Step 1.2:** In `apps/backend/src/db/schema.ts`, define the PostgreSQL schema. Create a `base_entities` table (id, type, payload JSONB, metadata, timestamps) and a `files` table (hash, path, reference_count, size).
-- [ ] **Step 1.3:** Configure `drizzle-kit` to output migrations. Create a `docker-compose.yml` defining PostgreSQL and MinIO services.
-- [ ] **Verification:** Run `docker-compose up -d` and `npx drizzle-kit push:pg`. Verify the tables exist in the Postgres container using a database viewer.
+#### Phase 1: [Backend Infrastructure & Database State] ✅
+- [x] **Step 1.1:** Initialize a Node.js project in `apps/backend` and install `drizzle-orm`, `pg`, `express`, and `@trpc/server`.
+- [x] **Step 1.2:** In `apps/backend/src/db/schema.ts`, define the PostgreSQL schema. Create a `base_entities` table (id, type, payload JSONB, metadata, timestamps) and a `files` table (hash, path, reference_count, size).
+- [x] **Step 1.3:** Configure `drizzle-kit` to output migrations. Create a `docker-compose.yml` defining PostgreSQL and MinIO services.
+- [x] **Verification:** Run `docker-compose up -d` and `npx drizzle-kit push`. Verified `base_entities` + `files` tables with all indexes in Postgres container. Backend health endpoint responding on `http://localhost:3000/health`.
 
-#### Phase 2: [API, tRPC, & File Hashing Logic]
-- [ ] **Step 2.1:** In `apps/backend/src/routes/trpc.ts`, establish the base tRPC router exporting types to `packages/shared-types`.
-- [ ] **Step 2.2:** In `apps/backend/src/routes/upload.ts`, create a POST endpoint using `multer` that accepts a file, calculates its SHA-256 hash, and checks the `files` table.
-- [ ] **Step 2.3:** Implement Reference Counting logic: If hash exists, increment `reference_count` and return existing MinIO path. If not, upload to MinIO, insert to DB with count 1.
-- [ ] **Verification:** Run `curl -X POST -F "file=@test.jpg" http://localhost:3000/upload`. Verify the file is in MinIO and DB. Run it again with the same file and verify `reference_count` increments instead of creating a duplicate.
+#### Phase 2: [API, tRPC, & File Hashing Logic] ✅
+- [x] **Step 2.1:** In `apps/backend/src/routes/trpc.ts`, establish the base tRPC router exporting types to `packages/shared-types`.
+- [x] **Step 2.2:** In `apps/backend/src/routes/upload.ts`, create a POST endpoint using `multer` that accepts a file, calculates its SHA-256 hash, and checks the `files` table.
+- [x] **Step 2.3:** Implement Reference Counting logic: If hash exists, increment `reference_count` and return existing MinIO path. If not, upload to MinIO, insert to DB with count 1.
+- [x] **Verification:** Verified via curl: same file uploaded twice → `deduplicated: true`, `reference_count` increments on second upload. MinIO path consistent across uploads.
 
-#### Phase 3: [Client Portal Web View]
-- [ ] **Step 3.1:** In `apps/backend/src/web/`, initialize a minimal React or Next.js build configured to be served via Express static routing at `/portal/:projectId`.
-- [ ] **Step 3.2:** Build a read-only view that fetches `base_entities` associated with a specific project ID via tRPC, displaying modular data based on the entity `type`.
-- [ ] **Verification:** Run the backend server, navigate to `http://localhost:3000/portal/test-id` in a browser, and verify the mock project data renders.
+#### Phase 3: [Client Portal Web View] ✅
+- [x] **Step 3.1:** In `apps/backend/src/web/`, initialized a minimal React + Vite build. Express serves it at `/portal` (static) and `/portal/:projectId` (SPA fallback).
+- [x] **Step 3.2:** Built a read-only view (`portal.tsx`) that fetches `base_entities` via `GET /trpc/entities.list` filtered by `parent_id`, displaying entities grouped by `type` (notes, tasks, calendar events, time logs) with inline styles (zero CDN — GDPR compliant).
+- [x] **Verification:** `GET /portal/11111111-1111-1111-1111-111111111111` → HTTP 200, serves React SPA. tRPC list confirmed returning 6 seeded entities (note ×2, task ×2, calendar_event ×2) grouped by type. `npm run build:web` bundles in 1.06s, 147 kB gzipped to 48 kB.
 
 ---
 

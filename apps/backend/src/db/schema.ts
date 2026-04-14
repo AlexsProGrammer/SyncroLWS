@@ -8,6 +8,7 @@ import {
   timestamp,
   index,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 // ── base_entities ─────────────────────────────────────────────────────────────
 /**
@@ -20,9 +21,10 @@ export const baseEntities = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     type: text('type').notNull(),
-    payload: jsonb('payload').notNull().default({}),
-    metadata: jsonb('metadata').notNull().default({}),
-    tags: text('tags').array().notNull().default([]),
+    // sql`` expressions produce valid DB-level DEFAULT clauses for drizzle-kit 0.31+
+    payload: jsonb('payload').notNull().default(sql`'{}'::jsonb`),
+    metadata: jsonb('metadata').notNull().default(sql`'{}'::jsonb`),
+    tags: text('tags').array().notNull().default(sql`ARRAY[]::text[]`),
     parent_id: uuid('parent_id'),
     created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

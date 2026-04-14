@@ -55,7 +55,7 @@ const baseEntityRouter = t.router({
     .input(BaseEntitySchema)
     .mutation(async ({ input }) => {
       const now = new Date().toISOString();
-      const row = {
+      const insertRow = {
         id: input.id ?? randomUUID(),
         type: input.type,
         payload: input.payload,
@@ -66,11 +66,13 @@ const baseEntityRouter = t.router({
         updated_at: new Date(now),
         deleted_at: input.deleted_at ? new Date(input.deleted_at) : null,
       };
+      // Exclude created_at from the ON CONFLICT update — preserve original creation time
+      const { created_at: _omit, ...updateRow } = insertRow;
       await db
         .insert(baseEntities)
-        .values(row)
-        .onConflictDoUpdate({ target: baseEntities.id, set: { ...row, created_at: undefined } });
-      return row;
+        .values(insertRow)
+        .onConflictDoUpdate({ target: baseEntities.id, set: updateRow });
+      return insertRow;
     }),
 
   delete: publicProcedure

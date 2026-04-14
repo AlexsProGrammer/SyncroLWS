@@ -4,7 +4,7 @@ import * as schema from './schema';
 
 const pool = new Pool({
   connectionString:
-    process.env['DATABASE_URL'] ?? 'postgresql://syncrohws:syncrohws@localhost:5432/syncrohws',
+    process.env['DATABASE_URL'] ?? 'postgresql://syncrohws:syncrohws@localhost:5434/syncrohws',
   max: 20,
 });
 
