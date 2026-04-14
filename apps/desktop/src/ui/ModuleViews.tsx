@@ -1,9 +1,9 @@
 /**
- * Placeholder view components for each module.
- * These render while full module UIs are being built in later phases.
- * Each panel shows its name, purpose, and keyboard shortcut.
+ * Module view components. TimeTrackerView is fully implemented.
+ * Notes/Tasks/Calendar views are placeholders for their upcoming phases.
  */
 import React from 'react';
+export { TimeTrackerView } from '@/modules/time-tracker/TimeTrackerView';
 
 interface PlaceholderProps {
   title: string;
@@ -81,24 +81,6 @@ export function CalendarView(): React.ReactElement {
           <line x1="16" y1="2" x2="16" y2="6" />
           <line x1="8" y1="2" x2="8" y2="6" />
           <line x1="3" y1="10" x2="21" y2="10" />
-        </svg>
-      }
-    />
-  );
-}
-
-// ── Time tracker ─────────────────────────────────────────────────────────────
-
-export function TimeTrackerView(): React.ReactElement {
-  return (
-    <ModulePlaceholder
-      title="Time Tracker"
-      description="Automatic active-window detection every 60 s. Time logs stored as base_entities of type=time_log."
-      shortcut="Ctrl+4"
-      icon={
-        <svg className="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12 6 12 12 16 14" />
         </svg>
       }
     />

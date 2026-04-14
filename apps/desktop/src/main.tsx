@@ -11,6 +11,7 @@ import App from './App';
 import './styles/globals.css';
 
 import { initDB, getDB, ftsSearch } from './core/db';
+import { initDeepLink } from './core/deep-link';
 
 // Initialise modules after DB is ready (registers Event Bus listeners)
 import { init as initNotes } from './modules/notes';
@@ -75,7 +76,13 @@ async function bootstrap(): Promise<void> {
       console.info('[dev] sync:conflict emitted — DiffEditor should now appear');
     };
 
-    console.info('[dev] window.__db + window.__triggerConflict() exposed');
+    /** Simulate a deep-link open for verification: __deepLink('/test/123') */
+    (window as unknown as Record<string, unknown>)['__deepLink'] = (path: string, params: Record<string, string> = {}) => {
+      eventBus.emit('deeplink:received', { path, params });
+      console.info('[dev] deeplink:received emitted:', path, params);
+    };
+
+    console.info('[dev] window.__db + window.__triggerConflict() + window.__deepLink() exposed');
   }
 
   // ── 3. Register module Event Bus listeners ──────────────────────────────────
@@ -84,7 +91,10 @@ async function bootstrap(): Promise<void> {
   initCalendar();
   initTimeTracker();
 
-  // ── 4. Mount React ──────────────────────────────────────────────────────────
+  // ── 4. Register OS deep-link listener (bridges Tauri event → eventBus) ──────
+  await initDeepLink();
+
+  // ── 5. Mount React ──────────────────────────────────────────────────────────
   ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     <React.StrictMode>
       <App />

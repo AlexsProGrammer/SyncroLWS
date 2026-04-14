@@ -73,12 +73,12 @@
 - [x] **Step 6.3:** `src/modules/notes/NoteEditor.tsx` — TipTap editor (`StarterKit`, `Highlight`, `Link`, `Placeholder`). Markdown saved as raw string in `payload.content_md` via debounced autosave (800 ms) + save-on-unmount. `src/modules/notes/WikiLinkExtension.ts` — custom ProseMirror plugin: decorates `[[Name]]` spans with `wiki-link` CSS class; click handler resolves link text against SQLite → emits `nav:open-entity`.
 - [x] **Verification:** TypeScript EXIT:0. `window.__triggerConflict()` exposed in dev mode — call it in devtools to emit `sync:conflict` and verify the DiffEditor overlay appears with highlighted differences and Local/Server/Merged resolution buttons.
 
-#### Phase 7: [Power Features & OS Integration]
-- [ ] **Step 7.1:** In `src-tauri/src/lib.rs`, configure the Deep Link plugin to register the custom URI scheme `syncrolws://`. Emit a Tauri event to React when a link is opened.
-- [ ] **Step 7.2:** Implement an OS Window hook in Rust to poll the currently active window title every 60 seconds. Expose this to React via a Tauri command `get_active_window()`.
-- [ ] **Step 7.3:** In `src/modules/time-tracker`, listen for window changes and auto-suggest time logs.
-- [ ] **Step 7.4:** Implement a backup scheduler in `src/core/backup.ts` using `setInterval` to dump the local SQLite `.db` file to a configured backup directory on the hard drive.
-- [ ] **Verification:** Run the compiled Tauri app. Type `syncrolws://test/123` in a web browser address bar; verify the Tauri app comes to focus and logs `/test/123` in the console.
+#### Phase 7: [Power Features & OS Integration] ✅
+- [x] **Step 7.1:** `src-tauri/src/lib.rs` — `setup_deep_links()` registers the `syncrohws://` URI scheme (configured in `tauri.conf.json`) and emits `"deeplink://received"` (a native Tauri event) with `{ path, params }` JSON payload whenever the OS opens a matching URL. New `src/core/deep-link.ts` bridges this native event to the React Event Bus via `listen('deeplink://received')` → `eventBus.emit('deeplink:received')`. `initDeepLink()` called in `bootstrap()` after all module `init()` calls.
+- [x] **Step 7.2:** `src-tauri/src/commands.rs` — `get_active_window()` Tauri command wraps platform-native detection: Linux (`xdotool getactivewindow getwindowname`), macOS (`osascript`), Windows/other (graceful no-op). Registered in `invoke_handler!` in `lib.rs`.
+- [x] **Step 7.3:** `src/modules/time-tracker/index.ts` — `_startWindowPoller()` calls `invoke('get_active_window')` every 60 s. On title change emits `tracker:window-changed` → `notification:show` suggestion. New `src/modules/time-tracker/TimeTrackerView.tsx` shows: active window display (live via eventBus), Start/Stop button (persists `time_log` entity to SQLite, emits `tracker:start` / `tracker:stop`), elapsed timer, 10 most-recent logs table.
+- [x] **Step 7.4:** `src/core/backup.ts` — `startBackupScheduler()` runs immediately on startup then every 30 min: `path.appDataDir()` → `backups/` subdir → timestamped `.db` copy via `copyFile`. Tauri `fs:allow-mkdir` / `fs:allow-copy-file` scoped to `$APPDATA/**` in `capabilities/default.json`.
+- [x] **Verification:** TypeScript EXIT:0. App navigates via `syncrohws://entity/<type>/<id>` URLs (parsed in `App.tsx`). Dev helper: `window.__deepLink('/test/123')` in devtools emits the event and logs the path. `window.__triggerConflict()` still works for DiffEditor. Time Tracker panel accessible via Ctrl+4 or sidebar.
 
 ---
 

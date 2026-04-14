@@ -65,6 +65,19 @@ export default function App(): React.ReactElement {
     };
     eventBus.on('nav:open-entity', onOpenEntity);
 
+    // deeplink:received → parse syncrohws://entity/<type>/<id> and navigate
+    const onDeepLink = ({ path, params }: { path: string; params: Record<string, string> }): void => {
+      console.log('[deep-link] App received:', path, params);
+      // Pattern: /entity/<type>/<id>
+      const match = path.match(/^\/entity\/([^/]+)\/([^/]+)/);
+      if (match && match[1] && match[2]) {
+        const type = match[1] as BaseEntity['type'];
+        const id = match[2];
+        eventBus.emit('nav:open-entity', { id, type });
+      }
+    };
+    eventBus.on('deeplink:received', onDeepLink);
+
     // Backup scheduler
     const stopBackup = startBackupScheduler();
 
@@ -77,6 +90,7 @@ export default function App(): React.ReactElement {
     return () => {
       window.removeEventListener('keydown', onKey);
       eventBus.off('nav:open-entity', onOpenEntity);
+      eventBus.off('deeplink:received', onDeepLink);
       eventBus.off('sync:conflict', onConflict);
       stopBackup();
     };
