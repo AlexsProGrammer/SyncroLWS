@@ -1,5 +1,7 @@
 export { CommandPalette } from './CommandPalette';
 export { DiffEditor } from './DiffEditor';
+export { Sidebar, type ModuleId } from './Sidebar';
+export { NotesView, TasksView, CalendarView, TimeTrackerView } from './ModuleViews';
 
 // shadcn/ui-style primitives (local, no CDN)
 export { Button, buttonVariants } from './components/button';
