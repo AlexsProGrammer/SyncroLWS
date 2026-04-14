@@ -10,9 +10,14 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
+    "start": "turbo run dev",
+    "start:all": "turbo run dev",
+    "start:desktop": "turbo run dev --filter=desktop",
+    "start:backend": "turbo run dev --filter=backend",
     "backend": "turbo run dev --filter=backend",
     "desktop": "turbo run dev --filter=desktop"
   },
+  "packageManager": "npm@11.6.2",
   "devDependencies": {
     "turbo": "^2.0.0",
     "typescript": "^5.4.0"

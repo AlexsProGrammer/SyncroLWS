@@ -18,11 +18,13 @@ import { init as initTasks } from './modules/tasks';
 import { init as initCalendar } from './modules/calendar';
 import { init as initTimeTracker } from './modules/time-tracker';
 
+import { eventBus } from './core/events';
+
 async function bootstrap(): Promise<void> {
   // ── 1. Initialise SQLite (creates tables + FTS5 triggers if needed) ────────
   await initDB();
 
-  // ── 2. Expose db helpers on window in dev mode for console verification ────
+  // ── 2. Expose helpers on window in dev mode for console verification ───────
   if (import.meta.env.DEV) {
     (window as unknown as Record<string, unknown>)['__db'] = {
       getDB,
@@ -49,7 +51,31 @@ async function bootstrap(): Promise<void> {
         );
       },
     };
-    console.info('[dev] window.__db exposed — use __db.insertTest() / __db.listAll() / __db.ftsSearch()');
+
+    /** Trigger a mock sync conflict to test the DiffEditor UI */
+    (window as unknown as Record<string, unknown>)['__triggerConflict'] = async () => {
+      const now = new Date().toISOString();
+      const base = {
+        id: crypto.randomUUID(),
+        type: 'note' as const,
+        metadata: {},
+        tags: [],
+        parent_id: null,
+        created_at: now,
+        updated_at: now,
+        deleted_at: null,
+      };
+      eventBus.emit('sync:conflict', {
+        local: { ...base, payload: { title: 'My Note', content_md: 'Local version of the content.' } },
+        server: { ...base, payload: { title: 'My Note', content_md: 'Server version — edit made remotely.' } },
+        resolve: (resolved) => {
+          console.log('[dev] conflict resolved with:', resolved);
+        },
+      });
+      console.info('[dev] sync:conflict emitted — DiffEditor should now appear');
+    };
+
+    console.info('[dev] window.__db + window.__triggerConflict() exposed');
   }
 
   // ── 3. Register module Event Bus listeners ──────────────────────────────────
@@ -68,4 +94,22 @@ async function bootstrap(): Promise<void> {
 
 bootstrap().catch((err: unknown) => {
   console.error('[bootstrap] Fatal error during startup:', err);
+
+  // Render a visible error so developers aren't left with a blank white screen.
+  const root = document.getElementById('root');
+  if (root) {
+    const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    root.style.cssText =
+      'display:flex;align-items:center;justify-content:center;height:100vh;' +
+      'font-family:monospace;background:#0f172a;color:#f87171;padding:2rem;box-sizing:border-box';
+    root.innerHTML = `
+      <div style="max-width:640px;width:100%">
+        <h2 style="color:#fb923c;margin:0 0 .75rem">SyncroLWS — startup error</h2>
+        <pre style="white-space:pre-wrap;word-break:break-all;background:#1e293b;padding:1rem;
+                    border-radius:.5rem;font-size:.8rem;color:#e2e8f0">${message}</pre>
+        <p style="margin:.75rem 0 0;font-size:.75rem;color:#94a3b8">
+          Open DevTools (F12) for the full stack trace.
+        </p>
+      </div>`;
+  }
 });

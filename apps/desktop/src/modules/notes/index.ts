@@ -2,6 +2,9 @@ import { eventBus } from '@/core/events';
 import { getDB } from '@/core/db';
 import type { BaseEntity, NotePayload } from '@syncrohws/shared-types';
 
+export { NoteEditor } from './NoteEditor';
+export { WikiLink } from './WikiLinkExtension';
+
 /**
  * Notes module — registers all Event Bus listeners.
  * Call init() once at app startup.

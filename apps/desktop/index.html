@@ -8,6 +8,31 @@
   </head>
   <body>
     <div id="root"></div>
+
+    <!-- Catch catastrophic module-load errors BEFORE main.tsx runs.
+         Vite ES module failures (bad resolve, network, etc.) never reach
+         the catch() in bootstrap() — they must be caught here. -->
+    <script>
+      function showBootstrapError(msg, src, line, col, err) {
+        var root = document.getElementById('root');
+        if (!root) return;
+        root.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100vh;font-family:monospace;background:#0f172a;color:#f87171;padding:2rem;box-sizing:border-box';
+        root.innerHTML =
+          '<div style="max-width:640px;width:100%">' +
+          '<h2 style="color:#fb923c;margin:0 0 .75rem">SyncroLWS — startup error</h2>' +
+          '<pre style="white-space:pre-wrap;word-break:break-all;background:#1e293b;padding:1rem;border-radius:.5rem;font-size:.8rem;color:#e2e8f0">' +
+          (err ? (err.stack || err.message || String(err)) : (msg || 'Unknown error')) +
+          (src ? '\n\nSource: ' + src + ' (' + line + ':' + col + ')' : '') +
+          '</pre>' +
+          '<p style="margin:.75rem 0 0;font-size:.75rem;color:#94a3b8">Open DevTools (F12) for the full stack trace.</p>' +
+          '</div>';
+      }
+      window.onerror = showBootstrapError;
+      window.addEventListener('unhandledrejection', function(e) {
+        showBootstrapError(null, null, null, null, e.reason);
+      });
+    </script>
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

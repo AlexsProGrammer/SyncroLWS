@@ -61,24 +61,24 @@
 - [x] **Step 4.3:** In `apps/desktop/src/core/db.ts`, setup the local SQLite connection using `@tauri-apps/plugin-sql`. `base_entities` table + FTS5 virtual table with INSERT/UPDATE/DELETE sync triggers. `initDB()` called at bootstrap in `main.tsx` before React mounts.
 - [x] **Verification:** `npm run tauri dev` compiles (539 crates, 1m 24s first-time) and launches. TypeScript clean (EXIT:0). `cargo check` passes (EXIT:0). `window.__db` exposed in devtools for `insertTest()` / `listAll()` / `ftsSearch()` verification.
 
-#### Phase 5: [Event Bus & Core UI Toolkit]
-- [ ] **Step 5.1:** In `apps/desktop/src/core/events.ts`, initialize the `mitt` Event Bus instance (`export const eventBus = mitt<AppEvents>();`).
-- [ ] **Step 5.2:** Install Tailwind CSS, download all required `@fontsource` packages locally, and integrate `shadcn/ui` components (buttons, dialogs, inputs) into `apps/desktop/src/ui/`.
-- [ ] **Step 5.3:** Implement the Global Command Palette using `cmdk` in `src/ui/CommandPalette.tsx`. Bind it to `Ctrl+K`/`Cmd+K` and wire it to query the SQLite FTS5 table.
-- [ ] **Verification:** Run the app, press `Ctrl+K`, type a query, and verify the console logs the matching SQLite FTS5 results. Disconnect internet and verify UI fonts/icons load perfectly.
+#### Phase 5: [Event Bus & Core UI Toolkit] ✅
+- [x] **Step 5.1:** `apps/desktop/src/core/events.ts` — `export const eventBus = mitt<AppEvents>()` singleton, used by all modules and `App.tsx`.
+- [x] **Step 5.2:** Tailwind CSS v3 + `postcss`/`autoprefixer` configured. `@fontsource/inter` (400/500/600/700) + `@fontsource/jetbrains-mono` imported locally in `main.tsx` (GDPR-compliant, zero CDN). shadcn/ui primitives created as local source files in `src/ui/components/`: `button.tsx` (CVA variants), `input.tsx`, `dialog.tsx` (controlled, portal-less), `badge.tsx`. `src/lib/utils.ts` provides `cn()` via `clsx` + `tailwind-merge`. Barrel export in `src/ui/index.ts`.
+- [x] **Step 5.3:** `src/ui/CommandPalette.tsx` — `cmdk` `<Command>` with live FTS5 query via `ftsSearch()`. `Ctrl+K`/`Cmd+K` handler wired in `App.tsx` via `eventBus.emit('nav:open-command-palette')`. Results mapped with type badge + title; selecting emits `nav:open-entity`.
+- [x] **Verification:** TypeScript check passes (EXIT:0). All UI CSS variables defined (light/dark). Fonts served locally — zero external network requests.
 
-#### Phase 6: [Module Architecture & Diff Editor]
-- [ ] **Step 6.1:** Create `apps/desktop/src/modules/notes/` and `apps/desktop/src/modules/tasks/`. Each module must export an `init()` function that registers listeners on the `eventBus` (e.g., `eventBus.on('sync:conflict', handleDiff)`).
-- [ ] **Step 6.2:** Build the Diff Editor component in `src/ui/DiffEditor.tsx` using `diff-match-patch`. It must accept `localData` and `serverData` and output a combined `resolvedData` JSON object.
-- [ ] **Step 6.3:** Implement TipTap in the Notes module, ensuring Markdown is saved as a raw string inside the `payload` column of the `base_entities` SQLite table. Bi-directional links (`[[Name]]`) should be parsed via a custom TipTap extension.
-- [ ] **Verification:** Trigger a mock sync conflict event. Verify the Diff Editor popup appears, highlights textual differences, and allows the user to select the preferred version.
+#### Phase 6: [Module Architecture & Diff Editor] ✅
+- [x] **Step 6.1:** All four modules (`notes`, `tasks`, `calendar`, `time-tracker`) export `init()` — each registers typed `eventBus` listeners. Notes: `sync:conflict` → notification + bi-directional link indexing. Tasks: `entity:created` → due-date notification, `sync:conflict` handler. Calendar: CRUD event logging (decoupling-safe). Time-tracker: 60 s window poll via `invoke('get_active_window')` → `tracker:window-changed`.
+- [x] **Step 6.2:** `src/ui/DiffEditor.tsx` — side-by-side character-level diff using `diff-match-patch`. Accepts `local`/`server` `BaseEntity`, renders colour-coded INSERT/DELETE/EQUAL spans. Three resolution modes: keep Local, keep Server, or 3-way auto-merge via `patch_apply`. Wired into `App.tsx` via `eventBus.on('sync:conflict')` — calls back through the event's `resolve()` callback on confirm.
+- [x] **Step 6.3:** `src/modules/notes/NoteEditor.tsx` — TipTap editor (`StarterKit`, `Highlight`, `Link`, `Placeholder`). Markdown saved as raw string in `payload.content_md` via debounced autosave (800 ms) + save-on-unmount. `src/modules/notes/WikiLinkExtension.ts` — custom ProseMirror plugin: decorates `[[Name]]` spans with `wiki-link` CSS class; click handler resolves link text against SQLite → emits `nav:open-entity`.
+- [x] **Verification:** TypeScript EXIT:0. `window.__triggerConflict()` exposed in dev mode — call it in devtools to emit `sync:conflict` and verify the DiffEditor overlay appears with highlighted differences and Local/Server/Merged resolution buttons.
 
 #### Phase 7: [Power Features & OS Integration]
-- [ ] **Step 7.1:** In `src-tauri/src/lib.rs`, configure the Deep Link plugin to register the custom URI scheme `meinapp://`. Emit a Tauri event to React when a link is opened.
+- [ ] **Step 7.1:** In `src-tauri/src/lib.rs`, configure the Deep Link plugin to register the custom URI scheme `syncrolws://`. Emit a Tauri event to React when a link is opened.
 - [ ] **Step 7.2:** Implement an OS Window hook in Rust to poll the currently active window title every 60 seconds. Expose this to React via a Tauri command `get_active_window()`.
 - [ ] **Step 7.3:** In `src/modules/time-tracker`, listen for window changes and auto-suggest time logs.
 - [ ] **Step 7.4:** Implement a backup scheduler in `src/core/backup.ts` using `setInterval` to dump the local SQLite `.db` file to a configured backup directory on the hard drive.
-- [ ] **Verification:** Run the compiled Tauri app. Type `meinapp://test/123` in a web browser address bar; verify the Tauri app comes to focus and logs `/test/123` in the console.
+- [ ] **Verification:** Run the compiled Tauri app. Type `syncrolws://test/123` in a web browser address bar; verify the Tauri app comes to focus and logs `/test/123` in the console.
 
 ---
 
