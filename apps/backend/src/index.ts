@@ -3,6 +3,7 @@
 import { env } from './config/env';
 
 import express, { type Request, type Response } from 'express';
+import cors from 'cors';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import { randomUUID } from 'crypto';
 import path from 'path';
@@ -11,6 +12,9 @@ import { uploadRouter } from './routes/upload';
 
 const app = express();
 const PORT = env.PORT;
+
+// ── CORS ──────────────────────────────────────────────────────────────────────
+app.use(cors());
 
 // ── Body parsing ──────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));

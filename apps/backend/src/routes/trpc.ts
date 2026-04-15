@@ -92,6 +92,10 @@ const baseEntityRouter = t.router({
 
 export const appRouter = t.router({
   entities: baseEntityRouter,
+  health: publicProcedure.query(() => ({
+    status: 'ok' as const,
+    timestamp: new Date().toISOString(),
+  })),
 });
 
 export type AppRouter = typeof appRouter;
