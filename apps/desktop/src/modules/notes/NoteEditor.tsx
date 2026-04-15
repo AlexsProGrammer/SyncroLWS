@@ -1,106 +1,135 @@
-import React, { useEffect, useCallback, useRef } from 'react';
+import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Highlight from '@tiptap/extension-highlight';
 import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import Table from '@tiptap/extension-table';
+import TableRow from '@tiptap/extension-table-row';
+import TableCell from '@tiptap/extension-table-cell';
+import TableHeader from '@tiptap/extension-table-header';
+import Image from '@tiptap/extension-image';
+import Typography from '@tiptap/extension-typography';
+import { common, createLowlight } from 'lowlight';
 import { WikiLink } from './WikiLinkExtension';
+import { TagHighlight } from './TagExtension';
+import { EditorToolbar } from './EditorToolbar';
 import { eventBus } from '@/core/events';
 import { getWorkspaceDB } from '@/core/db';
 import type { NotePayload } from '@syncrohws/shared-types';
 import { cn } from '@/lib/utils';
 
+const lowlight = createLowlight(common);
+
 interface NoteEditorProps {
-  /** UUID of the base_entity row being edited */
   entityId: string;
   initialTitle?: string;
   initialContentMd?: string;
+  initialContentJson?: string;
   className?: string;
+  onTagClick?: (tag: string) => void;
 }
 
 const AUTOSAVE_DEBOUNCE_MS = 800;
 
-/**
- * Full-featured Markdown note editor backed by TipTap.
- *
- * Persistence contract:
- *   - Content is stored as raw Markdown string in `payload.content_md`
- *   - On every keystroke (debounced) the entity row is updated via raw SQL
- *   - FTS5 virtual table is kept in sync via the UPDATE trigger defined in db.ts
- *   - [[wikilink]] syntax is highlighted; clicking one emits `nav:open-entity`
- */
 export function NoteEditor({
   entityId,
   initialTitle = '',
   initialContentMd = '',
+  initialContentJson = '',
   className,
+  onTagClick,
 }: NoteEditorProps): React.ReactElement {
   const titleRef = useRef<HTMLInputElement>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [sourceMode, setSourceMode] = useState(false);
+  const [sourceHtml, setSourceHtml] = useState('');
+
+  // Determine initial content: prefer JSON, fall back to plain text
+  let initialContent: string | object = '';
+  if (initialContentJson) {
+    try {
+      initialContent = JSON.parse(initialContentJson) as object;
+    } catch {
+      initialContent = initialContentMd || '';
+    }
+  } else {
+    initialContent = initialContentMd || '';
+  }
 
   // ── TipTap editor instance ─────────────────────────────────────────────────
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({ codeBlock: false }),
       Highlight,
       Link.configure({ openOnClick: false }),
       Placeholder.configure({ placeholder: 'Start writing…' }),
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      CodeBlockLowlight.configure({ lowlight }),
+      Table.configure({ resizable: false }),
+      TableRow,
+      TableCell,
+      TableHeader,
+      Image,
+      Typography,
       WikiLink.configure({
         onLinkClick(linkText) {
-          // Fire the event bus so other modules / routing can react
           void resolveAndOpenLink(linkText);
         },
       }),
+      TagHighlight.configure({ onTagClick }),
     ],
-    content: initialContentMd,
-    onUpdate({ editor: ed }) {
-      scheduleSave(ed.getText({ blockSeparator: '\n\n' }), ed.storage);
+    content: initialContent,
+    onUpdate() {
+      scheduleSave();
     },
   });
 
   // ── Autosave ───────────────────────────────────────────────────────────────
-  const scheduleSave = useCallback(
-    (_text: string, _storage: unknown) => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(async () => {
-        await persistNote();
-      }, AUTOSAVE_DEBOUNCE_MS);
-    },
+  const scheduleSave = useCallback(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      await persistNote();
+    }, AUTOSAVE_DEBOUNCE_MS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entityId],
-  );
+  }, [entityId]);
 
   const persistNote = useCallback(async (): Promise<void> => {
     if (!editor) return;
     const title = titleRef.current?.value ?? initialTitle;
-    const content_md: string = editor.getText({ blockSeparator: '\n\n' });
-
-    // Extract [[links]] for bi-directional index (resolved in notes/index.ts via event)
+    const content_md = editor.getText({ blockSeparator: '\n\n' });
+    const content_json = JSON.stringify(editor.getJSON());
     const linked_entity_ids: string[] = [];
 
-    const payload: NotePayload = { title, content_md, linked_entity_ids };
+    // Extract #tags from text
+    const tagMatches = [...content_md.matchAll(/#([a-zA-Z][\w-]*)/g)];
+    const tags = [...new Set(tagMatches.map((m) => m[1]).filter((t): t is string => !!t))];
+
+    const payload: NotePayload = { title, content_md, content_json, linked_entity_ids };
 
     try {
       const db = getWorkspaceDB();
       await db.execute(
-        `UPDATE base_entities SET payload = ?, updated_at = ? WHERE id = ?`,
-        [JSON.stringify(payload), new Date().toISOString(), entityId],
+        `UPDATE base_entities SET payload = ?, tags = ?, updated_at = ? WHERE id = ?`,
+        [JSON.stringify(payload), JSON.stringify(tags), new Date().toISOString(), entityId],
       );
-      // Notify other modules that content changed
       eventBus.emit('entity:updated', {
         entity: {
           id: entityId,
           type: 'note',
           payload,
           metadata: {},
-          tags: [],
+          tags,
           parent_id: null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           deleted_at: null,
         },
       });
-      console.log('[NoteEditor] saved:', entityId);
     } catch (err) {
       console.error('[NoteEditor] save failed:', err);
     }
@@ -114,26 +143,50 @@ export function NoteEditor({
     };
   }, [persistNote]);
 
+  // ── Source mode toggle ─────────────────────────────────────────────────────
+  const toggleSourceMode = useCallback(() => {
+    if (!editor) return;
+    if (!sourceMode) {
+      setSourceHtml(editor.getHTML());
+      setSourceMode(true);
+    } else {
+      editor.commands.setContent(sourceHtml);
+      setSourceMode(false);
+    }
+  }, [editor, sourceMode, sourceHtml]);
+
   return (
-    <div className={cn('flex flex-col gap-2', className)}>
+    <div className={cn('flex flex-col gap-0', className)}>
       {/* Title field */}
       <input
         ref={titleRef}
         defaultValue={initialTitle}
         placeholder="Untitled note"
-        className="w-full border-0 bg-transparent text-2xl font-semibold text-foreground outline-none placeholder:text-muted-foreground"
-        onChange={() => scheduleSave('', null)}
+        className="w-full border-0 bg-transparent text-2xl font-semibold text-foreground outline-none placeholder:text-muted-foreground px-1 mb-2"
+        onChange={() => scheduleSave()}
       />
 
-      {/* TipTap content area */}
-      <EditorContent
+      {/* Formatting toolbar */}
+      <EditorToolbar
         editor={editor}
-        className={cn(
-          'prose prose-sm dark:prose-invert max-w-none flex-1 cursor-text rounded-md p-1 outline-none',
-          // wiki-link decoration styles (injected via TipTap decorator class)
-          '[&_.wiki-link]:cursor-pointer [&_.wiki-link]:rounded [&_.wiki-link]:bg-primary/10 [&_.wiki-link]:px-1 [&_.wiki-link]:text-primary [&_.wiki-link]:underline-offset-2 hover:[&_.wiki-link]:underline',
-        )}
+        sourceMode={sourceMode}
+        onToggleSource={toggleSourceMode}
       />
+
+      {/* Editor content / source view */}
+      {sourceMode ? (
+        <textarea
+          value={sourceHtml}
+          onChange={(e) => setSourceHtml(e.target.value)}
+          className="flex-1 min-h-[200px] rounded-md border border-border bg-muted/50 p-3 font-mono text-sm text-foreground outline-none resize-none"
+          spellCheck={false}
+        />
+      ) : (
+        <EditorContent
+          editor={editor}
+          className="note-editor-content prose prose-sm dark:prose-invert max-w-none flex-1 cursor-text rounded-md p-1 outline-none"
+        />
+      )}
     </div>
   );
 }
@@ -150,8 +203,6 @@ async function resolveAndOpenLink(linkText: string): Promise<void> {
     );
     if (rows[0]) {
       eventBus.emit('nav:open-entity', { id: rows[0].id, type: rows[0].type as 'note' });
-    } else {
-      console.warn('[NoteEditor] [[' + linkText + ']] — no matching entity found');
     }
   } catch (err) {
     console.error('[NoteEditor] link resolution failed:', err);

@@ -31,7 +31,10 @@ export type BaseEntity = z.infer<typeof BaseEntitySchema>;
 /** Payload shapes per entity type */
 export const NotePayloadSchema = z.object({
   title: z.string(),
+  /** Plain text extract for FTS and preview */
   content_md: z.string(),
+  /** TipTap editor JSON (stringified) — primary rich content storage */
+  content_json: z.string().optional(),
   /** Bi-directional links extracted from [[Name]] syntax */
   linked_entity_ids: z.array(z.string().uuid()).default([]),
 });

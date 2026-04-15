@@ -105,3 +105,179 @@
 html {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
+
+/* ── Note Editor Styles ────────────────────────────────────────────────────── */
+
+/* Wiki-links */
+.note-editor-content .wiki-link {
+  cursor: pointer;
+  border-radius: 0.25rem;
+  background: hsl(var(--primary) / 0.1);
+  padding: 0 0.25rem;
+  color: hsl(var(--primary));
+  text-underline-offset: 2px;
+}
+.note-editor-content .wiki-link:hover {
+  text-decoration: underline;
+}
+
+/* Inline #tags */
+.note-editor-content .note-tag {
+  cursor: pointer;
+  border-radius: 0.25rem;
+  background: hsl(var(--primary) / 0.1);
+  padding: 0 0.25rem;
+  color: hsl(var(--primary));
+  font-weight: 500;
+}
+.note-editor-content .note-tag:hover {
+  text-decoration: underline;
+}
+
+/* Task lists */
+.note-editor-content ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+  margin-left: 0;
+}
+.note-editor-content ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.note-editor-content ul[data-type="taskList"] li > label {
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
+.note-editor-content ul[data-type="taskList"] li > label input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  accent-color: hsl(var(--primary));
+  cursor: pointer;
+}
+.note-editor-content ul[data-type="taskList"] li[data-checked="true"] > div > p {
+  text-decoration: line-through;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Tables */
+.note-editor-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+}
+.note-editor-content th,
+.note-editor-content td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  min-width: 80px;
+}
+.note-editor-content th {
+  background: hsl(var(--muted));
+  font-weight: 600;
+}
+.note-editor-content td {
+  background: transparent;
+}
+.note-editor-content .selectedCell {
+  background: hsl(var(--accent));
+}
+
+/* Code blocks with syntax highlighting */
+.note-editor-content pre {
+  background: hsl(var(--muted));
+  border-radius: 0.375rem;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85em;
+  line-height: 1.6;
+}
+.note-editor-content pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  color: inherit;
+}
+
+/* Syntax highlight — Light mode (One Light inspired) */
+.note-editor-content .hljs-comment,
+.note-editor-content .hljs-quote { color: #a0a1a7; font-style: italic; }
+.note-editor-content .hljs-keyword,
+.note-editor-content .hljs-selector-tag { color: #a626a4; }
+.note-editor-content .hljs-string,
+.note-editor-content .hljs-addition { color: #50a14f; }
+.note-editor-content .hljs-number,
+.note-editor-content .hljs-literal { color: #986801; }
+.note-editor-content .hljs-title,
+.note-editor-content .hljs-section { color: #4078f2; }
+.note-editor-content .hljs-variable,
+.note-editor-content .hljs-template-variable,
+.note-editor-content .hljs-deletion { color: #e45649; }
+.note-editor-content .hljs-type,
+.note-editor-content .hljs-built_in { color: #c18401; }
+.note-editor-content .hljs-attr,
+.note-editor-content .hljs-attribute { color: #986801; }
+.note-editor-content .hljs-meta { color: #4078f2; }
+
+/* Syntax highlight — Dark mode (One Dark inspired) */
+.dark .note-editor-content .hljs-comment,
+.dark .note-editor-content .hljs-quote { color: #5c6370; font-style: italic; }
+.dark .note-editor-content .hljs-keyword,
+.dark .note-editor-content .hljs-selector-tag { color: #c678dd; }
+.dark .note-editor-content .hljs-string,
+.dark .note-editor-content .hljs-addition { color: #98c379; }
+.dark .note-editor-content .hljs-number,
+.dark .note-editor-content .hljs-literal { color: #d19a66; }
+.dark .note-editor-content .hljs-title,
+.dark .note-editor-content .hljs-section { color: #61afef; }
+.dark .note-editor-content .hljs-variable,
+.dark .note-editor-content .hljs-template-variable,
+.dark .note-editor-content .hljs-deletion { color: #e06c75; }
+.dark .note-editor-content .hljs-type,
+.dark .note-editor-content .hljs-built_in { color: #e5c07b; }
+.dark .note-editor-content .hljs-attr,
+.dark .note-editor-content .hljs-attribute { color: #d19a66; }
+.dark .note-editor-content .hljs-meta { color: #61afef; }
+
+/* Inline code */
+.note-editor-content :not(pre) > code {
+  background: hsl(var(--muted));
+  border-radius: 0.25rem;
+  padding: 0.15rem 0.35rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85em;
+}
+
+/* Blockquote */
+.note-editor-content blockquote {
+  border-left: 3px solid hsl(var(--primary) / 0.4);
+  padding-left: 1rem;
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+}
+
+/* Horizontal rule */
+.note-editor-content hr {
+  border: none;
+  border-top: 1px solid hsl(var(--border));
+  margin: 1.5rem 0;
+}
+
+/* Images */
+.note-editor-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.375rem;
+}
+
+/* Highlight mark */
+.note-editor-content mark {
+  background: hsl(50 100% 50% / 0.3);
+  border-radius: 0.125rem;
+  padding: 0 0.125rem;
+}
+.dark .note-editor-content mark {
+  background: hsl(50 100% 50% / 0.2);
+}

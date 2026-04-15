@@ -5,6 +5,9 @@ import type { BaseEntity, NotePayload } from '@syncrohws/shared-types';
 export { NoteEditor } from './NoteEditor';
 export { NotesView } from './NotesView';
 export { WikiLink } from './WikiLinkExtension';
+export { TagHighlight } from './TagExtension';
+export { BacklinksPanel } from './BacklinksPanel';
+export { EditorToolbar } from './EditorToolbar';
 
 /**
  * Notes module — registers all Event Bus listeners.
@@ -14,8 +17,6 @@ export function init(): void {
   // Handle sync conflicts for note entities
   eventBus.on('sync:conflict', (event) => {
     if (event.local.type !== 'note') return;
-    // Conflict resolution is handled by DiffEditor in the UI layer.
-    // This listener triggers the notification that a conflict exists.
     eventBus.emit('notification:show', {
       title: 'Notes conflict detected',
       body: `Note "${getNoteTitle(event.local)}" was modified on two devices.`,
@@ -43,8 +44,9 @@ function getNoteTitle(entity: BaseEntity): string {
 }
 
 /**
- * Parses [[Name]] wiki-link syntax from the note's Markdown content
+ * Parses [[Name]] wiki-link syntax from the note's content
  * and persists the linked entity IDs back into the payload.
+ * Reads current payload from DB and merges to preserve content_json.
  */
 async function updateBiDirectionalLinks(entity: BaseEntity): Promise<void> {
   const payload = entity.payload as Partial<NotePayload>;
@@ -67,15 +69,19 @@ async function updateBiDirectionalLinks(entity: BaseEntity): Promise<void> {
 
     if (!linked.length) return;
 
-    const updated: NotePayload = {
-      title: payload.title ?? '',
-      content_md: content,
-      linked_entity_ids: [...new Set(linked)],
-    };
+    // Read current payload from DB to preserve all fields (including content_json)
+    const currentRows = await db.select<{ payload: string }[]>(
+      `SELECT payload FROM base_entities WHERE id = ? LIMIT 1`,
+      [entity.id],
+    );
+    if (!currentRows[0]) return;
+
+    const currentPayload = JSON.parse(currentRows[0].payload) as Record<string, unknown>;
+    currentPayload.linked_entity_ids = [...new Set(linked)];
 
     await db.execute(
       `UPDATE base_entities SET payload = ?, updated_at = ? WHERE id = ?`,
-      [JSON.stringify(updated), new Date().toISOString(), entity.id],
+      [JSON.stringify(currentPayload), new Date().toISOString(), entity.id],
     );
   } catch (err) {
     console.error('[module:notes] bi-directional link update failed:', err);
