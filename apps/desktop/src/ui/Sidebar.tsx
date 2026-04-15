@@ -341,7 +341,7 @@ function ProfileSwitcher({ collapsed: sidebarCollapsed, onNavigate }: { collapse
           {profiles.map((p) => (
             <button
               key={p.id}
-              onClick={() => { setActiveProfile(p.id); setOpen(false); }}
+              onClick={() => { void setActiveProfile(p.id); setOpen(false); }}
               className={cn(
                 'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm transition-colors',
                 p.id === activeProfileId

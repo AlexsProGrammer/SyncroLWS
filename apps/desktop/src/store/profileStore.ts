@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
+import { loadProfileDB } from '@/core/db';
+import { eventBus } from '@/core/events';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -19,8 +21,10 @@ interface ProfileState {
 interface ProfileActions {
   /** Create a new profile, persist it, and set it as active. */
   createProfile: (name: string, color?: string) => Promise<Profile>;
-  /** Switch to an existing profile by UUID. */
-  setActiveProfile: (id: string) => void;
+  /** Switch to an existing profile — reloads DBs and workspaces. */
+  setActiveProfile: (id: string) => Promise<void>;
+  /** Whether a profile switch is in progress. */
+  switching: boolean;
   /** Rename an existing profile. */
   renameProfile: (id: string, name: string) => void;
   /** Update profile fields (name, color, avatar_url). */
@@ -36,6 +40,7 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
     (set, get) => ({
       profiles: [],
       activeProfileId: null,
+      switching: false,
 
       createProfile: async (name: string, color?: string): Promise<Profile> => {
         const id = crypto.randomUUID();
@@ -52,13 +57,53 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
         return profile;
       },
 
-      setActiveProfile: (id: string) => {
+      setActiveProfile: async (id: string) => {
         const exists = get().profiles.some((p) => p.id === id);
         if (!exists) {
           console.error(`[profile] cannot switch — profile ${id} not found`);
           return;
         }
-        set({ activeProfileId: id });
+        if (id === get().activeProfileId) return;
+
+        set({ switching: true });
+
+        try {
+          // Import workspaceStore lazily to avoid circular dependency
+          const { useWorkspaceStore } = await import('./workspaceStore');
+
+          // 1. Load the new profile's database (closes old profile + workspace DBs)
+          await loadProfileDB(id);
+
+          // 2. Update active profile in store
+          set({ activeProfileId: id });
+
+          // 3. Reload workspaces from the new profile DB
+          const wsStore = useWorkspaceStore.getState();
+          // Reset workspace state before loading
+          useWorkspaceStore.setState({ workspaces: [], activeWorkspaceId: null });
+          await wsStore.loadWorkspaces();
+
+          // 4. Switch to the first non-folder workspace (if any)
+          const workspaces = useWorkspaceStore.getState().workspaces;
+          const firstReal = workspaces.find((w) => w.icon !== 'folder-group');
+          if (firstReal) {
+            await wsStore.switchWorkspace(firstReal.id);
+          }
+
+          // 5. Emit event so App.tsx can react (reset view, etc.)
+          eventBus.emit('profile:switched', { id });
+
+          console.log(`[profile] switched to: ${id}`);
+        } catch (err) {
+          console.error('[profile] switch failed:', err);
+          eventBus.emit('notification:show', {
+            title: 'Profile switch failed',
+            body: err instanceof Error ? err.message : String(err),
+            type: 'error',
+          });
+        } finally {
+          set({ switching: false });
+        }
       },
 
       renameProfile: (id: string, name: string) => {

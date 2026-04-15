@@ -98,6 +98,15 @@ export default function App(): React.ReactElement {
     // Backup scheduler
     const stopBackup = startBackupScheduler();
 
+    // Profile switch → reset active view to first enabled tool
+    const onProfileSwitched = (): void => {
+      const firstTool = useWorkspaceStore.getState().activeWorkspaceId
+        ? enabledTools[0]?.id
+        : undefined;
+      setActiveView(firstTool ?? 'settings');
+    };
+    eventBus.on('profile:switched', onProfileSwitched);
+
     // Sync conflict overlay
     const onConflict = (event: { local: BaseEntity; server: BaseEntity; resolve: (r: BaseEntity) => void }): void => {
       setConflict({ local: event.local, server: event.server, resolve: event.resolve });
@@ -109,6 +118,7 @@ export default function App(): React.ReactElement {
       eventBus.off('nav:open-entity', onOpenEntity);
       eventBus.off('deeplink:received', onDeepLink);
       eventBus.off('sync:conflict', onConflict);
+      eventBus.off('profile:switched', onProfileSwitched);
       stopBackup();
     };
   }, [enabledTools]);
@@ -134,6 +144,7 @@ export default function App(): React.ReactElement {
     s.workspaces.find((w) => w.id === s.activeWorkspaceId),
   );
   const workspaceLoading = useWorkspaceStore((s) => s.loading);
+  const profileSwitching = useProfileStore((s) => s.switching);
   const activeProfile = useProfileStore((s) =>
     s.profiles.find((p) => p.id === s.activeProfileId),
   );
@@ -197,7 +208,18 @@ export default function App(): React.ReactElement {
 
         {/* Active view */}
         <div className="flex flex-1 overflow-auto">
-          {renderView()}
+          {profileSwitching ? (
+            <div className="flex flex-1 items-center justify-center">
+              <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                <svg className="h-8 w-8 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="60" strokeDashoffset="20" strokeLinecap="round" />
+                </svg>
+                <span className="text-sm">Switching profile…</span>
+              </div>
+            </div>
+          ) : (
+            renderView()
+          )}
         </div>
       </main>
 
