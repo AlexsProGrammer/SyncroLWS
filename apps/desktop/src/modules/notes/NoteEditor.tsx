@@ -14,6 +14,7 @@ import TableHeader from '@tiptap/extension-table-header';
 import Image from '@tiptap/extension-image';
 import Typography from '@tiptap/extension-typography';
 import { common, createLowlight } from 'lowlight';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { WikiLink } from './WikiLinkExtension';
 import { TagHighlight } from './TagExtension';
 import { EditorToolbar } from './EditorToolbar';
@@ -21,8 +22,151 @@ import { eventBus } from '@/core/events';
 import { getWorkspaceDB } from '@/core/db';
 import type { NotePayload } from '@syncrohws/shared-types';
 import { cn } from '@/lib/utils';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/ui/components/dialog';
+import { Input } from '@/ui/components/input';
+import { Button } from '@/ui/components/button';
 
 const lowlight = createLowlight(common);
+
+// ── Image Picker Dialog ───────────────────────────────────────────────────────
+
+interface WorkspaceImage {
+  hash: string;
+  local_path: string;
+  name: string;
+  size_bytes: number;
+}
+
+function ImagePickerDialog({
+  open,
+  onOpenChange,
+  onSelect,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSelect: (src: string) => void;
+}): React.ReactElement {
+  const [images, setImages] = useState<WorkspaceImage[]>([]);
+  const [urlInput, setUrlInput] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    void (async () => {
+      try {
+        const db = getWorkspaceDB();
+        const rows = await db.select<{
+          hash: string;
+          local_path: string;
+          payload: string;
+          size_bytes: number;
+        }[]>(
+          `SELECT lf.hash, lf.local_path, lf.size_bytes, be.payload
+           FROM local_files lf
+           JOIN base_entities be ON json_extract(be.payload, '$.hash') = lf.hash
+           WHERE be.type = 'file_attachment'
+             AND lf.mime_type LIKE 'image/%'
+             AND be.deleted_at IS NULL
+           ORDER BY lf.created_at DESC`,
+        );
+        setImages(
+          rows.map((r) => {
+            const p = JSON.parse(r.payload) as { name?: string };
+            return {
+              hash: r.hash,
+              local_path: r.local_path,
+              name: p.name || 'Untitled',
+              size_bytes: r.size_bytes,
+            };
+          }),
+        );
+      } catch {
+        setImages([]);
+      }
+    })();
+  }, [open]);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg max-h-[70vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Insert Image</DialogTitle>
+        </DialogHeader>
+
+        {/* URL input */}
+        <div className="flex gap-2 mt-1">
+          <Input
+            placeholder="Paste image URL…"
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            className="h-8 text-sm flex-1"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && urlInput.trim()) {
+                onSelect(urlInput.trim());
+                onOpenChange(false);
+                setUrlInput('');
+              }
+            }}
+          />
+          <Button
+            size="sm"
+            className="h-8"
+            disabled={!urlInput.trim()}
+            onClick={() => {
+              onSelect(urlInput.trim());
+              onOpenChange(false);
+              setUrlInput('');
+            }}
+          >
+            Insert
+          </Button>
+        </div>
+
+        {/* Workspace images */}
+        {images.length > 0 && (
+          <>
+            <p className="text-xs text-muted-foreground mt-2">Or pick from workspace files:</p>
+            <div className="grid grid-cols-3 gap-2 overflow-y-auto flex-1 min-h-0 mt-1">
+              {images.map((img) => (
+                <button
+                  key={img.hash}
+                  type="button"
+                  className="group flex flex-col items-center gap-1 rounded-lg border border-border p-2 hover:border-primary/50 transition-colors cursor-pointer"
+                  onClick={() => {
+                    onSelect(convertFileSrc(img.local_path));
+                    onOpenChange(false);
+                  }}
+                >
+                  <img
+                    src={convertFileSrc(img.local_path)}
+                    alt={img.name}
+                    className="h-16 w-full rounded object-cover"
+                    loading="lazy"
+                  />
+                  <span className="w-full truncate text-[10px] text-muted-foreground text-center">
+                    {img.name}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {images.length === 0 && (
+          <p className="py-4 text-center text-xs text-muted-foreground">
+            No images in workspace — upload files via the File Manager or paste a URL above.
+          </p>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── NoteEditor ────────────────────────────────────────────────────────────────
 
 interface NoteEditorProps {
   entityId: string;
@@ -47,6 +191,7 @@ export function NoteEditor({
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sourceMode, setSourceMode] = useState(false);
   const [sourceHtml, setSourceHtml] = useState('');
+  const [showImagePicker, setShowImagePicker] = useState(false);
 
   // Determine initial content: prefer JSON, fall back to plain text
   let initialContent: string | object = '';
@@ -158,6 +303,16 @@ export function NoteEditor({
     }
   }, [editor, sourceMode, sourceHtml]);
 
+  const handleInsertImage = useCallback(
+    (src: string) => {
+      if (editor) {
+        editor.chain().focus().setImage({ src }).run();
+        scheduleSave();
+      }
+    },
+    [editor, scheduleSave],
+  );
+
   return (
     <div className={cn('flex flex-col h-full', className)}>
       {/* Title field */}
@@ -174,6 +329,7 @@ export function NoteEditor({
         editor={editor}
         sourceMode={sourceMode}
         onToggleSource={toggleSourceMode}
+        onInsertImage={() => setShowImagePicker(true)}
       />
 
       {/* Editor content / source view */}
@@ -190,6 +346,13 @@ export function NoteEditor({
           className="note-editor-content prose prose-sm dark:prose-invert max-w-none flex-1 min-h-0 cursor-text rounded-md p-1 outline-none overflow-y-auto"
         />
       )}
+
+      {/* Image picker dialog */}
+      <ImagePickerDialog
+        open={showImagePicker}
+        onOpenChange={setShowImagePicker}
+        onSelect={handleInsertImage}
+      />
     </div>
   );
 }

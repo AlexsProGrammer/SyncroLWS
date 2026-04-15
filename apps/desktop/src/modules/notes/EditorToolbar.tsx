@@ -26,6 +26,7 @@ interface EditorToolbarProps {
   editor: Editor | null;
   sourceMode: boolean;
   onToggleSource: () => void;
+  onInsertImage?: () => void;
 }
 
 function ToolbarButton({
@@ -64,6 +65,7 @@ export function EditorToolbar({
   editor,
   sourceMode,
   onToggleSource,
+  onInsertImage,
 }: EditorToolbarProps): React.ReactElement {
   if (!editor) return <div />;
 
@@ -202,8 +204,12 @@ export function EditorToolbar({
       <ToolbarButton
         active={false}
         onClick={() => {
-          const url = window.prompt('Image URL:');
-          if (url) editor.chain().focus().setImage({ src: url }).run();
+          if (onInsertImage) {
+            onInsertImage();
+          } else {
+            const url = window.prompt('Image URL:');
+            if (url) editor.chain().focus().setImage({ src: url }).run();
+          }
         }}
         title="Insert image"
       >
