@@ -1,0 +1,484 @@
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import FullCalendar from '@fullcalendar/react';
+import dayGridPlugin from '@fullcalendar/daygrid';
+import timeGridPlugin from '@fullcalendar/timegrid';
+import interactionPlugin from '@fullcalendar/interaction';
+import listPlugin from '@fullcalendar/list';
+import rrulePlugin from '@fullcalendar/rrule';
+import type {
+  EventInput,
+  EventClickArg,
+  DateSelectArg,
+  EventDropArg,
+} from '@fullcalendar/core';
+import type { EventResizeDoneArg } from '@fullcalendar/interaction';
+import { getWorkspaceDB } from '@/core/db';
+import { eventBus } from '@/core/events';
+import { Button } from '@/ui/components/button';
+import type {
+  CalendarEventPayload,
+  TaskPayload,
+  TimeLogPayload,
+} from '@syncrohws/shared-types';
+import {
+  EventDetailModal,
+  type CalendarEventItem,
+} from './EventDetailModal';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type ViewMode = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek';
+
+interface DBRow {
+  id: string;
+  type: string;
+  payload: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+export function CalendarView(): React.ReactElement {
+  const calRef = useRef<FullCalendar>(null);
+  const [events, setEvents] = useState<CalendarEventItem[]>([]);
+  const [taskEvents, setTaskEvents] = useState<EventInput[]>([]);
+  const [timeLogEvents, setTimeLogEvents] = useState<EventInput[]>([]);
+  const [currentView, setCurrentView] = useState<ViewMode>('dayGridMonth');
+
+  // Modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<CalendarEventItem | null>(null);
+  const [defaultStart, setDefaultStart] = useState<string>('');
+  const [defaultEnd, setDefaultEnd] = useState<string>('');
+  const [defaultAllDay, setDefaultAllDay] = useState(false);
+
+  // ── Load calendar events from DB ──────────────────────────────────────────
+
+  const loadEvents = useCallback(async () => {
+    try {
+      const db = getWorkspaceDB();
+      const rows = await db.select<DBRow[]>(
+        `SELECT id, type, payload, created_at, updated_at FROM base_entities
+         WHERE type = 'calendar_event' AND deleted_at IS NULL ORDER BY created_at DESC`,
+      );
+      const items: CalendarEventItem[] = rows.map((r) => {
+        const p = JSON.parse(r.payload) as CalendarEventPayload;
+        return {
+          id: r.id,
+          payload: {
+            title: p.title ?? '',
+            description: p.description ?? '',
+            start: p.start,
+            end: p.end,
+            all_day: p.all_day ?? false,
+            recurrence_rule: p.recurrence_rule ?? null,
+            location: p.location ?? '',
+            color: p.color ?? '#3b82f6',
+            linked_entity_id: p.linked_entity_id ?? null,
+            linked_entity_type: p.linked_entity_type ?? null,
+          },
+          created_at: r.created_at,
+          updated_at: r.updated_at,
+        };
+      });
+      setEvents(items);
+    } catch (err) {
+      console.error('[calendar] load failed:', err);
+    }
+  }, []);
+
+  // ── Load cross-module events (tasks + time logs) ──────────────────────────
+
+  const loadCrossModuleEvents = useCallback(async () => {
+    try {
+      const db = getWorkspaceDB();
+
+      // Tasks with due dates → virtual calendar events
+      const taskRows = await db.select<DBRow[]>(
+        `SELECT id, type, payload, created_at, updated_at FROM base_entities
+         WHERE type = 'task' AND deleted_at IS NULL`,
+      );
+      const tasks: EventInput[] = [];
+      for (const r of taskRows) {
+        const p = JSON.parse(r.payload) as TaskPayload;
+        if (p.due_date) {
+          tasks.push({
+            id: `task__${r.id}`,
+            title: `📋 ${p.title}`,
+            start: p.due_date,
+            allDay: true,
+            backgroundColor: '#6366f1',
+            borderColor: '#6366f1',
+            textColor: '#fff',
+            editable: false,
+            extendedProps: { sourceType: 'task', sourceId: r.id },
+          });
+        }
+      }
+      setTaskEvents(tasks);
+
+      // Time log entries → ghost blocks
+      const logRows = await db.select<DBRow[]>(
+        `SELECT id, type, payload, created_at, updated_at FROM base_entities
+         WHERE type = 'time_log' AND deleted_at IS NULL`,
+      );
+      const logs: EventInput[] = [];
+      for (const r of logRows) {
+        const p = JSON.parse(r.payload) as TimeLogPayload;
+        if (p.start && p.end) {
+          logs.push({
+            id: `timelog__${r.id}`,
+            title: `⏱ ${p.description || 'Time log'}`,
+            start: p.start,
+            end: p.end,
+            backgroundColor: 'rgba(34, 197, 94, 0.15)',
+            borderColor: '#22c55e',
+            textColor: '#22c55e',
+            editable: false,
+            display: 'background',
+            extendedProps: { sourceType: 'time_log', sourceId: r.id },
+          });
+        }
+      }
+      setTimeLogEvents(logs);
+    } catch (err) {
+      console.error('[calendar] cross-module load failed:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadEvents();
+    void loadCrossModuleEvents();
+  }, [loadEvents, loadCrossModuleEvents]);
+
+  // Reload on entity events
+  useEffect(() => {
+    const handler = (): void => {
+      void loadEvents();
+      void loadCrossModuleEvents();
+    };
+    eventBus.on('entity:created', handler);
+    eventBus.on('entity:updated', handler);
+    eventBus.on('entity:deleted', handler);
+    return () => {
+      eventBus.off('entity:created', handler);
+      eventBus.off('entity:updated', handler);
+      eventBus.off('entity:deleted', handler);
+    };
+  }, [loadEvents, loadCrossModuleEvents]);
+
+  // ── Convert to FullCalendar events ────────────────────────────────────────
+
+  const fcEvents: EventInput[] = useMemo(() => {
+    const calEvents: EventInput[] = events.map((e) => {
+      const base: EventInput = {
+        id: e.id,
+        title: e.payload.title,
+        start: e.payload.start,
+        end: e.payload.end,
+        allDay: e.payload.all_day,
+        backgroundColor: e.payload.color,
+        borderColor: e.payload.color,
+        extendedProps: {
+          sourceType: 'calendar_event',
+          sourceId: e.id,
+          location: e.payload.location,
+          description: e.payload.description,
+        },
+      };
+
+      if (e.payload.recurrence_rule) {
+        base.rrule = e.payload.recurrence_rule;
+        base.duration = (() => {
+          const ms = new Date(e.payload.end).getTime() - new Date(e.payload.start).getTime();
+          return { milliseconds: ms > 0 ? ms : 3600000 };
+        })();
+      }
+
+      return base;
+    });
+
+    return [...calEvents, ...taskEvents, ...timeLogEvents];
+  }, [events, taskEvents, timeLogEvents]);
+
+  // ── Save event to DB ──────────────────────────────────────────────────────
+
+  const saveEvent = useCallback(
+    async (id: string | null, payload: CalendarEventPayload) => {
+      try {
+        const db = getWorkspaceDB();
+        const now = new Date().toISOString();
+
+        if (id) {
+          // Update
+          await db.execute(
+            `UPDATE base_entities SET payload = ?, updated_at = ? WHERE id = ?`,
+            [JSON.stringify(payload), now, id],
+          );
+          setEvents((prev) =>
+            prev.map((e) =>
+              e.id === id ? { ...e, payload, updated_at: now } : e,
+            ),
+          );
+          eventBus.emit('entity:updated', {
+            entity: {
+              id,
+              type: 'calendar_event',
+              payload,
+              metadata: {},
+              tags: [],
+              parent_id: null,
+              created_at: '',
+              updated_at: now,
+              deleted_at: null,
+            },
+          });
+        } else {
+          // Create
+          const newId = crypto.randomUUID();
+          await db.execute(
+            `INSERT INTO base_entities (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
+             VALUES (?, 'calendar_event', ?, '{}', '[]', NULL, ?, ?)`,
+            [newId, JSON.stringify(payload), now, now],
+          );
+          const newItem: CalendarEventItem = {
+            id: newId,
+            payload,
+            created_at: now,
+            updated_at: now,
+          };
+          setEvents((prev) => [newItem, ...prev]);
+          eventBus.emit('entity:created', {
+            entity: {
+              id: newId,
+              type: 'calendar_event',
+              payload,
+              metadata: {},
+              tags: [],
+              parent_id: null,
+              created_at: now,
+              updated_at: now,
+              deleted_at: null,
+            },
+          });
+        }
+      } catch (err) {
+        console.error('[calendar] save failed:', err);
+      }
+    },
+    [],
+  );
+
+  // ── Delete event ──────────────────────────────────────────────────────────
+
+  const deleteEvent = useCallback(async (eventId: string) => {
+    try {
+      const db = getWorkspaceDB();
+      await db.execute(
+        `UPDATE base_entities SET deleted_at = ? WHERE id = ?`,
+        [new Date().toISOString(), eventId],
+      );
+      setEvents((prev) => prev.filter((e) => e.id !== eventId));
+      eventBus.emit('entity:deleted', { id: eventId, type: 'calendar_event' });
+    } catch (err) {
+      console.error('[calendar] delete failed:', err);
+    }
+  }, []);
+
+  // ── FullCalendar callbacks ────────────────────────────────────────────────
+
+  const handleDateSelect = useCallback((selectInfo: DateSelectArg) => {
+    setEditingEvent(null);
+    setDefaultStart(selectInfo.startStr);
+    setDefaultEnd(selectInfo.endStr);
+    setDefaultAllDay(selectInfo.allDay);
+    setModalOpen(true);
+    selectInfo.view.calendar.unselect();
+  }, []);
+
+  const handleEventClick = useCallback(
+    (clickInfo: EventClickArg) => {
+      const props = clickInfo.event.extendedProps;
+      // Don't open modal for cross-module ghost events
+      if (props.sourceType === 'task' || props.sourceType === 'time_log') {
+        // Navigate to the entity instead
+        eventBus.emit('nav:open-entity', {
+          id: props.sourceId as string,
+          type: props.sourceType as 'task' | 'time_log',
+        });
+        return;
+      }
+
+      const found = events.find((e) => e.id === clickInfo.event.id);
+      if (found) {
+        setEditingEvent(found);
+        setDefaultStart('');
+        setDefaultEnd('');
+        setDefaultAllDay(false);
+        setModalOpen(true);
+      }
+    },
+    [events],
+  );
+
+  const handleEventDrop = useCallback(
+    (dropInfo: EventDropArg) => {
+      const props = dropInfo.event.extendedProps;
+      if (props.sourceType !== 'calendar_event') {
+        dropInfo.revert();
+        return;
+      }
+
+      const found = events.find((e) => e.id === dropInfo.event.id);
+      if (!found) return;
+
+      const updatedPayload: CalendarEventPayload = {
+        ...found.payload,
+        start: dropInfo.event.startStr || found.payload.start,
+        end: dropInfo.event.endStr || found.payload.end,
+        all_day: dropInfo.event.allDay,
+      };
+      void saveEvent(found.id, updatedPayload);
+    },
+    [events, saveEvent],
+  );
+
+  const handleEventResize = useCallback(
+    (resizeInfo: EventResizeDoneArg) => {
+      const props = resizeInfo.event.extendedProps;
+      if (props.sourceType !== 'calendar_event') return;
+
+      const found = events.find((e) => e.id === resizeInfo.event.id);
+      if (!found) return;
+
+      const updatedPayload: CalendarEventPayload = {
+        ...found.payload,
+        start: resizeInfo.event.startStr || found.payload.start,
+        end: resizeInfo.event.endStr || found.payload.end,
+      };
+      void saveEvent(found.id, updatedPayload);
+    },
+    [events, saveEvent],
+  );
+
+  // ── View navigation ──────────────────────────────────────────────────────
+
+  const changeView = useCallback(
+    (view: ViewMode) => {
+      setCurrentView(view);
+      calRef.current?.getApi().changeView(view);
+    },
+    [],
+  );
+
+  const goToday = useCallback(() => {
+    calRef.current?.getApi().today();
+  }, []);
+
+  const goPrev = useCallback(() => {
+    calRef.current?.getApi().prev();
+  }, []);
+
+  const goNext = useCallback(() => {
+    calRef.current?.getApi().next();
+  }, []);
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden p-4">
+      {/* ── Toolbar ────────────────────────────────────────────────── */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="sm" onClick={goPrev} className="h-8 px-2">
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <polyline points="15,18 9,12 15,6" />
+            </svg>
+          </Button>
+          <Button variant="outline" size="sm" onClick={goToday} className="h-8 px-3 text-xs">
+            Today
+          </Button>
+          <Button variant="outline" size="sm" onClick={goNext} className="h-8 px-2">
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <polyline points="9,18 15,12 9,6" />
+            </svg>
+          </Button>
+        </div>
+
+        <div className="flex items-center gap-1">
+          {(
+            [
+              ['dayGridMonth', 'Month'],
+              ['timeGridWeek', 'Week'],
+              ['timeGridDay', 'Day'],
+              ['listWeek', 'Agenda'],
+            ] as const
+          ).map(([view, label]) => (
+            <Button
+              key={view}
+              variant={currentView === view ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => changeView(view)}
+              className="h-8 px-3 text-xs"
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+
+        <Button
+          size="sm"
+          onClick={() => {
+            setEditingEvent(null);
+            setDefaultStart(new Date().toISOString());
+            setDefaultEnd(new Date(Date.now() + 3600000).toISOString());
+            setDefaultAllDay(false);
+            setModalOpen(true);
+          }}
+          className="h-8"
+        >
+          + New Event
+        </Button>
+      </div>
+
+      {/* ── Calendar ───────────────────────────────────────────────── */}
+      <div className="calendar-wrapper flex-1 overflow-auto">
+        <FullCalendar
+          ref={calRef}
+          plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin, rrulePlugin]}
+          initialView={currentView}
+          headerToolbar={false}
+          events={fcEvents}
+          selectable
+          editable
+          eventResizableFromStart
+          selectMirror
+          dayMaxEvents={3}
+          nowIndicator
+          select={handleDateSelect}
+          eventClick={handleEventClick}
+          eventDrop={handleEventDrop}
+          eventResize={handleEventResize}
+          height="100%"
+          eventTimeFormat={{
+            hour: '2-digit',
+            minute: '2-digit',
+            meridiem: false,
+            hour12: false,
+          }}
+        />
+      </div>
+
+      {/* ── Event modal ────────────────────────────────────────────── */}
+      <EventDetailModal
+        event={editingEvent}
+        defaultStart={defaultStart}
+        defaultEnd={defaultEnd}
+        defaultAllDay={defaultAllDay}
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onSave={saveEvent}
+        onDelete={deleteEvent}
+      />
+    </div>
+  );
+}

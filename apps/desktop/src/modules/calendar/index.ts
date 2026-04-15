@@ -1,5 +1,9 @@
 import { eventBus } from '@/core/events';
 
+export { CalendarView } from './CalendarView';
+export { EventDetailModal } from './EventDetailModal';
+export type { CalendarEventItem } from './EventDetailModal';
+
 /**
  * Calendar module — registers all Event Bus listeners.
  * Call init() once at app startup.

@@ -308,3 +308,121 @@ html {
   height: 0;
   pointer-events: none;
 }
+
+/* ── FullCalendar Theme Integration ──────────────────────────────────────── */
+
+.calendar-wrapper {
+  --fc-border-color: hsl(var(--border));
+  --fc-today-bg-color: hsl(var(--accent) / 0.15);
+  --fc-neutral-bg-color: hsl(var(--muted));
+  --fc-page-bg-color: transparent;
+  --fc-event-border-color: transparent;
+  --fc-now-indicator-color: hsl(var(--primary));
+  --fc-list-event-hover-bg-color: hsl(var(--accent) / 0.3);
+}
+
+.calendar-wrapper .fc {
+  font-family: inherit;
+  font-size: 0.8125rem;
+}
+
+.calendar-wrapper .fc-toolbar-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+/* Day header cells */
+.calendar-wrapper .fc-col-header-cell {
+  background: hsl(var(--muted) / 0.5);
+  font-weight: 500;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: hsl(var(--muted-foreground));
+  padding: 0.5rem 0;
+}
+
+/* Day numbers */
+.calendar-wrapper .fc-daygrid-day-number {
+  color: hsl(var(--foreground));
+  font-size: 0.75rem;
+  padding: 4px 8px;
+}
+
+.calendar-wrapper .fc-day-today .fc-daygrid-day-number {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-radius: 9999px;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 4px;
+}
+
+/* Events */
+.calendar-wrapper .fc-event {
+  border-radius: 0.25rem;
+  font-size: 0.6875rem;
+  padding: 1px 4px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.calendar-wrapper .fc-event:hover {
+  opacity: 0.85;
+}
+
+/* Time grid slots */
+.calendar-wrapper .fc-timegrid-slot {
+  height: 2.5rem;
+  border-color: hsl(var(--border) / 0.5);
+}
+.calendar-wrapper .fc-timegrid-slot-label {
+  font-size: 0.625rem;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Now indicator */
+.calendar-wrapper .fc-timegrid-now-indicator-line {
+  border-color: hsl(var(--primary));
+  border-width: 2px;
+}
+.calendar-wrapper .fc-timegrid-now-indicator-arrow {
+  border-color: hsl(var(--primary));
+}
+
+/* List view */
+.calendar-wrapper .fc-list {
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.calendar-wrapper .fc-list-day-cushion {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.calendar-wrapper .fc-list-event td {
+  border-color: hsl(var(--border) / 0.5);
+  color: hsl(var(--foreground));
+  font-size: 0.8125rem;
+}
+
+/* More-events link */
+.calendar-wrapper .fc-more-link {
+  color: hsl(var(--primary));
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+/* Scrollbar in calendar */
+.calendar-wrapper .fc-scroller::-webkit-scrollbar {
+  width: 4px;
+}
+.calendar-wrapper .fc-scroller::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.2);
+  border-radius: 999px;
+}

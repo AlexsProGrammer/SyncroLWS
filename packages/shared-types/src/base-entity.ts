@@ -88,11 +88,16 @@ export const TaskPayloadSchema = z.object({
 
 export const CalendarEventPayloadSchema = z.object({
   title: z.string(),
+  description: z.string().default(''),
   start: z.string().datetime(),
   end: z.string().datetime(),
   all_day: z.boolean().default(false),
   recurrence_rule: z.string().nullable().default(null),
   location: z.string().default(''),
+  color: z.string().default('#3b82f6'),
+  /** Link to another entity (e.g. task id whose due date spawned this event) */
+  linked_entity_id: z.string().nullable().default(null),
+  linked_entity_type: z.enum(['task', 'time_log', 'note']).nullable().default(null),
 });
 
 export const TimeLogPayloadSchema = z.object({
