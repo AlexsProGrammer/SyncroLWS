@@ -281,3 +281,30 @@ html {
 .dark .note-editor-content mark {
   background: hsl(50 100% 50% / 0.2);
 }
+
+/* ── Kanban Board ────────────────────────────────────────────────────────── */
+
+/* Smooth column scrollbar */
+.kanban-column::-webkit-scrollbar {
+  width: 4px;
+}
+.kanban-column::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.2);
+  border-radius: 999px;
+}
+.kanban-column::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
+}
+
+/* Task detail panel description editor */
+.task-detail-desc .ProseMirror {
+  outline: none;
+  min-height: 60px;
+}
+.task-detail-desc .ProseMirror p.is-editor-empty:first-child::before {
+  color: hsl(var(--muted-foreground));
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

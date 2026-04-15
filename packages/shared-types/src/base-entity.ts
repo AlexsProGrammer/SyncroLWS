@@ -39,14 +39,51 @@ export const NotePayloadSchema = z.object({
   linked_entity_ids: z.array(z.string().uuid()).default([]),
 });
 
+export const TaskLabelSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  color: z.string(),
+});
+
+export const ChecklistItemSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  checked: z.boolean().default(false),
+});
+
+export const TaskCommentSchema = z.object({
+  id: z.string(),
+  author: z.string().default(''),
+  text: z.string(),
+  created_at: z.string().datetime(),
+});
+
 export const TaskPayloadSchema = z.object({
   title: z.string(),
   description: z.string().default(''),
+  /** Rich text description stored as TipTap JSON (stringified) */
+  description_json: z.string().optional(),
   status: z.enum(['todo', 'in_progress', 'done', 'cancelled']).default('todo'),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).default('medium'),
   due_date: z.string().datetime().nullable().default(null),
   assigned_to: z.string().nullable().default(null),
   file_hashes: z.array(z.string()).default([]),
+  /** Column identifier for Kanban boards */
+  column_id: z.string().default('todo'),
+  /** Colored labels */
+  labels: z.array(TaskLabelSchema).default([]),
+  /** Checklist / subtasks */
+  checklist: z.array(ChecklistItemSchema).default([]),
+  /** File attachment references */
+  attachments: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    hash: z.string(),
+    mime_type: z.string().default('application/octet-stream'),
+    size_bytes: z.number().default(0),
+  })).default([]),
+  /** Activity comments */
+  comments: z.array(TaskCommentSchema).default([]),
 });
 
 export const CalendarEventPayloadSchema = z.object({
@@ -111,5 +148,8 @@ export type ToolManifest = z.infer<typeof ToolManifestSchema>;
 
 export type NotePayload = z.infer<typeof NotePayloadSchema>;
 export type TaskPayload = z.infer<typeof TaskPayloadSchema>;
+export type TaskLabel = z.infer<typeof TaskLabelSchema>;
+export type ChecklistItem = z.infer<typeof ChecklistItemSchema>;
+export type TaskComment = z.infer<typeof TaskCommentSchema>;
 export type CalendarEventPayload = z.infer<typeof CalendarEventPayloadSchema>;
 export type TimeLogPayload = z.infer<typeof TimeLogPayloadSchema>;

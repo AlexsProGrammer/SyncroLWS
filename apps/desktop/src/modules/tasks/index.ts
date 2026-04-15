@@ -2,6 +2,12 @@ import { eventBus } from '@/core/events';
 import type { TaskPayload } from '@syncrohws/shared-types';
 
 export { TasksView } from './TasksView';
+export { KanbanCard, SortableKanbanCard } from './KanbanCard';
+export { TaskDetailPanel } from './TaskDetailPanel';
+export { KanbanFilters, DEFAULT_FILTERS } from './KanbanFilters';
+export type { KanbanTaskItem } from './KanbanCard';
+export type { KanbanColumn } from './TasksView';
+export type { KanbanFilterState } from './KanbanFilters';
 
 /**
  * Tasks module — registers all Event Bus listeners.
