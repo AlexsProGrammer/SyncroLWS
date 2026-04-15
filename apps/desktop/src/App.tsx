@@ -3,10 +3,14 @@ import { CommandPalette } from './ui/CommandPalette';
 import { DiffEditor } from './ui/DiffEditor';
 import { Sidebar, useEnabledTools, type ActiveView } from './ui/Sidebar';
 import { SettingsView } from './ui/SettingsView';
+import { Toaster } from './ui/Toaster';
+import { Separator } from './ui/components/separator';
 import { getTool, getToolByEntityType } from './registry/ToolRegistry';
 import { eventBus } from './core/events';
 import { startBackupScheduler } from './core/backup';
 import { useWorkspaceStore } from './store/workspaceStore';
+import { useProfileStore } from './store/profileStore';
+import { toast } from './ui/hooks/use-toast';
 import type { BaseEntity } from '@syncrohws/shared-types';
 
 interface ConflictState {
@@ -110,6 +114,21 @@ export default function App(): React.ReactElement {
     s.workspaces.find((w) => w.id === s.activeWorkspaceId),
   );
   const workspaceLoading = useWorkspaceStore((s) => s.loading);
+  const activeProfile = useProfileStore((s) =>
+    s.profiles.find((p) => p.id === s.activeProfileId),
+  );
+
+  // Wire notification:show event bus → toast UI
+  useEffect(() => {
+    const onNotification = ({ title, body, type }: { title: string; body: string; type: 'info' | 'warning' | 'error' }): void => {
+      const variant = type === 'error' ? 'destructive' as const
+        : type === 'warning' ? 'warning' as const
+        : 'default' as const;
+      toast({ title, description: body, variant });
+    };
+    eventBus.on('notification:show', onNotification);
+    return () => { eventBus.off('notification:show', onNotification); };
+  }, []);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
@@ -118,18 +137,32 @@ export default function App(): React.ReactElement {
 
       {/* ── Main content area ────────────────────────────────────────────── */}
       <main className="flex flex-1 flex-col overflow-hidden">
-        {/* Top bar with workspace breadcrumb */}
-        <header className="flex h-14 shrink-0 items-center border-b border-border px-4 gap-2">
+        {/* Breadcrumb header: Profile / Workspace / Tool */}
+        <header className="flex h-12 shrink-0 items-center border-b border-border px-4 gap-1.5">
+          {activeProfile && (
+            <span className="header-breadcrumb-profile contents">
+              <span
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white"
+                style={{ backgroundColor: activeProfile.color ?? '#6366f1' }}
+              >
+                {activeProfile.name[0]?.toUpperCase()}
+              </span>
+              <span className="text-xs text-muted-foreground truncate max-w-[100px]">
+                {activeProfile.name}
+              </span>
+              <Separator orientation="vertical" className="mx-1 h-4" />
+            </span>
+          )}
           {activeWorkspace && (
             <>
               <span
-                className="h-3 w-3 shrink-0 rounded-sm"
+                className="h-2.5 w-2.5 shrink-0 rounded-sm"
                 style={{ backgroundColor: activeWorkspace.color }}
               />
               <span className="text-xs text-muted-foreground truncate max-w-[120px]">
                 {activeWorkspace.name}
               </span>
-              <span className="text-xs text-muted-foreground">/</span>
+              <Separator orientation="vertical" className="mx-1 h-4" />
             </>
           )}
           <h1 className="text-sm font-medium text-foreground capitalize">
@@ -150,6 +183,7 @@ export default function App(): React.ReactElement {
 
       {/* ── Global overlays ─────────────────────────────────────────────── */}
       <CommandPalette />
+      <Toaster />
 
       {conflict && (
         <DiffEditor

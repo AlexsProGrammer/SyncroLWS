@@ -43,6 +43,8 @@ interface WorkspaceActions {
   ) => Promise<void>;
   /** Soft-delete a workspace. */
   deleteWorkspace: (id: string) => Promise<void>;
+  /** Batch-update sort_order for a list of workspace IDs (in order). */
+  reorderWorkspaces: (orderedIds: string[]) => Promise<void>;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -176,6 +178,29 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       }
 
       eventBus.emit('workspace:deleted', { id });
+    },
+
+    reorderWorkspaces: async (orderedIds: string[]) => {
+      const db = getDB();
+      const now = new Date().toISOString();
+
+      // Update sort_order in DB for each workspace
+      for (let i = 0; i < orderedIds.length; i++) {
+        await db.execute(
+          `UPDATE workspaces SET sort_order = ?, updated_at = ? WHERE id = ?`,
+          [i, now, orderedIds[i]],
+        );
+      }
+
+      // Update local state
+      set((state) => ({
+        workspaces: state.workspaces
+          .map((w) => {
+            const idx = orderedIds.indexOf(w.id);
+            return idx >= 0 ? { ...w, sort_order: idx, updated_at: now } : w;
+          })
+          .sort((a, b) => a.sort_order - b.sort_order),
+      }));
     },
   }),
 );

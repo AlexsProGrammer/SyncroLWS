@@ -68,3 +68,40 @@
     user-select: text;
   }
 }
+
+/* ── Responsive layout ─────────────────────────────────────────────────────── */
+
+/* Auto-collapse sidebar on narrow windows */
+@media (max-width: 640px) {
+  .sidebar-auto-collapse {
+    width: 3.5rem !important; /* w-14 */
+  }
+}
+
+/* Ensure main content fills available space */
+@media (max-width: 480px) {
+  .header-breadcrumb-profile {
+    display: none;
+  }
+}
+
+/* Custom scrollbar for sidebar and main area */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
+/* Smooth transitions for theme changes */
+html {
+  transition: background-color 0.2s ease, color 0.2s ease;
+}

@@ -5,6 +5,10 @@ import { getAllTools, type Tool } from '@/registry/ToolRegistry';
 import { getDB } from '@/core/db';
 import { useProfileStore } from '@/store/profileStore';
 import { useWorkspaceStore, buildWorkspaceTree, type Workspace } from '@/store/workspaceStore';
+import { useThemeStore } from '@/store/themeStore';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
@@ -206,6 +210,80 @@ function WorkspaceTreeItem({
   );
 }
 
+// ── Sortable workspace item ───────────────────────────────────────────────────
+
+function SortableWorkspaceItem({
+  node,
+  depth,
+  activeId,
+  onSelect,
+  collapsed: sidebarCollapsed,
+}: {
+  node: WorkspaceTreeNode;
+  depth: number;
+  activeId: string | null;
+  onSelect: (id: string) => void;
+  collapsed: boolean;
+}): React.ReactElement {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: node.id,
+  });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  const [expanded, setExpanded] = useState(true);
+  const hasChildren = node.children.length > 0;
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <button
+        {...attributes}
+        {...listeners}
+        onClick={() => onSelect(node.id)}
+        className={cn(
+          'flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors',
+          activeId === node.id
+            ? 'bg-accent text-accent-foreground font-medium'
+            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+        )}
+        style={{ paddingLeft: sidebarCollapsed ? undefined : `${8 + depth * 16}px` }}
+        title={sidebarCollapsed ? node.name : undefined}
+      >
+        {hasChildren && !sidebarCollapsed && (
+          <span
+            onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
+            className="shrink-0 cursor-pointer"
+          >
+            <IconChevronDown className={cn('h-3 w-3 transition-transform', !expanded && '-rotate-90')} />
+          </span>
+        )}
+        <span
+          className="h-3 w-3 shrink-0 rounded-sm"
+          style={{ backgroundColor: node.color }}
+        />
+        {!sidebarCollapsed && <span className="truncate flex-1 text-left">{node.name}</span>}
+      </button>
+      {hasChildren && expanded && !sidebarCollapsed && (
+        <div>
+          {node.children.map((child) => (
+            <WorkspaceTreeItem
+              key={child.id}
+              node={child as WorkspaceTreeNode}
+              depth={depth + 1}
+              activeId={activeId}
+              onSelect={onSelect}
+              collapsed={sidebarCollapsed}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Profile switcher ──────────────────────────────────────────────────────────
 
 function ProfileSwitcher({ collapsed: sidebarCollapsed }: { collapsed: boolean }): React.ReactElement {
@@ -269,18 +347,105 @@ function ProfileSwitcher({ collapsed: sidebarCollapsed }: { collapsed: boolean }
   );
 }
 
+// ── Theme toggle ──────────────────────────────────────────────────────────────
+
+function IconSun({ className }: { className?: string }): React.ReactElement {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="5" />
+      <line x1="12" y1="1" x2="12" y2="3" />
+      <line x1="12" y1="21" x2="12" y2="23" />
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+      <line x1="1" y1="12" x2="3" y2="12" />
+      <line x1="21" y1="12" x2="23" y2="12" />
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+    </svg>
+  );
+}
+
+function IconMoon({ className }: { className?: string }): React.ReactElement {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  );
+}
+
+function ThemeToggle({ collapsed: sidebarCollapsed }: { collapsed: boolean }): React.ReactElement {
+  const theme = useThemeStore((s) => s.theme);
+  const setTheme = useThemeStore((s) => s.setTheme);
+
+  const cycle = (): void => {
+    const next = theme === 'dark' ? 'light' : theme === 'light' ? 'system' : 'dark';
+    setTheme(next);
+  };
+
+  const label = theme === 'dark' ? 'Dark' : theme === 'light' ? 'Light' : 'System';
+
+  return (
+    <button
+      onClick={cycle}
+      title={sidebarCollapsed ? `Theme: ${label}` : undefined}
+      className={cn(
+        'flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-sm transition-colors',
+        'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+      )}
+    >
+      {theme === 'dark' ? (
+        <IconMoon className="h-4 w-4 shrink-0" />
+      ) : (
+        <IconSun className="h-4 w-4 shrink-0" />
+      )}
+      {!sidebarCollapsed && <span className="flex-1 text-left">{label}</span>}
+    </button>
+  );
+}
+
 // ── Main Sidebar ──────────────────────────────────────────────────────────────
 
 export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElement {
   const [collapsed, setCollapsed] = useState(false);
   const { enabledTools } = useEnabledTools();
 
+  // Auto-collapse on narrow windows
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 640px)');
+    const handler = (e: MediaQueryListEvent | MediaQueryList): void => {
+      if (e.matches) setCollapsed(true);
+    };
+    handler(mq);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
   const createWorkspace = useWorkspaceStore((s) => s.createWorkspace);
+  const reorderWorkspaces = useWorkspaceStore((s) => s.reorderWorkspaces);
 
   const tree = buildWorkspaceTree(workspaces);
+  const rootIds = tree.map((n) => n.id);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
+  const handleDragEnd = (event: DragEndEvent): void => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = rootIds.indexOf(active.id as string);
+    const newIndex = rootIds.indexOf(over.id as string);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const newOrder = [...rootIds];
+    newOrder.splice(oldIndex, 1);
+    newOrder.splice(newIndex, 0, active.id as string);
+    void reorderWorkspaces(newOrder);
+  };
 
   const handleCreateWorkspace = async (): Promise<void> => {
     const name = prompt('Workspace name:');
@@ -346,16 +511,20 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
           </button>
         </div>
         <div className="max-h-40 overflow-y-auto">
-          {tree.map((node) => (
-            <WorkspaceTreeItem
-              key={node.id}
-              node={node as WorkspaceTreeNode}
-              depth={0}
-              activeId={activeWorkspaceId}
-              onSelect={(id) => void switchWorkspace(id)}
-              collapsed={collapsed}
-            />
-          ))}
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={rootIds} strategy={verticalListSortingStrategy}>
+              {tree.map((node) => (
+                <SortableWorkspaceItem
+                  key={node.id}
+                  node={node as WorkspaceTreeNode}
+                  depth={0}
+                  activeId={activeWorkspaceId}
+                  onSelect={(id) => void switchWorkspace(id)}
+                  collapsed={collapsed}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         </div>
       </div>
 
@@ -394,9 +563,10 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
         })}
       </nav>
 
-      {/* Profile switcher + Settings + Collapse */}
+      {/* Profile switcher + Theme + Settings + Collapse */}
       <div className="border-t border-border p-2 space-y-0.5">
         <ProfileSwitcher collapsed={collapsed} />
+        <ThemeToggle collapsed={collapsed} />
         <button
           onClick={() => onNavigate('settings')}
           title={collapsed ? 'Settings' : undefined}

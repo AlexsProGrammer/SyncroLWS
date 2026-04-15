@@ -2,11 +2,15 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Switch } from '@/ui/components/switch';
 import { Input } from '@/ui/components/input';
 import { Button } from '@/ui/components/button';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/ui/components/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/components/select';
+import { Separator } from '@/ui/components/separator';
 import { getAllTools } from '@/registry/ToolRegistry';
 import { getDB } from '@/core/db';
 import { eventBus } from '@/core/events';
 import { useProfileStore } from '@/store/profileStore';
 import { useSyncStore } from '@/store/syncStore';
+import { useThemeStore } from '@/store/themeStore';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -32,11 +36,12 @@ export { IconSettings };
 
 export function SettingsView(): React.ReactElement {
   const [toolStates, setToolStates] = useState<ToolToggleState[]>([]);
-  const [activeTab, setActiveTab] = useState<'tools' | 'sync'>('tools');
   const activeProfileId = useProfileStore((s) => s.activeProfileId);
   const profiles = useProfileStore((s) => s.profiles);
   const activeProfile = profiles.find((p) => p.id === activeProfileId);
   const tools = getAllTools();
+  const theme = useThemeStore((s) => s.theme);
+  const setTheme = useThemeStore((s) => s.setTheme);
 
   // ── Sync store ─────────────────────────────────────────────────────────────
   const syncUrl = useSyncStore((s) => s.syncUrl);
@@ -168,33 +173,63 @@ export function SettingsView(): React.ReactElement {
         </p>
       </div>
 
-      {/* ── Tab bar ───────────────────────────────────────────────────── */}
-      <div className="flex border-b border-border px-6">
-        <button
-          onClick={() => setActiveTab('tools')}
-          className={`px-4 py-2.5 text-sm font-medium transition-colors ${
-            activeTab === 'tools'
-              ? 'border-b-2 border-primary text-foreground'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Tools
-        </button>
-        <button
-          onClick={() => setActiveTab('sync')}
-          className={`px-4 py-2.5 text-sm font-medium transition-colors ${
-            activeTab === 'sync'
-              ? 'border-b-2 border-primary text-foreground'
-              : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          Sync Configuration
-        </button>
-      </div>
+      {/* ── Tabs ─────────────────────────────────────────────────────── */}
+      <Tabs defaultValue="general" className="flex flex-1 flex-col overflow-hidden">
+        <div className="border-b border-border px-6">
+          <TabsList className="h-10 bg-transparent p-0">
+            <TabsTrigger value="general" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+              General
+            </TabsTrigger>
+            <TabsTrigger value="tools" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+              Tools
+            </TabsTrigger>
+            <TabsTrigger value="sync" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+              Sync
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
-      {/* ── Tab content ───────────────────────────────────────────────── */}
-      <div className="flex-1 p-6">
-        {activeTab === 'tools' && (
+        <div className="flex-1 overflow-y-auto p-6">
+          {/* ── General tab ─────────────────────────────────────────── */}
+          <TabsContent value="general">
+            <section className="max-w-lg space-y-6">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Appearance</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Customize the look and feel of the application.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground">Theme</label>
+                <Select value={theme} onValueChange={(v) => setTheme(v as 'light' | 'dark' | 'system')}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Select theme" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="light">Light</SelectItem>
+                    <SelectItem value="dark">Dark</SelectItem>
+                    <SelectItem value="system">System</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Select your preferred color scheme.
+                </p>
+              </div>
+
+              <Separator />
+
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">About</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  SyncroLWS v0.1.0 — Local-first workspace manager.
+                </p>
+              </div>
+            </section>
+          </TabsContent>
+
+          {/* ── Tools tab ───────────────────────────────────────────── */}
+          <TabsContent value="tools">
           <section>
             <h2 className="text-lg font-semibold text-foreground">Tools</h2>
             <p className="mt-1 mb-4 text-sm text-muted-foreground">
@@ -233,9 +268,10 @@ export function SettingsView(): React.ReactElement {
               })}
             </div>
           </section>
-        )}
+          </TabsContent>
 
-        {activeTab === 'sync' && (
+          {/* ── Sync tab ────────────────────────────────────────────── */}
+          <TabsContent value="sync">
           <section className="max-w-lg space-y-6">
             <div>
               <h2 className="text-lg font-semibold text-foreground">Sync Configuration</h2>
@@ -312,8 +348,9 @@ export function SettingsView(): React.ReactElement {
               )}
             </div>
           </section>
-        )}
-      </div>
+          </TabsContent>
+        </div>
+      </Tabs>
     </div>
   );
 }
