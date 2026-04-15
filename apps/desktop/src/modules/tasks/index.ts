@@ -1,6 +1,8 @@
 import { eventBus } from '@/core/events';
 import type { TaskPayload } from '@syncrohws/shared-types';
 
+export { TasksView } from './TasksView';
+
 /**
  * Tasks module — registers all Event Bus listeners.
  * Call init() once at app startup.

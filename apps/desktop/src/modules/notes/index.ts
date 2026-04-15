@@ -3,6 +3,7 @@ import { getDB } from '@/core/db';
 import type { BaseEntity, NotePayload } from '@syncrohws/shared-types';
 
 export { NoteEditor } from './NoteEditor';
+export { NotesView } from './NotesView';
 export { WikiLink } from './WikiLinkExtension';
 
 /**

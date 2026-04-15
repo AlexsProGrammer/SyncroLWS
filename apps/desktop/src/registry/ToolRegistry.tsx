@@ -1,5 +1,8 @@
 import React from 'react';
-import { NotesView, TasksView, CalendarView, TimeTrackerView } from '@/ui/ModuleViews';
+import { NotesView } from '@/modules/notes/NotesView';
+import { TasksView } from '@/modules/tasks/TasksView';
+import { CalendarView } from '@/ui/ModuleViews';
+import { TimeTrackerView } from '@/modules/time-tracker/TimeTrackerView';
 
 // ── Icons (inline SVG — no external CDN, DSGVO compliant) ──────────────────
 
