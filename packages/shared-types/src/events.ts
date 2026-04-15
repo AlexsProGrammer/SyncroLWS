@@ -41,4 +41,15 @@ export type AppEvents = {
   // ── Settings ──────────────────────────────────────────────────────────────
   /** Emitted when tool toggle state changes in the Settings UI */
   'settings:tools-changed': void;
+
+  // ── Workspace ─────────────────────────────────────────────────────────────
+  'workspace:created': { id: string; name: string };
+  'workspace:switched': { id: string; name: string };
+  'workspace:deleted': { id: string };
+  'workspace:updated': { id: string };
+  'workspace:tool-added': { workspaceId: string; toolInstanceId: string; toolId: string };
+  'workspace:tool-removed': { workspaceId: string; toolInstanceId: string };
+
+  // ── Profile ───────────────────────────────────────────────────────────────
+  'profile:switched': { id: string };
 };

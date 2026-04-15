@@ -1,0 +1,12 @@
+{
+  "id": "tasks",
+  "name": "Tasks",
+  "version": "1.0.0",
+  "description": "Kanban board with drag-and-drop task management.",
+  "icon": "tasks",
+  "entityTypes": ["task"],
+  "shortcut": "2",
+  "hasPortalView": true,
+  "portalPermissions": ["read"],
+  "configSchema": {}
+}

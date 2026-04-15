@@ -17,7 +17,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useDroppable } from '@dnd-kit/core';
-import { getDB } from '@/core/db';
+import { getWorkspaceDB } from '@/core/db';
 import { eventBus } from '@/core/events';
 import { Button } from '@/ui/components/button';
 import { Input } from '@/ui/components/input';
@@ -59,7 +59,7 @@ export function TasksView(): React.ReactElement {
   // ── Load tasks from DB ────────────────────────────────────────────────────
   const loadTasks = useCallback(async () => {
     try {
-      const db = getDB();
+      const db = getWorkspaceDB();
       const rows = await db.select<{ id: string; payload: string; created_at: string }[]>(
         `SELECT id, payload, created_at FROM base_entities WHERE type = 'task' AND deleted_at IS NULL ORDER BY created_at DESC`,
       );
@@ -116,7 +116,7 @@ export function TasksView(): React.ReactElement {
     };
 
     try {
-      const db = getDB();
+      const db = getWorkspaceDB();
       await db.execute(
         `INSERT INTO base_entities (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
          VALUES (?, 'task', ?, '{}', '[]', NULL, ?, ?)`,
@@ -159,7 +159,7 @@ export function TasksView(): React.ReactElement {
   const updateTaskStatus = useCallback(
     async (taskId: string, newStatus: TaskStatus) => {
       try {
-        const db = getDB();
+        const db = getWorkspaceDB();
         // Read current payload, update status field
         const rows = await db.select<{ payload: string }[]>(
           `SELECT payload FROM base_entities WHERE id = ?`,
@@ -184,7 +184,7 @@ export function TasksView(): React.ReactElement {
   // ── Delete task ───────────────────────────────────────────────────────────
   const deleteTask = useCallback(async (taskId: string) => {
     try {
-      const db = getDB();
+      const db = getWorkspaceDB();
       await db.execute(
         `UPDATE base_entities SET deleted_at = ? WHERE id = ?`,
         [new Date().toISOString(), taskId],

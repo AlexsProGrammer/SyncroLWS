@@ -3,9 +3,10 @@ import { CommandPalette } from './ui/CommandPalette';
 import { DiffEditor } from './ui/DiffEditor';
 import { Sidebar, useEnabledTools, type ActiveView } from './ui/Sidebar';
 import { SettingsView } from './ui/SettingsView';
-import { getTool } from './registry/ToolRegistry';
+import { getTool, getToolByEntityType } from './registry/ToolRegistry';
 import { eventBus } from './core/events';
 import { startBackupScheduler } from './core/backup';
+import { useWorkspaceStore } from './store/workspaceStore';
 import type { BaseEntity } from '@syncrohws/shared-types';
 
 interface ConflictState {
@@ -53,7 +54,7 @@ export default function App(): React.ReactElement {
 
     // nav:open-entity → switch to the matching tool
     const onOpenEntity = ({ type }: { id: string; type: BaseEntity['type'] }): void => {
-      const tool = enabledTools.find((t) => t.entityType === type);
+      const tool = getToolByEntityType(type) ?? enabledTools.find((t) => t.entityTypes?.includes(type));
       if (tool) setActiveView(tool.id);
     };
     eventBus.on('nav:open-entity', onOpenEntity);
@@ -105,6 +106,11 @@ export default function App(): React.ReactElement {
       ? 'Settings'
       : (getTool(activeView)?.name ?? activeView).replace('-', ' ');
 
+  const activeWorkspace = useWorkspaceStore((s) =>
+    s.workspaces.find((w) => w.id === s.activeWorkspaceId),
+  );
+  const workspaceLoading = useWorkspaceStore((s) => s.loading);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
@@ -112,11 +118,28 @@ export default function App(): React.ReactElement {
 
       {/* ── Main content area ────────────────────────────────────────────── */}
       <main className="flex flex-1 flex-col overflow-hidden">
-        {/* Top bar */}
-        <header className="flex h-14 shrink-0 items-center border-b border-border px-4">
+        {/* Top bar with workspace breadcrumb */}
+        <header className="flex h-14 shrink-0 items-center border-b border-border px-4 gap-2">
+          {activeWorkspace && (
+            <>
+              <span
+                className="h-3 w-3 shrink-0 rounded-sm"
+                style={{ backgroundColor: activeWorkspace.color }}
+              />
+              <span className="text-xs text-muted-foreground truncate max-w-[120px]">
+                {activeWorkspace.name}
+              </span>
+              <span className="text-xs text-muted-foreground">/</span>
+            </>
+          )}
           <h1 className="text-sm font-medium text-foreground capitalize">
             {headerTitle}
           </h1>
+          {workspaceLoading && (
+            <span className="ml-auto text-xs text-muted-foreground animate-pulse">
+              Loading…
+            </span>
+          )}
         </header>
 
         {/* Active view */}

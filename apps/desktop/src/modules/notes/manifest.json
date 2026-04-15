@@ -1,0 +1,12 @@
+{
+  "id": "notes",
+  "name": "Notes",
+  "version": "1.0.0",
+  "description": "Rich-text notes with wiki-style [[links]] and full-text search.",
+  "icon": "notes",
+  "entityTypes": ["note"],
+  "shortcut": "1",
+  "hasPortalView": true,
+  "portalPermissions": ["read"],
+  "configSchema": {}
+}

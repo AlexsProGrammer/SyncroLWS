@@ -6,7 +6,7 @@ import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import { WikiLink } from './WikiLinkExtension';
 import { eventBus } from '@/core/events';
-import { getDB } from '@/core/db';
+import { getWorkspaceDB } from '@/core/db';
 import type { NotePayload } from '@syncrohws/shared-types';
 import { cn } from '@/lib/utils';
 
@@ -81,7 +81,7 @@ export function NoteEditor({
     const payload: NotePayload = { title, content_md, linked_entity_ids };
 
     try {
-      const db = getDB();
+      const db = getWorkspaceDB();
       await db.execute(
         `UPDATE base_entities SET payload = ?, updated_at = ? WHERE id = ?`,
         [JSON.stringify(payload), new Date().toISOString(), entityId],
@@ -142,7 +142,7 @@ export function NoteEditor({
 
 async function resolveAndOpenLink(linkText: string): Promise<void> {
   try {
-    const db = getDB();
+    const db = getWorkspaceDB();
     const rows = await db.select<{ id: string; type: string }[]>(
       `SELECT id, type FROM base_entities
        WHERE json_extract(payload, '$.title') = ? AND deleted_at IS NULL LIMIT 1`,

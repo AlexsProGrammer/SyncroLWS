@@ -51,6 +51,8 @@ pub fn run() {
             commands::get_active_window,
             commands::create_profile_folder,
             commands::get_profile_path,
+            commands::create_workspace_folder,
+            commands::get_workspace_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SyncroLWS");

@@ -40,12 +40,8 @@ pub fn get_active_window() -> Result<String, String> {
     get_active_window_impl()
 }
 
-/// Creates the profile directory structure at `<app_data>/profiles/<uuid>/files/`.
-/// Returns the absolute path to the profile root (`<app_data>/profiles/<uuid>`).
-/// Frontend: `invoke('create_profile_folder', { uuid: '...' })`
-#[tauri::command]
-pub fn create_profile_folder(app: tauri::AppHandle, uuid: String) -> Result<String, String> {
-    // Validate UUID format (loose check — 32 hex + 4 hyphens = 36 chars)
+/// Validates a UUID string (loose: 36 chars, hex digits + hyphens).
+fn validate_uuid(uuid: &str) -> Result<(), String> {
     if uuid.len() != 36
         || uuid
             .chars()
@@ -53,6 +49,15 @@ pub fn create_profile_folder(app: tauri::AppHandle, uuid: String) -> Result<Stri
     {
         return Err(format!("Invalid UUID format: {uuid}"));
     }
+    Ok(())
+}
+
+/// Creates the profile directory structure at `<app_data>/profiles/<uuid>/files/`.
+/// Returns the absolute path to the profile root (`<app_data>/profiles/<uuid>`).
+/// Frontend: `invoke('create_profile_folder', { uuid: '...' })`
+#[tauri::command]
+pub fn create_profile_folder(app: tauri::AppHandle, uuid: String) -> Result<String, String> {
+    validate_uuid(&uuid)?;
 
     let app_data = app
         .path()
@@ -89,5 +94,67 @@ pub fn get_profile_path(app: tauri::AppHandle, uuid: String) -> Result<String, S
     profile_dir
         .to_str()
         .ok_or_else(|| "Profile path contains non-UTF8 characters".to_string())
+        .map(|s: &str| s.to_string())
+}
+
+/// Creates the workspace directory structure at
+/// `<app_data>/profiles/<profile_uuid>/workspaces/<workspace_uuid>/files/`.
+/// Returns the absolute path to the workspace root.
+/// Frontend: `invoke('create_workspace_folder', { profileUuid: '...', workspaceUuid: '...' })`
+#[tauri::command]
+pub fn create_workspace_folder(
+    app: tauri::AppHandle,
+    profile_uuid: String,
+    workspace_uuid: String,
+) -> Result<String, String> {
+    validate_uuid(&profile_uuid)?;
+    validate_uuid(&workspace_uuid)?;
+
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
+
+    let workspace_dir = app_data
+        .join("profiles")
+        .join(&profile_uuid)
+        .join("workspaces")
+        .join(&workspace_uuid);
+    let files_dir = workspace_dir.join("files");
+
+    std::fs::create_dir_all(&files_dir)
+        .map_err(|e| format!("Failed to create workspace folder: {e}"))?;
+
+    let workspace_path = workspace_dir
+        .to_str()
+        .ok_or_else(|| "Workspace path contains non-UTF8 characters".to_string())?
+        .to_string();
+
+    println!("[workspace] created folder: {workspace_path}");
+    Ok(workspace_path)
+}
+
+/// Returns the absolute path to a workspace directory WITHOUT creating it.
+/// Frontend: `invoke('get_workspace_path', { profileUuid: '...', workspaceUuid: '...' })`
+#[tauri::command]
+pub fn get_workspace_path(
+    app: tauri::AppHandle,
+    profile_uuid: String,
+    workspace_uuid: String,
+) -> Result<String, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
+
+    let workspace_dir = app_data
+        .join("profiles")
+        .join(&profile_uuid)
+        .join("workspaces")
+        .join(&workspace_uuid);
+
+    workspace_dir
+        .to_str()
+        .ok_or_else(|| "Workspace path contains non-UTF8 characters".to_string())
         .map(|s: &str| s.to_string())
 }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Command } from 'cmdk';
 import { eventBus } from '@/core/events';
-import { ftsSearch, getDB } from '@/core/db';
+import { ftsSearch, getWorkspaceDB } from '@/core/db';
 import type { BaseEntity } from '@syncrohws/shared-types';
 
 type SearchResult = Pick<BaseEntity, 'id' | 'type'> & { title: string };
@@ -41,7 +41,7 @@ export function CommandPalette(): React.ReactElement {
         setResults([]);
         return;
       }
-      const db = getDB();
+      const db = getWorkspaceDB();
       const placeholders = ids.map(() => '?').join(',');
       const rows = await db.select<{ id: string; type: string; payload: string }[]>(
         `SELECT id, type, payload FROM base_entities WHERE id IN (${placeholders}) AND deleted_at IS NULL`,

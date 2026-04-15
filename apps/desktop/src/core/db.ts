@@ -1,88 +1,184 @@
 import Database from '@tauri-apps/plugin-sql';
 import { invoke } from '@tauri-apps/api/core';
 
-let _db: Database | null = null;
+// ═══════════════════════════════════════════════════════════════════════════════
+// Two-level database architecture:
+//   Profile DB  → profiles/<uuid>/data.sqlite    (workspaces, active_tools)
+//   Workspace DB → profiles/<uuid>/workspaces/<uuid>/data.sqlite (entities, files)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _profileDb: Database | null = null;
 let _currentProfileId: string | null = null;
 
+let _workspaceDb: Database | null = null;
+let _currentWorkspaceId: string | null = null;
+
+// ── Profile DB ────────────────────────────────────────────────────────────────
+
 /**
- * Returns the active SQLite database connection.
- * Throws if no profile has been loaded yet — call loadProfileDB() first.
+ * Returns the active profile-level SQLite database connection.
+ * Throws if no profile has been loaded yet.
  */
 export function getDB(): Database {
-  if (!_db) {
+  if (!_profileDb) {
     throw new Error(
-      '[db] No database loaded. Call loadProfileDB(profileId) before accessing the DB.',
+      '[db] No profile database loaded. Call loadProfileDB(profileId) before accessing the DB.',
     );
   }
-  return _db;
+  return _profileDb;
 }
 
 /**
  * Load (or switch to) the SQLite database for a specific profile.
- * - Creates the profile folder on disk if it doesn't exist.
- * - Opens `profiles/<uuid>/data.sqlite` via the Tauri SQL plugin.
- * - Runs Drizzle-style migrations (FTS5 triggers, etc.).
- *
- * If another profile DB was open, it is closed first.
+ * This DB holds workspace metadata and profile-level settings.
  */
 export async function loadProfileDB(profileId: string): Promise<Database> {
-  // Skip if already connected to this profile
-  if (_db && _currentProfileId === profileId) return _db;
+  if (_profileDb && _currentProfileId === profileId) return _profileDb;
 
-  // Close previous connection
-  if (_db) {
+  // Close previous workspace DB first
+  await closeWorkspaceDB();
+
+  // Close previous profile DB
+  if (_profileDb) {
     try {
-      await _db.close();
+      await _profileDb.close();
     } catch {
       // Ignore close errors on stale handles
     }
-    _db = null;
+    _profileDb = null;
     _currentProfileId = null;
   }
 
-  // Ensure the profile directory exists on disk — returns the absolute path
   const profilePath = await invoke<string>('create_profile_folder', { uuid: profileId });
 
-  // Open the profile-specific SQLite database using the absolute path
-  // (relative paths resolve to app config dir, not app data dir on Linux)
-  _db = await Database.load(`sqlite:${profilePath}/data.sqlite`);
+  _profileDb = await Database.load(`sqlite:${profilePath}/data.sqlite`);
   _currentProfileId = profileId;
 
-  // Run schema migrations
-  await runMigrations(_db);
+  await runProfileMigrations(_profileDb);
 
   console.log(`[db] Profile DB loaded: ${profileId}`);
-  return _db;
+  return _profileDb;
 }
 
 /**
- * Close the current profile database (e.g. before switching profiles).
+ * Close the current profile database (and workspace DB if open).
  */
 export async function closeProfileDB(): Promise<void> {
-  if (_db) {
-    await _db.close();
-    _db = null;
+  await closeWorkspaceDB();
+  if (_profileDb) {
+    await _profileDb.close();
+    _profileDb = null;
     _currentProfileId = null;
   }
 }
 
-/**
- * Returns the profile ID of the currently loaded database (or null).
- */
 export function getCurrentProfileId(): string | null {
   return _currentProfileId;
 }
 
-// ── Migrations ────────────────────────────────────────────────────────────────
+// ── Workspace DB ──────────────────────────────────────────────────────────────
 
-// Drizzle-generated migration SQL (from drizzle/0000_init.sql)
-// We inline it so the Tauri app carries no extra FS reads at runtime.
-const DRIZZLE_MIGRATION_0000 = `
+/**
+ * Returns the active workspace-level SQLite database connection.
+ * Throws if no workspace has been loaded yet.
+ */
+export function getWorkspaceDB(): Database {
+  if (!_workspaceDb) {
+    throw new Error(
+      '[db] No workspace database loaded. Call loadWorkspaceDB(workspaceId) before accessing.',
+    );
+  }
+  return _workspaceDb;
+}
+
+/**
+ * Load (or switch to) the SQLite database for a specific workspace.
+ * Requires the profile DB to be loaded first.
+ */
+export async function loadWorkspaceDB(workspaceId: string): Promise<Database> {
+  if (!_currentProfileId) {
+    throw new Error('[db] Cannot load workspace DB — no profile loaded.');
+  }
+
+  if (_workspaceDb && _currentWorkspaceId === workspaceId) return _workspaceDb;
+
+  // Close previous workspace DB
+  await closeWorkspaceDB();
+
+  const workspacePath = await invoke<string>('create_workspace_folder', {
+    profileUuid: _currentProfileId,
+    workspaceUuid: workspaceId,
+  });
+
+  _workspaceDb = await Database.load(`sqlite:${workspacePath}/data.sqlite`);
+  _currentWorkspaceId = workspaceId;
+
+  await runWorkspaceMigrations(_workspaceDb);
+
+  console.log(`[db] Workspace DB loaded: ${workspaceId}`);
+  return _workspaceDb;
+}
+
+/**
+ * Close the current workspace database.
+ */
+export async function closeWorkspaceDB(): Promise<void> {
+  if (_workspaceDb) {
+    try {
+      await _workspaceDb.close();
+    } catch {
+      // Ignore close errors on stale handles
+    }
+    _workspaceDb = null;
+    _currentWorkspaceId = null;
+  }
+}
+
+export function getCurrentWorkspaceId(): string | null {
+  return _currentWorkspaceId;
+}
+
+// ── Profile Migrations ────────────────────────────────────────────────────────
+
+const PROFILE_MIGRATION = `
+CREATE TABLE IF NOT EXISTS \`workspaces\` (
+  \`id\` text PRIMARY KEY NOT NULL,
+  \`name\` text NOT NULL,
+  \`description\` text DEFAULT '' NOT NULL,
+  \`icon\` text DEFAULT 'folder' NOT NULL,
+  \`color\` text DEFAULT '#6366f1' NOT NULL,
+  \`parent_id\` text,
+  \`sort_order\` integer DEFAULT 0 NOT NULL,
+  \`created_at\` text NOT NULL,
+  \`updated_at\` text NOT NULL,
+  \`deleted_at\` text
+);
 CREATE TABLE IF NOT EXISTS \`active_tools\` (
   \`profile_id\` text NOT NULL,
   \`tool_id\` text NOT NULL,
   \`is_enabled\` integer DEFAULT 1 NOT NULL
 );
+`;
+
+async function runProfileMigrations(db: Database): Promise<void> {
+  const statements = PROFILE_MIGRATION
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  for (const stmt of statements) {
+    await db.execute(stmt);
+  }
+
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_workspaces_parent ON workspaces(parent_id);`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_workspaces_deleted ON workspaces(deleted_at);`);
+
+  console.log('[db] Profile migrations complete');
+}
+
+// ── Workspace Migrations ──────────────────────────────────────────────────────
+
+const WORKSPACE_MIGRATION = `
 CREATE TABLE IF NOT EXISTS \`base_entities\` (
   \`id\` text PRIMARY KEY NOT NULL,
   \`type\` text NOT NULL,
@@ -94,6 +190,15 @@ CREATE TABLE IF NOT EXISTS \`base_entities\` (
   \`updated_at\` text NOT NULL,
   \`deleted_at\` text
 );
+CREATE TABLE IF NOT EXISTS \`workspace_tools\` (
+  \`id\` text PRIMARY KEY NOT NULL,
+  \`tool_id\` text NOT NULL,
+  \`name\` text NOT NULL,
+  \`description\` text DEFAULT '' NOT NULL,
+  \`config\` text DEFAULT '{}' NOT NULL,
+  \`sort_order\` integer DEFAULT 0 NOT NULL,
+  \`created_at\` text NOT NULL
+);
 CREATE TABLE IF NOT EXISTS \`local_files\` (
   \`hash\` text PRIMARY KEY NOT NULL,
   \`local_path\` text NOT NULL,
@@ -104,13 +209,8 @@ CREATE TABLE IF NOT EXISTS \`local_files\` (
 );
 `;
 
-/**
- * Run Drizzle-generated + custom FTS5 migrations.
- * All statements are idempotent (IF NOT EXISTS).
- */
-async function runMigrations(db: Database): Promise<void> {
-  // ── 1. Drizzle-generated tables ────────────────────────────────────────────
-  const statements = DRIZZLE_MIGRATION_0000
+async function runWorkspaceMigrations(db: Database): Promise<void> {
+  const statements = WORKSPACE_MIGRATION
     .split(';')
     .map((s) => s.trim())
     .filter(Boolean);
@@ -119,12 +219,12 @@ async function runMigrations(db: Database): Promise<void> {
     await db.execute(stmt);
   }
 
-  // ── 2. Indexes (not generated by Drizzle for SQLite) ───────────────────────
+  // Indexes
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_base_entities_type ON base_entities(type);`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_base_entities_parent ON base_entities(parent_id);`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_base_entities_deleted ON base_entities(deleted_at);`);
 
-  // ── 3. FTS5 virtual table (Drizzle cannot generate these) ──────────────────
+  // FTS5 virtual table
   await db.execute(`
     CREATE VIRTUAL TABLE IF NOT EXISTS base_entities_fts
     USING fts5(
@@ -164,16 +264,17 @@ async function runMigrations(db: Database): Promise<void> {
     END;
   `);
 
-  console.log('[db] Migrations complete');
+  console.log('[db] Workspace migrations complete');
 }
 
+// ── FTS Search (workspace-scoped) ─────────────────────────────────────────────
+
 /**
- * Perform an FTS5 full-text search across all base_entities.
+ * Perform an FTS5 full-text search across all base_entities in the current workspace.
  * Returns matching entity IDs ordered by rank.
  */
 export async function ftsSearch(query: string): Promise<string[]> {
-  const db = getDB();
-  // Sanitise: escape double-quotes, wrap in FTS5 phrase
+  const db = getWorkspaceDB();
   const safe = query.replace(/"/g, '""');
   const rows = await db.select<{ id: string }[]>(
     `SELECT id FROM base_entities_fts WHERE base_entities_fts MATCH ? ORDER BY rank LIMIT 50`,

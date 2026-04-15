@@ -1,0 +1,12 @@
+{
+  "id": "calendar",
+  "name": "Calendar",
+  "version": "1.0.0",
+  "description": "Calendar view for events, deadlines, and scheduling.",
+  "icon": "calendar",
+  "entityTypes": ["calendar_event"],
+  "shortcut": "3",
+  "hasPortalView": true,
+  "portalPermissions": ["read"],
+  "configSchema": {}
+}

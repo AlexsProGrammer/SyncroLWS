@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { NoteEditor } from './NoteEditor';
-import { getDB } from '@/core/db';
+import { getWorkspaceDB } from '@/core/db';
 import { eventBus } from '@/core/events';
 import { Button } from '@/ui/components/button';
 import { cn } from '@/lib/utils';
@@ -28,7 +28,7 @@ export function NotesView(): React.ReactElement {
   // ── Load notes list ───────────────────────────────────────────────────────
   const loadNotes = useCallback(async () => {
     try {
-      const db = getDB();
+      const db = getWorkspaceDB();
       const rows = await db.select<{ id: string; payload: string; updated_at: string }[]>(
         `SELECT id, payload, updated_at FROM base_entities
          WHERE type = 'note' AND deleted_at IS NULL
@@ -83,7 +83,7 @@ export function NotesView(): React.ReactElement {
   // ── Open a note ───────────────────────────────────────────────────────────
   const openNote = useCallback(async (noteId: string) => {
     try {
-      const db = getDB();
+      const db = getWorkspaceDB();
       const rows = await db.select<{ payload: string }[]>(
         `SELECT payload FROM base_entities WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
         [noteId],
@@ -111,7 +111,7 @@ export function NotesView(): React.ReactElement {
     };
 
     try {
-      const db = getDB();
+      const db = getWorkspaceDB();
       await db.execute(
         `INSERT INTO base_entities (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
          VALUES (?, 'note', ?, '{}', '[]', NULL, ?, ?)`,
@@ -143,7 +143,7 @@ export function NotesView(): React.ReactElement {
   const deleteNote = useCallback(
     async (noteId: string) => {
       try {
-        const db = getDB();
+        const db = getWorkspaceDB();
         await db.execute(
           `UPDATE base_entities SET deleted_at = ? WHERE id = ?`,
           [new Date().toISOString(), noteId],

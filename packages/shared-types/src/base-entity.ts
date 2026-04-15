@@ -6,12 +6,13 @@ export type EntityType =
   | 'calendar_event'
   | 'time_log'
   | 'project'
-  | 'file_attachment';
+  | 'file_attachment'
+  | 'workspace_tool';
 
 /** Mandatory fields every Base Entity must carry */
 export const BaseEntitySchema = z.object({
   id: z.string().uuid(),
-  type: z.enum(['note', 'task', 'calendar_event', 'time_log', 'project', 'file_attachment']),
+  type: z.enum(['note', 'task', 'calendar_event', 'time_log', 'project', 'file_attachment', 'workspace_tool']),
   /** Module-specific data serialised to JSON */
   payload: z.record(z.unknown()),
   /** Arbitrary key-value metadata (labels, visibility flags, …) */
@@ -62,6 +63,48 @@ export const TimeLogPayloadSchema = z.object({
   window_title: z.string().default(''),
   billable: z.boolean().default(false),
 });
+
+// ── Workspace ────────────────────────────────────────────────────────────────
+
+export const WorkspaceSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1),
+  description: z.string().default(''),
+  icon: z.string().default('folder'),
+  color: z.string().default('#6366f1'),
+  parent_id: z.string().uuid().nullable().default(null),
+  sort_order: z.number().int().nonnegative().default(0),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+  deleted_at: z.string().datetime().nullable().default(null),
+});
+
+export const WorkspaceToolSchema = z.object({
+  id: z.string().uuid(),
+  tool_id: z.string(),
+  name: z.string(),
+  description: z.string().default(''),
+  config: z.record(z.unknown()).default({}),
+  sort_order: z.number().int().nonnegative().default(0),
+  created_at: z.string().datetime(),
+});
+
+export const ToolManifestSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  version: z.string().default('1.0.0'),
+  description: z.string().default(''),
+  icon: z.string().default('box'),
+  entityTypes: z.array(z.string()).default([]),
+  shortcut: z.string().optional(),
+  hasPortalView: z.boolean().default(false),
+  portalPermissions: z.array(z.enum(['read', 'write', 'upload'])).default([]),
+  configSchema: z.record(z.unknown()).optional(),
+});
+
+export type Workspace = z.infer<typeof WorkspaceSchema>;
+export type WorkspaceTool = z.infer<typeof WorkspaceToolSchema>;
+export type ToolManifest = z.infer<typeof ToolManifestSchema>;
 
 export type NotePayload = z.infer<typeof NotePayloadSchema>;
 export type TaskPayload = z.infer<typeof TaskPayloadSchema>;

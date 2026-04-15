@@ -7,6 +7,8 @@ import { invoke } from '@tauri-apps/api/core';
 export interface Profile {
   id: string;   // UUID
   name: string;
+  avatar_url?: string;
+  color?: string;
 }
 
 interface ProfileState {

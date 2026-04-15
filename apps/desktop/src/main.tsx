@@ -10,12 +10,13 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './styles/globals.css';
 
-import { loadProfileDB, getDB, ftsSearch } from './core/db';
+import { loadProfileDB, getDB, getWorkspaceDB, ftsSearch } from './core/db';
 import { initDeepLink } from './core/deep-link';
 import { useProfileStore } from './store/profileStore';
+import { useWorkspaceStore } from './store/workspaceStore';
 
-// Import the ToolRegistry — this triggers all registerTool() calls
-import { getAllTools } from './registry/ToolRegistry';
+// Import the ToolRegistry — triggers manifest-based discovery
+import { getAllTools, discoverAndRegisterTools } from './registry/ToolRegistry';
 
 import { eventBus } from './core/events';
 
@@ -32,14 +33,29 @@ async function bootstrap(): Promise<void> {
 
   await loadProfileDB(profileId);
 
+  // ── 1b. Discover tools from manifests ──────────────────────────────────────
+  discoverAndRegisterTools();
+
+  // ── 1c. Load or create the default workspace ──────────────────────────────
+  const wsStore = useWorkspaceStore.getState();
+  await wsStore.loadWorkspaces();
+
+  const workspaces = useWorkspaceStore.getState().workspaces;
+  if (workspaces.length === 0) {
+    await wsStore.createWorkspace({ name: 'Personal', icon: 'folder', color: '#6366f1' });
+  } else {
+    await wsStore.switchWorkspace(workspaces[0]!.id);
+  }
+
   // ── 2. Expose helpers on window in dev mode for console verification ───────
   if (import.meta.env.DEV) {
     (window as unknown as Record<string, unknown>)['__db'] = {
       getDB,
+      getWorkspaceDB,
       ftsSearch,
       /** Quick helper: insert a test entity and return its id */
       async insertTest(type = 'note', payload: Record<string, unknown> = { title: 'Test' }) {
-        const db = getDB();
+        const db = getWorkspaceDB();
         const id = crypto.randomUUID();
         const now = new Date().toISOString();
         await db.execute(
@@ -53,7 +69,7 @@ async function bootstrap(): Promise<void> {
       },
       /** Quick helper: select all non-deleted entities */
       async listAll() {
-        const db = getDB();
+        const db = getWorkspaceDB();
         return db.select<{ id: string; type: string; payload: string }[]>(
           `SELECT id, type, payload FROM base_entities WHERE deleted_at IS NULL ORDER BY updated_at DESC`,
         );

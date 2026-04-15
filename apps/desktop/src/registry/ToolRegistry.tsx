@@ -1,8 +1,4 @@
 import React from 'react';
-import { NotesView } from '@/modules/notes/NotesView';
-import { TasksView } from '@/modules/tasks/TasksView';
-import { CalendarView } from '@/ui/ModuleViews';
-import { TimeTrackerView } from '@/modules/time-tracker/TimeTrackerView';
 
 // ── Icons (inline SVG — no external CDN, DSGVO compliant) ──────────────────
 
@@ -47,6 +43,30 @@ function IconTimer({ className }: { className?: string }): React.ReactElement {
   );
 }
 
+// ── Icon registry ─────────────────────────────────────────────────────────────
+
+const iconMap: Record<string, React.FC<{ className?: string }>> = {
+  notes: IconNotes,
+  tasks: IconTasks,
+  calendar: IconCalendar,
+  timer: IconTimer,
+};
+
+// ── Manifest type ─────────────────────────────────────────────────────────────
+
+export interface ToolManifest {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  icon: string;
+  entityTypes: string[];
+  shortcut?: string;
+  hasPortalView: boolean;
+  portalPermissions: string[];
+  configSchema: Record<string, unknown>;
+}
+
 // ── Tool interface ────────────────────────────────────────────────────────────
 
 export interface Tool {
@@ -56,10 +76,12 @@ export interface Tool {
   component: React.FC;
   /** Keyboard shortcut number (Ctrl+N). Omit for no shortcut. */
   shortcut?: string;
-  /** Entity type this tool manages (for nav:open-entity mapping). */
-  entityType?: string;
+  /** Entity types this tool manages (for nav:open-entity mapping). */
+  entityTypes?: string[];
   /** Module init function called at bootstrap. */
   init?: () => void;
+  /** Full manifest metadata. */
+  manifest?: ToolManifest;
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────
@@ -84,49 +106,87 @@ export function getAllTools(): Tool[] {
   return [..._tools.values()];
 }
 
-// ── Default tool registrations ────────────────────────────────────────────────
+/** Find a tool by one of its entity types. */
+export function getToolByEntityType(entityType: string): Tool | undefined {
+  return getAllTools().find((t) => t.entityTypes?.includes(entityType));
+}
 
-import { init as initNotes } from '@/modules/notes';
-import { init as initTasks } from '@/modules/tasks';
-import { init as initCalendar } from '@/modules/calendar';
-import { init as initTimeTracker } from '@/modules/time-tracker';
+// ── Manifest-based auto-discovery ─────────────────────────────────────────────
 
-registerTool({
-  id: 'notes',
-  name: 'Notes',
-  icon: IconNotes,
-  component: NotesView,
-  shortcut: '1',
-  entityType: 'note',
-  init: initNotes,
-});
+// Eagerly import all manifest.json files under modules/
+const manifests = import.meta.glob<ToolManifest>(
+  '../modules/*/manifest.json',
+  { eager: true, import: 'default' },
+);
 
-registerTool({
-  id: 'tasks',
-  name: 'Tasks',
-  icon: IconTasks,
-  component: TasksView,
-  shortcut: '2',
-  entityType: 'task',
-  init: initTasks,
-});
+// Eagerly import all module index.ts files (for init functions)
+const moduleInits = import.meta.glob<{ init?: () => void }>(
+  '../modules/*/index.ts',
+  { eager: true },
+);
 
-registerTool({
-  id: 'calendar',
-  name: 'Calendar',
-  icon: IconCalendar,
-  component: CalendarView,
-  shortcut: '3',
-  entityType: 'calendar_event',
-  init: initCalendar,
-});
+// Eagerly import all view components — convention: *View.tsx in each module folder
+const moduleViews = import.meta.glob<{ [key: string]: React.FC }>(
+  '../modules/*/*.tsx',
+  { eager: true },
+);
 
-registerTool({
-  id: 'time-tracker',
-  name: 'Time Tracker',
-  icon: IconTimer,
-  component: TimeTrackerView,
-  shortcut: '4',
-  entityType: 'time_log',
-  init: initTimeTracker,
-});
+// Also check ui/ModuleViews.tsx for fallback components
+import * as fallbackViews from '@/ui/ModuleViews';
+
+/**
+ * Discover and register all tools from their manifest.json files.
+ * Called once during app bootstrap.
+ */
+export function discoverAndRegisterTools(): void {
+  for (const [manifestPath, manifest] of Object.entries(manifests)) {
+    // Extract module folder name: ../modules/<folder>/manifest.json → <folder>
+    const folderMatch = manifestPath.match(/\.\.\/modules\/([^/]+)\/manifest\.json/);
+    if (!folderMatch) continue;
+    const folder = folderMatch[1];
+
+    // Find init function
+    const initModule = moduleInits[`../modules/${folder}/index.ts`];
+    const init = initModule?.init;
+
+    // Find view component — look for *View in module .tsx files
+    let component: React.FC | undefined;
+
+    for (const [viewPath, viewModule] of Object.entries(moduleViews)) {
+      if (!viewPath.startsWith(`../modules/${folder}/`)) continue;
+      // Find exported component ending with "View"
+      const viewExport = Object.entries(viewModule).find(([key]) => key.endsWith('View'));
+      if (viewExport) {
+        component = viewExport[1] as React.FC;
+        break;
+      }
+    }
+
+    // Fallback: check ModuleViews.tsx for a component named <Name>View
+    if (!component) {
+      const pascalName = manifest.name.replace(/[^a-zA-Z0-9]/g, '') + 'View';
+      component = (fallbackViews as Record<string, React.FC>)[pascalName];
+    }
+
+    if (!component) {
+      console.warn(`[registry] No view component found for module "${manifest.id}", skipping.`);
+      continue;
+    }
+
+    // Resolve icon
+    const icon = iconMap[manifest.icon] ?? IconNotes;
+
+    registerTool({
+      id: manifest.id,
+      name: manifest.name,
+      icon,
+      component,
+      shortcut: manifest.shortcut,
+      entityTypes: manifest.entityTypes,
+      init,
+      manifest,
+    });
+  }
+
+  console.log(`[registry] Discovered ${_tools.size} tools`);
+}

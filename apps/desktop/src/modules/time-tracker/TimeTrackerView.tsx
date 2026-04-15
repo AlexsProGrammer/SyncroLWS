@@ -8,7 +8,7 @@
  */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { eventBus } from '@/core/events';
-import { getDB } from '@/core/db';
+import { getWorkspaceDB } from '@/core/db';
 import type { BaseEntity, TimeLogPayload } from '@syncrohws/shared-types';
 
 interface TimeLog {
@@ -32,7 +32,7 @@ export function TimeTrackerView(): React.ReactElement {
   // ── Load recent logs ───────────────────────────────────────────────────────
   const loadLogs = useCallback(async (): Promise<void> => {
     try {
-      const db = getDB();
+      const db = getWorkspaceDB();
       const rows = await db.select<{ id: string; payload: string }[]>(
         `SELECT id, payload FROM base_entities
          WHERE type = 'time_log' AND deleted_at IS NULL
@@ -99,7 +99,7 @@ export function TimeTrackerView(): React.ReactElement {
     };
 
     try {
-      const db = getDB();
+      const db = getWorkspaceDB();
       await db.execute(
         `INSERT INTO base_entities
            (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
@@ -123,7 +123,7 @@ export function TimeTrackerView(): React.ReactElement {
     const duration = Math.floor((now.getTime() - activeStart.getTime()) / 1000);
 
     try {
-      const db = getDB();
+      const db = getWorkspaceDB();
       const row = await db.select<{ payload: string }[]>(
         `SELECT payload FROM base_entities WHERE id = ?`,
         [activeLogId],

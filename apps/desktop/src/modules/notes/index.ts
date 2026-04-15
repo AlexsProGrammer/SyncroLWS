@@ -1,5 +1,5 @@
 import { eventBus } from '@/core/events';
-import { getDB } from '@/core/db';
+import { getWorkspaceDB } from '@/core/db';
 import type { BaseEntity, NotePayload } from '@syncrohws/shared-types';
 
 export { NoteEditor } from './NoteEditor';
@@ -54,7 +54,7 @@ async function updateBiDirectionalLinks(entity: BaseEntity): Promise<void> {
   if (!matches.length) return;
 
   try {
-    const db = getDB();
+    const db = getWorkspaceDB();
     // Look up entity IDs whose payload title matches the link text
     const linked: string[] = [];
     for (const name of matches) {
