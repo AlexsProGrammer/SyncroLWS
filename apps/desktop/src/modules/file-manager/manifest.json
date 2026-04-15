@@ -1,0 +1,12 @@
+{
+  "id": "file-manager",
+  "name": "Files",
+  "version": "1.0.0",
+  "description": "Browse, upload, and preview workspace files with hash-based deduplication.",
+  "icon": "files",
+  "entityTypes": ["file_attachment"],
+  "shortcut": "5",
+  "hasPortalView": true,
+  "portalPermissions": ["read", "upload"],
+  "configSchema": {}
+}

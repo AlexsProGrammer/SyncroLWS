@@ -1,0 +1,12 @@
+{
+  "id": "bookmarks",
+  "name": "Bookmarks",
+  "version": "1.0.0",
+  "description": "Save and organise URLs with tags, colors, and pinning.",
+  "icon": "bookmark",
+  "entityTypes": ["bookmark"],
+  "shortcut": "8",
+  "hasPortalView": true,
+  "portalPermissions": ["read"],
+  "configSchema": {}
+}

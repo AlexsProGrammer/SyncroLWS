@@ -7,12 +7,15 @@ export type EntityType =
   | 'time_log'
   | 'project'
   | 'file_attachment'
-  | 'workspace_tool';
+  | 'workspace_tool'
+  | 'pomodoro_session'
+  | 'habit'
+  | 'bookmark';
 
 /** Mandatory fields every Base Entity must carry */
 export const BaseEntitySchema = z.object({
   id: z.string().uuid(),
-  type: z.enum(['note', 'task', 'calendar_event', 'time_log', 'project', 'file_attachment', 'workspace_tool']),
+  type: z.enum(['note', 'task', 'calendar_event', 'time_log', 'project', 'file_attachment', 'workspace_tool', 'pomodoro_session', 'habit', 'bookmark']),
   /** Module-specific data serialised to JSON */
   payload: z.record(z.unknown()),
   /** Arbitrary key-value metadata (labels, visibility flags, …) */
@@ -115,6 +118,62 @@ export const TimeLogPayloadSchema = z.object({
   manual: z.boolean().default(false),
 });
 
+// ── Pomodoro ─────────────────────────────────────────────────────────────────
+
+export const PomodoroSessionPayloadSchema = z.object({
+  /** Duration of the focus interval in minutes */
+  focus_minutes: z.number().int().positive().default(25),
+  /** Duration of the short break in minutes */
+  short_break_minutes: z.number().int().positive().default(5),
+  /** Duration of the long break in minutes */
+  long_break_minutes: z.number().int().positive().default(15),
+  /** Number of focus intervals before a long break */
+  intervals_before_long: z.number().int().positive().default(4),
+  /** Current interval number (1-based) */
+  current_interval: z.number().int().nonnegative().default(1),
+  /** Current phase */
+  phase: z.enum(['focus', 'short_break', 'long_break', 'idle']).default('idle'),
+  /** ISO timestamp when the current phase started (null if idle) */
+  started_at: z.string().datetime().nullable().default(null),
+  /** Total completed focus sessions */
+  completed_sessions: z.number().int().nonnegative().default(0),
+  /** Optional description of what the user is focusing on */
+  label: z.string().default(''),
+  /** Link to a time_log entity created when session completes */
+  linked_time_log_id: z.string().nullable().default(null),
+});
+
+// ── Habit ────────────────────────────────────────────────────────────────────
+
+export const HabitPayloadSchema = z.object({
+  name: z.string(),
+  /** Emoji or short icon string */
+  icon: z.string().default('✅'),
+  color: z.string().default('#22c55e'),
+  /** How often the habit should be done */
+  frequency: z.enum(['daily', 'weekly']).default('daily'),
+  /** Target count per period (e.g., 3 glasses of water per day) */
+  target_count: z.number().int().positive().default(1),
+  /** Dates when the habit was completed — ISO date strings (YYYY-MM-DD) mapped to completion count */
+  completions: z.record(z.number().int().nonnegative()).default({}),
+  /** Whether the habit is currently active */
+  archived: z.boolean().default(false),
+});
+
+// ── Bookmark ────────────────────────────────────────────────────────────────
+
+export const BookmarkPayloadSchema = z.object({
+  url: z.string(),
+  title: z.string(),
+  description: z.string().default(''),
+  /** Favicon or preview image stored as local file hash */
+  favicon_hash: z.string().nullable().default(null),
+  /** User-assigned color for visual grouping */
+  color: z.string().default('#3b82f6'),
+  /** Whether the bookmark has been marked as a favorite */
+  pinned: z.boolean().default(false),
+});
+
 // ── Workspace ────────────────────────────────────────────────────────────────
 
 export const WorkspaceSchema = z.object({
@@ -164,3 +223,6 @@ export type ChecklistItem = z.infer<typeof ChecklistItemSchema>;
 export type TaskComment = z.infer<typeof TaskCommentSchema>;
 export type CalendarEventPayload = z.infer<typeof CalendarEventPayloadSchema>;
 export type TimeLogPayload = z.infer<typeof TimeLogPayloadSchema>;
+export type PomodoroSessionPayload = z.infer<typeof PomodoroSessionPayloadSchema>;
+export type HabitPayload = z.infer<typeof HabitPayloadSchema>;
+export type BookmarkPayload = z.infer<typeof BookmarkPayloadSchema>;

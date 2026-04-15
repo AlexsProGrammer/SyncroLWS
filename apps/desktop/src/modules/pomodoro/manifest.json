@@ -1,0 +1,12 @@
+{
+  "id": "pomodoro",
+  "name": "Focus Timer",
+  "version": "1.0.0",
+  "description": "Pomodoro-style focus timer with configurable intervals and time-tracker integration.",
+  "icon": "pomodoro",
+  "entityTypes": ["pomodoro_session"],
+  "shortcut": "6",
+  "hasPortalView": false,
+  "portalPermissions": [],
+  "configSchema": {}
+}

@@ -32,6 +32,11 @@ export type AppEvents = {
   'tracker:start': { description: string };
   'tracker:stop': { time_log_id: string };
 
+  // ── Pomodoro ──────────────────────────────────────────────────────────────
+  'pomodoro:started': { phase: 'focus' | 'short_break' | 'long_break'; label: string };
+  'pomodoro:completed': { phase: 'focus' | 'short_break' | 'long_break'; label: string };
+  'pomodoro:stopped': void;
+
   // ── Notifications ─────────────────────────────────────────────────────────
   'notification:show': { title: string; body: string; type: 'info' | 'warning' | 'error' };
 

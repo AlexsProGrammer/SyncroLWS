@@ -1,0 +1,12 @@
+{
+  "id": "habits",
+  "name": "Habits",
+  "version": "1.0.0",
+  "description": "Track daily and weekly habits with streaks and a contribution-graph style overview.",
+  "icon": "habit",
+  "entityTypes": ["habit"],
+  "shortcut": "7",
+  "hasPortalView": false,
+  "portalPermissions": [],
+  "configSchema": {}
+}
