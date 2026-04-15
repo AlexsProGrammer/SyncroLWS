@@ -10,20 +10,27 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './styles/globals.css';
 
-import { initDB, getDB, ftsSearch } from './core/db';
+import { loadProfileDB, getDB, ftsSearch } from './core/db';
 import { initDeepLink } from './core/deep-link';
+import { useProfileStore } from './store/profileStore';
 
-// Initialise modules after DB is ready (registers Event Bus listeners)
-import { init as initNotes } from './modules/notes';
-import { init as initTasks } from './modules/tasks';
-import { init as initCalendar } from './modules/calendar';
-import { init as initTimeTracker } from './modules/time-tracker';
+// Import the ToolRegistry — this triggers all registerTool() calls
+import { getAllTools } from './registry/ToolRegistry';
 
 import { eventBus } from './core/events';
 
 async function bootstrap(): Promise<void> {
-  // ── 1. Initialise SQLite (creates tables + FTS5 triggers if needed) ────────
-  await initDB();
+  // ── 1. Load or create the active profile's SQLite database ─────────────────
+  const { activeProfileId, profiles, createProfile } = useProfileStore.getState();
+
+  let profileId = activeProfileId;
+  if (!profileId || !profiles.some((p) => p.id === profileId)) {
+    // First launch — create a default profile
+    const defaultProfile = await createProfile('Default');
+    profileId = defaultProfile.id;
+  }
+
+  await loadProfileDB(profileId);
 
   // ── 2. Expose helpers on window in dev mode for console verification ───────
   if (import.meta.env.DEV) {
@@ -32,7 +39,7 @@ async function bootstrap(): Promise<void> {
       ftsSearch,
       /** Quick helper: insert a test entity and return its id */
       async insertTest(type = 'note', payload: Record<string, unknown> = { title: 'Test' }) {
-        const db = await getDB();
+        const db = getDB();
         const id = crypto.randomUUID();
         const now = new Date().toISOString();
         await db.execute(
@@ -46,7 +53,7 @@ async function bootstrap(): Promise<void> {
       },
       /** Quick helper: select all non-deleted entities */
       async listAll() {
-        const db = await getDB();
+        const db = getDB();
         return db.select<{ id: string; type: string; payload: string }[]>(
           `SELECT id, type, payload FROM base_entities WHERE deleted_at IS NULL ORDER BY updated_at DESC`,
         );
@@ -85,11 +92,10 @@ async function bootstrap(): Promise<void> {
     console.info('[dev] window.__db + window.__triggerConflict() + window.__deepLink() exposed');
   }
 
-  // ── 3. Register module Event Bus listeners ──────────────────────────────────
-  initNotes();
-  initTasks();
-  initCalendar();
-  initTimeTracker();
+  // ── 3. Register module Event Bus listeners (dynamic from ToolRegistry) ──────
+  for (const tool of getAllTools()) {
+    if (tool.init) tool.init();
+  }
 
   // ── 4. Register OS deep-link listener (bridges Tauri event → eventBus) ──────
   await initDeepLink();

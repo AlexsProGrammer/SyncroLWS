@@ -1,3 +1,5 @@
+use tauri::Manager;
+
 // ── Platform helpers ──────────────────────────────────────────────────────────
 
 #[cfg(target_os = "linux")]
@@ -36,4 +38,56 @@ fn get_active_window_impl() -> Result<String, String> {
 #[tauri::command]
 pub fn get_active_window() -> Result<String, String> {
     get_active_window_impl()
+}
+
+/// Creates the profile directory structure at `<app_data>/profiles/<uuid>/files/`.
+/// Returns the absolute path to the profile root (`<app_data>/profiles/<uuid>`).
+/// Frontend: `invoke('create_profile_folder', { uuid: '...' })`
+#[tauri::command]
+pub fn create_profile_folder(app: tauri::AppHandle, uuid: String) -> Result<String, String> {
+    // Validate UUID format (loose check — 32 hex + 4 hyphens = 36 chars)
+    if uuid.len() != 36
+        || uuid
+            .chars()
+            .any(|c| !c.is_ascii_hexdigit() && c != '-')
+    {
+        return Err(format!("Invalid UUID format: {uuid}"));
+    }
+
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
+
+    let profile_dir = app_data.join("profiles").join(&uuid);
+    let files_dir = profile_dir.join("files");
+
+    std::fs::create_dir_all(&files_dir)
+        .map_err(|e| format!("Failed to create profile folder: {e}"))?;
+
+    let profile_path = profile_dir
+        .to_str()
+        .ok_or_else(|| "Profile path contains non-UTF8 characters".to_string())?
+        .to_string();
+
+    println!("[profile] created folder: {profile_path}");
+    Ok(profile_path)
+}
+
+/// Returns the absolute path to `<app_data>/profiles/<uuid>` WITHOUT creating it.
+/// Used by the frontend to build the SQLite connection string.
+/// Frontend: `invoke('get_profile_path', { uuid: '...' })`
+#[tauri::command]
+pub fn get_profile_path(app: tauri::AppHandle, uuid: String) -> Result<String, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
+
+    let profile_dir = app_data.join("profiles").join(&uuid);
+
+    profile_dir
+        .to_str()
+        .ok_or_else(|| "Profile path contains non-UTF8 characters".to_string())
+        .map(|s: &str| s.to_string())
 }

@@ -81,7 +81,7 @@ export function NoteEditor({
     const payload: NotePayload = { title, content_md, linked_entity_ids };
 
     try {
-      const db = await getDB();
+      const db = getDB();
       await db.execute(
         `UPDATE base_entities SET payload = ?, updated_at = ? WHERE id = ?`,
         [JSON.stringify(payload), new Date().toISOString(), entityId],
@@ -142,7 +142,7 @@ export function NoteEditor({
 
 async function resolveAndOpenLink(linkText: string): Promise<void> {
   try {
-    const db = await getDB();
+    const db = getDB();
     const rows = await db.select<{ id: string; type: string }[]>(
       `SELECT id, type FROM base_entities
        WHERE json_extract(payload, '$.title') = ? AND deleted_at IS NULL LIMIT 1`,

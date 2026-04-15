@@ -47,7 +47,11 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::get_active_window])
+        .invoke_handler(tauri::generate_handler![
+            commands::get_active_window,
+            commands::create_profile_folder,
+            commands::get_profile_path,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running SyncroLWS");
 }

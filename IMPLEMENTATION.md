@@ -2,96 +2,72 @@
 # IMPLEMENTATION.md
 
 ## 1. Project Context & Architecture
-- **Goal:** A highly modular, offline-first, enterprise-grade business management system (time tracking, notes, tasks, calendar) built for privacy and cross-platform use. It utilizes a central SQLite database with a "Base Entity" architecture, local file storage with server-side deduplication, and a robust Event Bus for decoupled tool modules, optionally syncing to a Single Source of Truth (SSOT) via PowerSync.
+- **Goal:** Refactor and upgrade the "SyncroLWS" boilerplate into a fully modular, profile-isolated enterprise tool. Core upgrades include migrating local Raw SQL to Drizzle ORM, implementing UUID-based profile isolation (each profile gets its own folder and SQLite database), building a dynamic Tool Registry (no hardcoded switches), and adding optional backend sync configuration via UI and `.env`.
 - **Tech Stack & Dependencies:**
-  - **Monorepo:** Turborepo (`npm i -g turbo`) or npm workspaces.
-  - **Frontend (Desktop/Mobile App):** Tauri 2.0, React, Vite, Tailwind CSS, `shadcn/ui` (bundled locally), `mitt` (Event Bus), `dnd-kit` (Kanban), `cmdk` (Command Palette), `@tiptap/react` (Markdown/Editor), `diff-match-patch` (Diffing).
-  - **Backend (API & Sync):** Node.js, Express, `trpc/server`, PowerSync (Server-side configuration), `multer` (File handling).
-  - **Database & ORM:** PostgreSQL (Server), SQLite (Tauri Local via `tauri-plugin-sql`), Drizzle ORM (`drizzle-orm`, `drizzle-kit`), `sqlite-vec` or FTS5 extensions for search.
-  - **File Storage:** MinIO (S3-compatible) for server, Tauri File System API for local.
-- **File Structure:**
+  - **Monorepo:** Turborepo or npm workspaces.
+  - **Frontend:** Tauri 2.0, React, Vite, Tailwind CSS, Zustand (State Management), `shadcn/ui`, `dnd-kit` (Kanban), `@tiptap/react` (Notes).
+  - **Backend:** Node.js, Express, `trpc/server`, Drizzle ORM, `zod` (Env validation), PowerSync.
+  - **Database & Storage:** PostgreSQL (Server), SQLite (Local via Drizzle + `tauri-plugin-sql`), local file system via Tauri APIs.
+- **File Structure Additions:**
   ```text
-  ├── packages/
-  │   └── shared-types/       # tRPC routers, Base Entity schemas, Event Bus types
   ├── apps/
-  │   ├── backend/            # Express, tRPC API, MinIO file processing
-  │   │   ├── src/
-  │   │   │   ├── db/         # Drizzle Postgres schema
-  │   │   │   ├── routes/     # tRPC endpoints, Upload handlers
-  │   │   │   └── web/        # Client-Portal web views (Next.js or minimal React)
-  │   │   └── docker-compose.yml # Postgres, PowerSync, MinIO
-  │   └── desktop/            # Tauri 2.0 + React
-  │       ├── src-tauri/      # Rust logic, OS Hooks (Window Tracker), Deep Linking
+  │   ├── backend/
+  │   │   ├── src/config/     # Zod strict env validation
+  │   └── desktop/
   │       ├── src/
-  │       │   ├── core/       # DB Manager, PowerSync Client, Event Bus init
-  │       │   ├── ui/         # Base Layout, cmdk, shadcn (LOCAL FONTS ONLY)
-  │       │   └── modules/    # Toolkit (tasks, notes, calendar, time-tracker)
+  │       │   ├── store/      # Zustand stores (ProfileStore, SyncStore)
+  │       │   ├── registry/   # Tool Registry (dynamic module loader)
+  │       │   ├── modules/    # Unchanged, but decoupled via registry
   ```
-- **Attention Points:** Strict modularity (modules communicate only via Event Bus). File hashing for deduplication requires Reference Counting in the DB. Ensure robust SQLite FTS5 integration for the command palette. Base Entities must share common fields (ID, type, created_at, tags, parent_id).
-- **DSGVO (GDPR):** Zero external CDN calls. All fonts (`@fontsource`), icons, and CSS must be bundled locally in `apps/desktop`. Telemetry is strictly prohibited. Client data must support a "hard wipe" cascading deletion.
+- **Attention Points:** - **Database Isolation:** Tools must NOT have their own database. Instead, **Profiles** have their own database and file folder using UUIDs (e.g., `~/.local/share/syncrolws/profiles/<UUID>/data.sqlite` and `/files/`). This ensures Global Search (FTS5) across all tools within a profile still works instantly.
+  - **Migration:** Replace all `db.execute('CREATE TABLE...')` in the desktop app with Drizzle ORM migrations.
+- **DSGVO (GDPR):** Zero external CDN calls. Local fonts only. Profiles are strictly isolated on the hard drive via UUID folders. Optional sync must be explicit opt-in via Settings UI.
 
 ---
 
-## 2. Execution Phases (Backend / Server)
+## 2. Execution Phases
 
-#### Phase 1: [Backend Infrastructure & Database State] ✅
-- [x] **Step 1.1:** Initialize a Node.js project in `apps/backend` and install `drizzle-orm`, `pg`, `express`, and `@trpc/server`.
-- [x] **Step 1.2:** In `apps/backend/src/db/schema.ts`, define the PostgreSQL schema. Create a `base_entities` table (id, type, payload JSONB, metadata, timestamps) and a `files` table (hash, path, reference_count, size).
-- [x] **Step 1.3:** Configure `drizzle-kit` to output migrations. Create a `docker-compose.yml` defining PostgreSQL and MinIO services.
-- [x] **Verification:** Run `docker-compose up -d` and `npx drizzle-kit push`. Verified `base_entities` + `files` tables with all indexes in Postgres container. Backend health endpoint responding on `http://localhost:3000/health`.
+#### Phase 1: [Backend Strict Config & Sync Prep]
+- [x] **Step 1.1:** In `apps/backend/src/config/env.ts`, implement a strict environment validator using `zod`. Require `DATABASE_URL`, `MINIO_URL`, `JWT_SECRET`, and `POWERSYNC_URL`.
+- [x] **Step 1.2:** Update `apps/backend/src/index.ts` to fail fast on startup if `env.ts` validation fails.
+- [x] **Step 1.3:** In `apps/backend/docker-compose.yml`, update the `postgres` service to include `command: postgres -c wal_level=logical` (required for PowerSync).
+- [ ] **Verification:** Run `cd apps/backend && npm run start`. It should crash with a Zod error if `.env` is missing variables. Add `.env`, restart, and ensure it boots successfully.
 
-#### Phase 2: [API, tRPC, & File Hashing Logic] ✅
-- [x] **Step 2.1:** In `apps/backend/src/routes/trpc.ts`, establish the base tRPC router exporting types to `packages/shared-types`.
-- [x] **Step 2.2:** In `apps/backend/src/routes/upload.ts`, create a POST endpoint using `multer` that accepts a file, calculates its SHA-256 hash, and checks the `files` table.
-- [x] **Step 2.3:** Implement Reference Counting logic: If hash exists, increment `reference_count` and return existing MinIO path. If not, upload to MinIO, insert to DB with count 1.
-- [x] **Verification:** Verified via curl: same file uploaded twice → `deduplicated: true`, `reference_count` increments on second upload. MinIO path consistent across uploads.
+#### Phase 2: [Tauri Profile Isolation & UUID Folders]
+- [x] **Step 2.1:** In `apps/desktop/src-tauri/src/main.rs`, create a Tauri command `create_profile_folder(uuid: String)`. It must use `tauri::api::path::app_data_dir` to create the path: `profiles/<uuid>/files/`.
+- [x] **Step 2.2:** In `apps/desktop/src/store/profileStore.ts`, create a Zustand store to manage `activeProfileId` (UUID) and `profiles` (list of {id, name}).
+- [x] **Step 2.3:** Refactor `apps/desktop/src/core/db.ts`. Remove raw SQL table creation. Set the DB path dynamically based on the Zustand `activeProfileId`: `sqlite://profiles/${activeProfileId}/data.sqlite`.
+- [x] **Step 2.4:** Set up `drizzle-kit` for the desktop app. Generate SQLite migrations for the `base_entities` table and run them using `migrate()` from `drizzle-orm/sqlite-proxy` on profile load.
+- [ ] **Verification:** Run the desktop app. Use the Redux/React devtools to set an `activeProfileId` UUID. Check the OS AppData folder and verify a `profiles/<UUID>/data.sqlite` file and `files/` folder were physically created.
 
-#### Phase 3: [Client Portal Web View] ✅
-- [x] **Step 3.1:** In `apps/backend/src/web/`, initialized a minimal React + Vite build. Express serves it at `/portal` (static) and `/portal/:projectId` (SPA fallback).
-- [x] **Step 3.2:** Built a read-only view (`portal.tsx`) that fetches `base_entities` via `GET /trpc/entities.list` filtered by `parent_id`, displaying entities grouped by `type` (notes, tasks, calendar events, time logs) with inline styles (zero CDN — GDPR compliant).
-- [x] **Verification:** `GET /portal/11111111-1111-1111-1111-111111111111` → HTTP 200, serves React SPA. tRPC list confirmed returning 6 seeded entities (note ×2, task ×2, calendar_event ×2) grouped by type. `npm run build:web` bundles in 1.06s, 147 kB gzipped to 48 kB.
+#### Phase 3: [Dynamic Tool Registry & Settings UI]
+- [ ] **Step 3.1:** Create `apps/desktop/src/registry/ToolRegistry.ts`. Define `interface Tool { id: string; name: string; icon: React.FC; component: React.FC; }`. Register the existing tools (Notes, Tasks, Calendar, TimeTracker) here.
+- [ ] **Step 3.2:** In the Profile SQLite DB, add a table `active_tools (profile_id, tool_id, is_enabled)`.
+- [ ] **Step 3.3:** Create `apps/desktop/src/ui/SettingsView.tsx`. Fetch registered tools and render `shadcn` toggle switches. Save toggle state to the `active_tools` DB table.
+- [ ] **Step 3.4:** Refactor `apps/desktop/src/ui/Sidebar.tsx` and `ModuleViews.tsx`. Remove the hardcoded `switch` statements. Query the `active_tools` table and dynamically `.map()` over the `ToolRegistry` to render the sidebar icons and routes.
+- [ ] **Verification:** Open the Settings view. Toggle the "Calendar" off. Verify the Calendar icon immediately disappears from the Sidebar and the route becomes inaccessible. 
 
----
+#### Phase 4: [Frontend Sync Configuration]
+- [ ] **Step 4.1:** Create `apps/desktop/src/store/syncStore.ts` using Zustand to hold `syncUrl`, `apiKey`, and `isSyncActive`. Persist this state using Zustand's `persist` middleware (local storage).
+- [ ] **Step 4.2:** In `SettingsView.tsx`, add a "Sync Configuration" tab. Add input fields for URL and API Key, and a "Test Connection" button.
+- [ ] **Step 4.3:** Create a tRPC health-check query in the backend. On "Test Connection", trigger this query using the provided URL.
+- [ ] **Verification:** Enter a dummy URL in the UI, click "Test Connection". Verify it fails. Start the backend, enter `http://localhost:3000`, click Test, and verify it shows a "Connection Successful" toast.
 
-## 2. Execution Phases (Frontend / Tauri Desktop)
-
-#### Phase 4: [Tauri Scaffold & Local SQLite Setup] ✅
-- [x] **Step 4.1:** Initialize the Tauri app in `apps/desktop` using `npm create tauri-app@latest` (select React, Vite, TypeScript).
-- [x] **Step 4.2:** In `src-tauri/Cargo.toml`, add `tauri-plugin-sql`, `tauri-plugin-fs`, and `tauri-plugin-deep-link`.
-- [x] **Step 4.3:** In `apps/desktop/src/core/db.ts`, setup the local SQLite connection using `@tauri-apps/plugin-sql`. `base_entities` table + FTS5 virtual table with INSERT/UPDATE/DELETE sync triggers. `initDB()` called at bootstrap in `main.tsx` before React mounts.
-- [x] **Verification:** `npm run tauri dev` compiles (539 crates, 1m 24s first-time) and launches. TypeScript clean (EXIT:0). `cargo check` passes (EXIT:0). `window.__db` exposed in devtools for `insertTest()` / `listAll()` / `ftsSearch()` verification.
-
-#### Phase 5: [Event Bus & Core UI Toolkit] ✅
-- [x] **Step 5.1:** `apps/desktop/src/core/events.ts` — `export const eventBus = mitt<AppEvents>()` singleton, used by all modules and `App.tsx`.
-- [x] **Step 5.2:** Tailwind CSS v3 + `postcss`/`autoprefixer` configured. `@fontsource/inter` (400/500/600/700) + `@fontsource/jetbrains-mono` imported locally in `main.tsx` (GDPR-compliant, zero CDN). shadcn/ui primitives created as local source files in `src/ui/components/`: `button.tsx` (CVA variants), `input.tsx`, `dialog.tsx` (controlled, portal-less), `badge.tsx`. `src/lib/utils.ts` provides `cn()` via `clsx` + `tailwind-merge`. Barrel export in `src/ui/index.ts`.
-- [x] **Step 5.3:** `src/ui/CommandPalette.tsx` — `cmdk` `<Command>` with live FTS5 query via `ftsSearch()`. `Ctrl+K`/`Cmd+K` handler wired in `App.tsx` via `eventBus.emit('nav:open-command-palette')`. Results mapped with type badge + title; selecting emits `nav:open-entity`.
-- [x] **Verification:** TypeScript check passes (EXIT:0). All UI CSS variables defined (light/dark). Fonts served locally — zero external network requests.
-
-#### Phase 6: [Module Architecture & Diff Editor] ✅
-- [x] **Step 6.1:** All four modules (`notes`, `tasks`, `calendar`, `time-tracker`) export `init()` — each registers typed `eventBus` listeners. Notes: `sync:conflict` → notification + bi-directional link indexing. Tasks: `entity:created` → due-date notification, `sync:conflict` handler. Calendar: CRUD event logging (decoupling-safe). Time-tracker: 60 s window poll via `invoke('get_active_window')` → `tracker:window-changed`.
-- [x] **Step 6.2:** `src/ui/DiffEditor.tsx` — side-by-side character-level diff using `diff-match-patch`. Accepts `local`/`server` `BaseEntity`, renders colour-coded INSERT/DELETE/EQUAL spans. Three resolution modes: keep Local, keep Server, or 3-way auto-merge via `patch_apply`. Wired into `App.tsx` via `eventBus.on('sync:conflict')` — calls back through the event's `resolve()` callback on confirm.
-- [x] **Step 6.3:** `src/modules/notes/NoteEditor.tsx` — TipTap editor (`StarterKit`, `Highlight`, `Link`, `Placeholder`). Markdown saved as raw string in `payload.content_md` via debounced autosave (800 ms) + save-on-unmount. `src/modules/notes/WikiLinkExtension.ts` — custom ProseMirror plugin: decorates `[[Name]]` spans with `wiki-link` CSS class; click handler resolves link text against SQLite → emits `nav:open-entity`.
-- [x] **Verification:** TypeScript EXIT:0. `window.__triggerConflict()` exposed in dev mode — call it in devtools to emit `sync:conflict` and verify the DiffEditor overlay appears with highlighted differences and Local/Server/Merged resolution buttons.
-
-#### Phase 7: [Power Features & OS Integration] ✅
-- [x] **Step 7.1:** `src-tauri/src/lib.rs` — `setup_deep_links()` registers the `syncrohws://` URI scheme (configured in `tauri.conf.json`) and emits `"deeplink://received"` (a native Tauri event) with `{ path, params }` JSON payload whenever the OS opens a matching URL. New `src/core/deep-link.ts` bridges this native event to the React Event Bus via `listen('deeplink://received')` → `eventBus.emit('deeplink:received')`. `initDeepLink()` called in `bootstrap()` after all module `init()` calls.
-- [x] **Step 7.2:** `src-tauri/src/commands.rs` — `get_active_window()` Tauri command wraps platform-native detection: Linux (`xdotool getactivewindow getwindowname`), macOS (`osascript`), Windows/other (graceful no-op). Registered in `invoke_handler!` in `lib.rs`.
-- [x] **Step 7.3:** `src/modules/time-tracker/index.ts` — `_startWindowPoller()` calls `invoke('get_active_window')` every 60 s. On title change emits `tracker:window-changed` → `notification:show` suggestion. New `src/modules/time-tracker/TimeTrackerView.tsx` shows: active window display (live via eventBus), Start/Stop button (persists `time_log` entity to SQLite, emits `tracker:start` / `tracker:stop`), elapsed timer, 10 most-recent logs table.
-- [x] **Step 7.4:** `src/core/backup.ts` — `startBackupScheduler()` runs immediately on startup then every 30 min: `path.appDataDir()` → `backups/` subdir → timestamped `.db` copy via `copyFile`. Tauri `fs:allow-mkdir` / `fs:allow-copy-file` scoped to `$APPDATA/**` in `capabilities/default.json`.
-- [x] **Verification:** TypeScript EXIT:0. App navigates via `syncrohws://entity/<type>/<id>` URLs (parsed in `App.tsx`). Dev helper: `window.__deepLink('/test/123')` in devtools emits the event and logs the path. `window.__triggerConflict()` still works for DiffEditor. Time Tracker panel accessible via Ctrl+4 or sidebar.
+#### Phase 5: [Tool "Muscle" Implementation]
+- [ ] **Step 5.1:** *Tasks:* In `apps/desktop/src/modules/tasks/index.tsx`, install `@dnd-kit/core`. Fetch `base_entities` where `type = 'task'`. Render them in standard Kanban columns (Todo, In Progress, Done). Dragging a card must update the `payload.status` JSON property in SQLite.
+- [ ] **Step 5.2:** *Notes:* In `NoteEditor.tsx`, implement a `useEffect` with a 1000ms debounce. Automatically `db.update` the `base_entities` `payload.content` field when the TipTap editor content changes. No manual "Save" button allowed.
+- [ ] **Step 5.3:** *Search:* In `CommandPalette.tsx`, bind the input query to a Drizzle query utilizing the SQLite `MATCH` operator against the FTS5 virtual table of `base_entities`.
+- [ ] **Verification:** Create a Note, type text, wait 1 second. Close the app completely. Reopen the app, go to Notes, and verify the text is still there (Auto-save verification). Press `Ctrl+K`, search a word from that note, and verify it appears instantly.
 
 ---
 
 ## 3. Global Testing Strategy
-
-- **Offline-to-Online Sync Conflict:** - *Action:* Disconnect internet. Modify Note A locally. Modify Note A in the Postgres Database directly (simulating another device). Reconnect internet. 
-  - *Expected:* Sync pauses. Global event triggers Diff Editor UI. User resolves. SSOT updates.
-- **Reference Count Deletion:**
-  - *Action:* Upload `image.png` to two different Tasks. Delete Task 1. 
-  - *Expected:* Task 1 is removed, file remains on disk/MinIO. Delete Task 2. `reference_count` hits 0. File is physically deleted from the local disk and MinIO.
-- **DSGVO Airgap Test:**
-  - *Action:* Route app traffic through a network monitor (e.g., Wireshark or Proxyman). Navigate all modules.
-  - *Expected:* ZERO network requests to `fonts.googleapis.com`, CDN providers, or telemetry endpoints. All traffic strictly goes to localhost or the predefined Sync server URL.
-- **Event Bus Decoupling:**
-  - *Action:* Delete or comment out the `init()` function for the Calendar module.
-  - *Expected:* The app compiles and runs. Creating a Task with a due date does not crash the app, the event simply safely drops.
+- **UUID Data Bleed Test:**
+  - Create Profile A. Create Note "Secret A".
+  - Switch to Profile B. 
+  - Verify Note "Secret A" does not exist in the UI or Search. Verify Profile B's SQLite file does not contain the data.
+- **Dynamic Routing Fallback:**
+  - Deactivate "Tasks" in Settings. 
+  - Attempt to navigate to `/tasks` manually via Deep Link or modified State. Verify the app redirects to a safe fallback (e.g., `/settings` or `/notes`).
+- **Sync Airgap:**
+  - Ensure `syncEnabled` is set to `false`. Trigger file uploads and note saves. Monitor network traffic via devtools. Verify absolutely zero outbound network requests are made.

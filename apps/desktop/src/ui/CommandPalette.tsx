@@ -41,7 +41,7 @@ export function CommandPalette(): React.ReactElement {
         setResults([]);
         return;
       }
-      const db = await getDB();
+      const db = getDB();
       const placeholders = ids.map(() => '?').join(',');
       const rows = await db.select<{ id: string; type: string; payload: string }[]>(
         `SELECT id, type, payload FROM base_entities WHERE id IN (${placeholders}) AND deleted_at IS NULL`,

@@ -1,3 +1,7 @@
+// ── Env validation — MUST be the first import so the process crashes
+// before any other module initialises with bad / missing config. ───────────────
+import { env } from './config/env';
+
 import express, { type Request, type Response } from 'express';
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import { randomUUID } from 'crypto';
@@ -6,7 +10,7 @@ import { appRouter } from './routes/trpc';
 import { uploadRouter } from './routes/upload';
 
 const app = express();
-const PORT = parseInt(process.env['PORT'] ?? '3000');
+const PORT = env.PORT;
 
 // ── Body parsing ──────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));

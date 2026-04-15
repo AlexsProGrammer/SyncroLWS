@@ -32,7 +32,7 @@ export function TimeTrackerView(): React.ReactElement {
   // ── Load recent logs ───────────────────────────────────────────────────────
   const loadLogs = useCallback(async (): Promise<void> => {
     try {
-      const db = await getDB();
+      const db = getDB();
       const rows = await db.select<{ id: string; payload: string }[]>(
         `SELECT id, payload FROM base_entities
          WHERE type = 'time_log' AND deleted_at IS NULL
@@ -99,7 +99,7 @@ export function TimeTrackerView(): React.ReactElement {
     };
 
     try {
-      const db = await getDB();
+      const db = getDB();
       await db.execute(
         `INSERT INTO base_entities
            (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
@@ -123,7 +123,7 @@ export function TimeTrackerView(): React.ReactElement {
     const duration = Math.floor((now.getTime() - activeStart.getTime()) / 1000);
 
     try {
-      const db = await getDB();
+      const db = getDB();
       const row = await db.select<{ payload: string }[]>(
         `SELECT payload FROM base_entities WHERE id = ?`,
         [activeLogId],

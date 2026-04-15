@@ -1,10 +1,10 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schema from './schema';
+import { env } from '../config/env';
 
 const pool = new Pool({
-  connectionString:
-    process.env['DATABASE_URL'] ?? 'postgresql://syncrohws:syncrohws@localhost:5434/syncrohws',
+  connectionString: env.DATABASE_URL,
   max: 20,
 });
 

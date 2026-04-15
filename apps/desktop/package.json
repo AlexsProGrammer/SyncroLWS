@@ -13,6 +13,8 @@
     "tauri": "npx tauri"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.0.0",
+    "@fontsource/jetbrains-mono": "^5.0.0",
     "@syncrohws/shared-types": "*",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-deep-link": "^2.0.0",
@@ -36,8 +38,7 @@
     "react-dom": "^18.3.0",
     "tailwind-merge": "^2.3.0",
     "zod": "^3.23.0",
-    "@fontsource/inter": "^5.0.0",
-    "@fontsource/jetbrains-mono": "^5.0.0"
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",

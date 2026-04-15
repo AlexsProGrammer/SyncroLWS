@@ -37,4 +37,8 @@ export type AppEvents = {
 
   // ── Deep Links ────────────────────────────────────────────────────────────
   'deeplink:received': { path: string; params: Record<string, string> };
+
+  // ── Settings ──────────────────────────────────────────────────────────────
+  /** Emitted when tool toggle state changes in the Settings UI */
+  'settings:tools-changed': void;
 };

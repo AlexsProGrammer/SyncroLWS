@@ -6,17 +6,19 @@ import { Client as MinioClient } from 'minio';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client';
 import { files } from '../db/schema';
+import { env } from '../config/env';
 
 // ── MinIO client ──────────────────────────────────────────────────────────────
+const minioUrl = new URL(env.MINIO_URL);
 const minio = new MinioClient({
-  endPoint: process.env['MINIO_ENDPOINT'] ?? 'localhost',
-  port: parseInt(process.env['MINIO_PORT'] ?? '9000'),
-  useSSL: process.env['MINIO_USE_SSL'] === 'true',
-  accessKey: process.env['MINIO_ACCESS_KEY'] ?? 'syncrohws',
-  secretKey: process.env['MINIO_SECRET_KEY'] ?? 'syncrohws_secret',
+  endPoint: minioUrl.hostname,
+  port: parseInt(minioUrl.port) || (minioUrl.protocol === 'https:' ? 443 : 9000),
+  useSSL: minioUrl.protocol === 'https:',
+  accessKey: env.MINIO_ACCESS_KEY,
+  secretKey: env.MINIO_SECRET_KEY,
 });
 
-const BUCKET = process.env['MINIO_BUCKET'] ?? 'syncrohws-files';
+const BUCKET = env.MINIO_BUCKET;
 
 async function ensureBucket(): Promise<void> {
   const exists = await minio.bucketExists(BUCKET);

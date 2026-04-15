@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { CommandPalette } from './ui/CommandPalette';
 import { DiffEditor } from './ui/DiffEditor';
-import { Sidebar, type ModuleId } from './ui/Sidebar';
-import { NotesView, TasksView, CalendarView, TimeTrackerView } from './ui/ModuleViews';
+import { Sidebar, useEnabledTools, type ActiveView } from './ui/Sidebar';
+import { SettingsView } from './ui/SettingsView';
+import { getTool } from './registry/ToolRegistry';
 import { eventBus } from './core/events';
 import { startBackupScheduler } from './core/backup';
 import type { BaseEntity } from '@syncrohws/shared-types';
@@ -13,20 +14,23 @@ interface ConflictState {
   resolve: (resolved: BaseEntity) => void;
 }
 
-const MODULE_VIEWS: Record<ModuleId, React.ReactElement> = {
-  notes: <NotesView />,
-  tasks: <TasksView />,
-  calendar: <CalendarView />,
-  'time-tracker': <TimeTrackerView />,
-};
-
 export default function App(): React.ReactElement {
-  const [activeModule, setActiveModule] = useState<ModuleId>('notes');
+  const [activeView, setActiveView] = useState<ActiveView>('notes');
   const [conflict, setConflict] = useState<ConflictState | null>(null);
+  const { enabledTools } = useEnabledTools();
 
-  const navigateTo = useCallback((id: ModuleId) => {
-    setActiveModule(id);
+  const navigateTo = useCallback((id: ActiveView) => {
+    setActiveView(id);
   }, []);
+
+  // If the active tool gets disabled, fall back to the first enabled tool or settings
+  useEffect(() => {
+    if (activeView === 'settings') return;
+    const isActive = enabledTools.some((t) => t.id === activeView);
+    if (!isActive) {
+      setActiveView(enabledTools[0]?.id ?? 'settings');
+    }
+  }, [enabledTools, activeView]);
 
   useEffect(() => {
     // Ctrl+K / Cmd+K → command palette
@@ -36,39 +40,27 @@ export default function App(): React.ReactElement {
         eventBus.emit('nav:open-command-palette', undefined);
         return;
       }
-      // Ctrl+1…4 → switch module
+      // Ctrl+1…9 → switch to tool by shortcut (dynamic from registry)
       if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-        const map: Record<string, ModuleId> = {
-          '1': 'notes',
-          '2': 'tasks',
-          '3': 'calendar',
-          '4': 'time-tracker',
-        };
-        if (map[e.key]) {
+        const tool = enabledTools.find((t) => t.shortcut === e.key);
+        if (tool) {
           e.preventDefault();
-          setActiveModule(map[e.key] as ModuleId);
+          setActiveView(tool.id);
         }
       }
     };
     window.addEventListener('keydown', onKey);
 
-    // nav:open-entity → switch to the matching module
+    // nav:open-entity → switch to the matching tool
     const onOpenEntity = ({ type }: { id: string; type: BaseEntity['type'] }): void => {
-      const moduleMap: Partial<Record<BaseEntity['type'], ModuleId>> = {
-        note: 'notes',
-        task: 'tasks',
-        calendar_event: 'calendar',
-        time_log: 'time-tracker',
-      };
-      const mod = moduleMap[type];
-      if (mod) setActiveModule(mod);
+      const tool = enabledTools.find((t) => t.entityType === type);
+      if (tool) setActiveView(tool.id);
     };
     eventBus.on('nav:open-entity', onOpenEntity);
 
     // deeplink:received → parse syncrohws://entity/<type>/<id> and navigate
     const onDeepLink = ({ path, params }: { path: string; params: Record<string, string> }): void => {
       console.log('[deep-link] App received:', path, params);
-      // Pattern: /entity/<type>/<id>
       const match = path.match(/^\/entity\/([^/]+)\/([^/]+)/);
       if (match && match[1] && match[2]) {
         const type = match[1] as BaseEntity['type'];
@@ -94,25 +86,42 @@ export default function App(): React.ReactElement {
       eventBus.off('sync:conflict', onConflict);
       stopBackup();
     };
-  }, []);
+  }, [enabledTools]);
+
+  // Resolve the active view's component
+  const renderView = (): React.ReactElement => {
+    if (activeView === 'settings') return <SettingsView />;
+    const tool = getTool(activeView);
+    if (tool) {
+      const Component = tool.component;
+      return <Component />;
+    }
+    return <SettingsView />;
+  };
+
+  // Display name for the header
+  const headerTitle =
+    activeView === 'settings'
+      ? 'Settings'
+      : (getTool(activeView)?.name ?? activeView).replace('-', ' ');
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
-      <Sidebar active={activeModule} onNavigate={navigateTo} />
+      <Sidebar active={activeView} onNavigate={navigateTo} />
 
       {/* ── Main content area ────────────────────────────────────────────── */}
       <main className="flex flex-1 flex-col overflow-hidden">
         {/* Top bar */}
         <header className="flex h-14 shrink-0 items-center border-b border-border px-4">
           <h1 className="text-sm font-medium text-foreground capitalize">
-            {activeModule.replace('-', ' ')}
+            {headerTitle}
           </h1>
         </header>
 
-        {/* Active module view */}
+        {/* Active view */}
         <div className="flex flex-1 overflow-auto">
-          {MODULE_VIEWS[activeModule]}
+          {renderView()}
         </div>
       </main>
 

@@ -53,7 +53,7 @@ async function updateBiDirectionalLinks(entity: BaseEntity): Promise<void> {
   if (!matches.length) return;
 
   try {
-    const db = await getDB();
+    const db = getDB();
     // Look up entity IDs whose payload title matches the link text
     const linked: string[] = [];
     for (const name of matches) {
