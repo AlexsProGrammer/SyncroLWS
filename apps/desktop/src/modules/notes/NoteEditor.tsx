@@ -90,13 +90,6 @@ export function NoteEditor({
   });
 
   // ── Autosave ───────────────────────────────────────────────────────────────
-  const scheduleSave = useCallback(() => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      await persistNote();
-    }, AUTOSAVE_DEBOUNCE_MS);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entityId]);
 
   const persistNote = useCallback(async (): Promise<void> => {
     if (!editor) return;
@@ -135,6 +128,16 @@ export function NoteEditor({
     }
   }, [editor, entityId, initialTitle]);
 
+  const persistNoteRef = useRef(persistNote);
+  persistNoteRef.current = persistNote;
+
+  const scheduleSave = useCallback(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      await persistNoteRef.current();
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }, []);
+
   // Save on unmount
   useEffect(() => {
     return () => {
@@ -156,13 +159,13 @@ export function NoteEditor({
   }, [editor, sourceMode, sourceHtml]);
 
   return (
-    <div className={cn('flex flex-col gap-0', className)}>
+    <div className={cn('flex flex-col h-full', className)}>
       {/* Title field */}
       <input
         ref={titleRef}
         defaultValue={initialTitle}
         placeholder="Untitled note"
-        className="w-full border-0 bg-transparent text-2xl font-semibold text-foreground outline-none placeholder:text-muted-foreground px-1 mb-2"
+        className="w-full border-0 bg-transparent text-2xl font-semibold text-foreground outline-none placeholder:text-muted-foreground px-1 mb-2 shrink-0"
         onChange={() => scheduleSave()}
       />
 
@@ -178,13 +181,13 @@ export function NoteEditor({
         <textarea
           value={sourceHtml}
           onChange={(e) => setSourceHtml(e.target.value)}
-          className="flex-1 min-h-[200px] rounded-md border border-border bg-muted/50 p-3 font-mono text-sm text-foreground outline-none resize-none"
+          className="flex-1 min-h-0 rounded-md border border-border bg-muted/50 p-3 font-mono text-sm text-foreground outline-none resize-none overflow-y-auto"
           spellCheck={false}
         />
       ) : (
         <EditorContent
           editor={editor}
-          className="note-editor-content prose prose-sm dark:prose-invert max-w-none flex-1 cursor-text rounded-md p-1 outline-none"
+          className="note-editor-content prose prose-sm dark:prose-invert max-w-none flex-1 min-h-0 cursor-text rounded-md p-1 outline-none overflow-y-auto"
         />
       )}
     </div>

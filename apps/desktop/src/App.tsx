@@ -73,9 +73,13 @@ export default function App(): React.ReactElement {
     window.addEventListener('keydown', onKey);
 
     // nav:open-entity → switch to the matching tool
-    const onOpenEntity = ({ type }: { id: string; type: BaseEntity['type'] }): void => {
-      const tool = getToolByEntityType(type) ?? enabledTools.find((t) => t.entityTypes?.includes(type));
-      if (tool) setActiveView(tool.id);
+    const onOpenEntity = ({ id, type }: { id: string; type: BaseEntity['type'] }): void => {
+      try {
+        const tool = getToolByEntityType(type) ?? enabledTools.find((t) => t.entityTypes?.includes(type));
+        if (tool) setActiveView(tool.id);
+      } catch (err) {
+        console.error('[app] nav:open-entity failed:', err);
+      }
     };
     eventBus.on('nav:open-entity', onOpenEntity);
 

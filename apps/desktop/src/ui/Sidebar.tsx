@@ -405,7 +405,8 @@ function IconMoon({ className }: { className?: string }): React.ReactElement {
   );
 }
 
-function ThemeToggle({ collapsed: sidebarCollapsed }: { collapsed: boolean }): React.ReactElement {
+/** Icon-only theme toggle shown beside settings (hidden when sidebar collapsed). */
+function ThemeToggleIcon(): React.ReactElement {
   const theme = useThemeStore((s) => s.theme);
   const setTheme = useThemeStore((s) => s.setTheme);
 
@@ -419,18 +420,14 @@ function ThemeToggle({ collapsed: sidebarCollapsed }: { collapsed: boolean }): R
   return (
     <button
       onClick={cycle}
-      title={sidebarCollapsed ? `Theme: ${label}` : undefined}
-      className={cn(
-        'flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-sm transition-colors',
-        'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-      )}
+      title={`Theme: ${label}`}
+      className="shrink-0 rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
     >
       {theme === 'dark' ? (
-        <IconMoon className="h-4 w-4 shrink-0" />
+        <IconMoon className="h-4 w-4" />
       ) : (
-        <IconSun className="h-4 w-4 shrink-0" />
+        <IconSun className="h-4 w-4" />
       )}
-      {!sidebarCollapsed && <span className="flex-1 text-left">{label}</span>}
     </button>
   );
 }
@@ -827,7 +824,7 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
       </div>
 
       {/* ── Workspace navigator ──────────────────────────────────────────── */}
-      <div className="px-2 pt-2">
+      <div className="flex flex-col px-2 pt-2 min-h-0 flex-shrink-0" style={{ maxHeight: '40%' }}>
         <div className="flex items-center justify-between px-2 pb-1">
           {!collapsed && (
             <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -854,7 +851,7 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
           </div>
         </div>
         <div
-          className="max-h-40 overflow-y-auto"
+          className="flex-1 min-h-0 overflow-y-auto"
           onDragOver={(e) => { e.preventDefault(); }}
           onDrop={handleRootDrop}
         >
@@ -1012,23 +1009,25 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
         )}
       </nav>
 
-      {/* Profile switcher + Theme + Settings + Collapse */}
+      {/* Profile switcher + Settings/Theme + Collapse */}
       <div className="border-t border-border p-2 space-y-0.5">
         <ProfileSwitcher collapsed={collapsed} onNavigate={onNavigate} />
-        <ThemeToggle collapsed={collapsed} />
-        <button
-          onClick={() => onNavigate('settings')}
-          title={collapsed ? 'Settings' : undefined}
-          className={cn(
-            'flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-sm transition-colors',
-            active === 'settings'
-              ? 'bg-accent text-accent-foreground font-medium'
-              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-          )}
-        >
-          <IconSettings className="h-4 w-4 shrink-0" />
-          {!collapsed && <span className="flex-1 text-left">Settings</span>}
-        </button>
+        <div className="flex w-full items-center gap-0.5">
+          <button
+            onClick={() => onNavigate('settings')}
+            title={collapsed ? 'Settings' : undefined}
+            className={cn(
+              'flex flex-1 items-center gap-2.5 rounded-md px-2 py-2 text-sm transition-colors',
+              active === 'settings'
+                ? 'bg-accent text-accent-foreground font-medium'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+            )}
+          >
+            <IconSettings className="h-4 w-4 shrink-0" />
+            {!collapsed && <span className="flex-1 text-left">Settings</span>}
+          </button>
+          {!collapsed && <ThemeToggleIcon />}
+        </div>
         <button
           onClick={() => setCollapsed((c) => !c)}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
