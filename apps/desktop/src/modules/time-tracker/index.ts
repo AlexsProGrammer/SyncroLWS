@@ -2,6 +2,12 @@ import { invoke } from '@tauri-apps/api/core';
 import { eventBus } from '@/core/events';
 import type { TimeLogPayload } from '@syncrohws/shared-types';
 
+export { TimeTrackerView } from './TimeTrackerView';
+export type { TimeLogItem } from './TimeTrackerView';
+export { formatDuration } from './TimeTrackerView';
+export { ManualEntryForm } from './ManualEntryForm';
+export { TimeTrackerReports } from './TimeTrackerReports';
+
 const POLL_INTERVAL_MS = 60_000; // 60 seconds — as specified in IMPLEMENTATION.md
 
 let _lastWindowTitle = '';
@@ -68,5 +74,8 @@ export function createTimeLog(
     duration_seconds: null,
     window_title: windowTitle,
     billable,
+    hourly_rate_cents: 0,
+    project: '',
+    manual: false,
   };
 }

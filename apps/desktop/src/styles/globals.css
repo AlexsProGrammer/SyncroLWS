@@ -426,3 +426,25 @@ html {
   background: hsl(var(--muted-foreground) / 0.2);
   border-radius: 999px;
 }
+
+/* ── Time Tracker ────────────────────────────────────────────────────────── */
+
+/* Recharts theme integration */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: hsl(var(--border) / 0.5);
+}
+.recharts-default-tooltip {
+  background: hsl(var(--popover)) !important;
+  border-color: hsl(var(--border)) !important;
+  border-radius: 0.5rem !important;
+}
+
+/* Pulse animation for active tracking indicator */
+@keyframes tracking-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.tracking-pulse {
+  animation: tracking-pulse 2s ease-in-out infinite;
+}

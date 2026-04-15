@@ -107,6 +107,12 @@ export const TimeLogPayloadSchema = z.object({
   duration_seconds: z.number().int().nonnegative().nullable().default(null),
   window_title: z.string().default(''),
   billable: z.boolean().default(false),
+  /** Hourly rate in cents (e.g. 7500 = $75.00) — 0 means not set */
+  hourly_rate_cents: z.number().int().nonnegative().default(0),
+  /** Project or client name for grouping in reports */
+  project: z.string().default(''),
+  /** Whether this entry was manually created vs auto-tracked */
+  manual: z.boolean().default(false),
 });
 
 // ── Workspace ────────────────────────────────────────────────────────────────
