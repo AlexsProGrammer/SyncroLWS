@@ -156,9 +156,9 @@ export function getToolByEntityType(entityType: string): Tool | undefined {
 // ── Manifest-based auto-discovery ─────────────────────────────────────────────
 
 // Eagerly import all manifest.json files under modules/
-const manifests = import.meta.glob<ToolManifest>(
+const manifests = import.meta.glob<{ default: ToolManifest } | ToolManifest>(
   '../modules/*/manifest.json',
-  { eager: true, import: 'default' },
+  { eager: true },
 );
 
 // Eagerly import all module index.ts files (for init functions)
@@ -181,7 +181,16 @@ import * as fallbackViews from '@/ui/ModuleViews';
  * Called once during app bootstrap.
  */
 export function discoverAndRegisterTools(): void {
-  for (const [manifestPath, manifest] of Object.entries(manifests)) {
+  for (const [manifestPath, rawManifest] of Object.entries(manifests)) {
+    // Handle both { default: {...} } and direct object forms
+    const manifest: ToolManifest =
+      (rawManifest as { default?: ToolManifest }).default ?? (rawManifest as ToolManifest);
+
+    if (!manifest?.id) {
+      console.warn(`[registry] Invalid manifest at "${manifestPath}", skipping.`);
+      continue;
+    }
+
     // Extract module folder name: ../modules/<folder>/manifest.json → <folder>
     const folderMatch = manifestPath.match(/\.\.\/modules\/([^/]+)\/manifest\.json/);
     if (!folderMatch) continue;

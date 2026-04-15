@@ -2,13 +2,25 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { eventBus } from '@/core/events';
 import { getAllTools, type Tool } from '@/registry/ToolRegistry';
-import { getDB } from '@/core/db';
-import { useProfileStore } from '@/store/profileStore';
+import { getDB, getWorkspaceDB } from '@/core/db';
+import { useProfileStore, type Profile } from '@/store/profileStore';
 import { useWorkspaceStore, buildWorkspaceTree, type Workspace } from '@/store/workspaceStore';
 import { useThemeStore } from '@/store/themeStore';
-import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
-import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+import { Input } from '@/ui/components/input';
+import { Button } from '@/ui/components/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/ui/components/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/ui/components/dropdown-menu';
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
@@ -50,9 +62,9 @@ function IconPlus({ className }: { className?: string }): React.ReactElement {
   );
 }
 
-function IconFolder({ className }: { className?: string }): React.ReactElement {
+function IconFolder({ className, style }: { className?: string; style?: React.CSSProperties }): React.ReactElement {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+    <svg className={className} style={style} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
       <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
     </svg>
   );
@@ -71,6 +83,46 @@ function IconChevronDown({ className }: { className?: string }): React.ReactElem
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
       <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+function IconFolderPlus({ className }: { className?: string }): React.ReactElement {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+      <line x1="12" y1="11" x2="12" y2="17" />
+      <line x1="9" y1="14" x2="15" y2="14" />
+    </svg>
+  );
+}
+
+function IconEdit({ className }: { className?: string }): React.ReactElement {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+    </svg>
+  );
+}
+
+function IconTrash({ className }: { className?: string }): React.ReactElement {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+    </svg>
+  );
+}
+
+function IconMoreVertical({ className }: { className?: string }): React.ReactElement {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="5" r="1" />
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="12" cy="19" r="1" />
     </svg>
   );
 }
@@ -155,44 +207,82 @@ function WorkspaceTreeItem({
   activeId,
   onSelect,
   collapsed: sidebarCollapsed,
+  onDrop,
 }: {
   node: WorkspaceTreeNode;
   depth: number;
   activeId: string | null;
   onSelect: (id: string) => void;
   collapsed: boolean;
+  onDrop?: (dragId: string, targetId: string) => void;
 }): React.ReactElement {
   const [expanded, setExpanded] = useState(true);
+  const [dragOver, setDragOver] = useState(false);
+  const isFolder = node.icon === 'folder-group';
   const hasChildren = node.children.length > 0;
+
+  const handleDragStart = (e: React.DragEvent): void => {
+    e.dataTransfer.setData('text/plain', node.id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent): void => {
+    if (!isFolder) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent): void => {
+    e.preventDefault();
+    setDragOver(false);
+  };
+
+  const handleDropOnFolder = (e: React.DragEvent): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    const dragId = e.dataTransfer.getData('text/plain');
+    if (dragId && dragId !== node.id && onDrop) {
+      onDrop(dragId, node.id);
+    }
+  };
 
   return (
     <div>
       <button
-        onClick={() => onSelect(node.id)}
+        draggable
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDropOnFolder}
+        onClick={() => isFolder ? setExpanded((v) => !v) : onSelect(node.id)}
         className={cn(
           'flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors',
-          activeId === node.id
+          dragOver && 'ring-2 ring-primary/50 bg-accent',
+          !isFolder && activeId === node.id
             ? 'bg-accent text-accent-foreground font-medium'
             : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
         )}
         style={{ paddingLeft: sidebarCollapsed ? undefined : `${8 + depth * 16}px` }}
         title={sidebarCollapsed ? node.name : undefined}
       >
-        {hasChildren && !sidebarCollapsed && (
-          <span
-            onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
-            className="shrink-0 cursor-pointer"
-          >
+        {isFolder && !sidebarCollapsed && (
+          <span className="shrink-0">
             <IconChevronDown className={cn('h-3 w-3 transition-transform', !expanded && '-rotate-90')} />
           </span>
         )}
-        <span
-          className="h-3 w-3 shrink-0 rounded-sm"
-          style={{ backgroundColor: node.color }}
-        />
+        {isFolder ? (
+          <IconFolder className="h-3.5 w-3.5 shrink-0" style={{ color: node.color }} />
+        ) : (
+          <span
+            className="h-3 w-3 shrink-0 rounded-sm"
+            style={{ backgroundColor: node.color }}
+          />
+        )}
         {!sidebarCollapsed && <span className="truncate flex-1 text-left">{node.name}</span>}
       </button>
-      {hasChildren && expanded && !sidebarCollapsed && (
+      {isFolder && expanded && !sidebarCollapsed && (
         <div>
           {node.children.map((child) => (
             <WorkspaceTreeItem
@@ -202,80 +292,7 @@ function WorkspaceTreeItem({
               activeId={activeId}
               onSelect={onSelect}
               collapsed={sidebarCollapsed}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Sortable workspace item ───────────────────────────────────────────────────
-
-function SortableWorkspaceItem({
-  node,
-  depth,
-  activeId,
-  onSelect,
-  collapsed: sidebarCollapsed,
-}: {
-  node: WorkspaceTreeNode;
-  depth: number;
-  activeId: string | null;
-  onSelect: (id: string) => void;
-  collapsed: boolean;
-}): React.ReactElement {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: node.id,
-  });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-
-  const [expanded, setExpanded] = useState(true);
-  const hasChildren = node.children.length > 0;
-
-  return (
-    <div ref={setNodeRef} style={style}>
-      <button
-        {...attributes}
-        {...listeners}
-        onClick={() => onSelect(node.id)}
-        className={cn(
-          'flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors',
-          activeId === node.id
-            ? 'bg-accent text-accent-foreground font-medium'
-            : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-        )}
-        style={{ paddingLeft: sidebarCollapsed ? undefined : `${8 + depth * 16}px` }}
-        title={sidebarCollapsed ? node.name : undefined}
-      >
-        {hasChildren && !sidebarCollapsed && (
-          <span
-            onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
-            className="shrink-0 cursor-pointer"
-          >
-            <IconChevronDown className={cn('h-3 w-3 transition-transform', !expanded && '-rotate-90')} />
-          </span>
-        )}
-        <span
-          className="h-3 w-3 shrink-0 rounded-sm"
-          style={{ backgroundColor: node.color }}
-        />
-        {!sidebarCollapsed && <span className="truncate flex-1 text-left">{node.name}</span>}
-      </button>
-      {hasChildren && expanded && !sidebarCollapsed && (
-        <div>
-          {node.children.map((child) => (
-            <WorkspaceTreeItem
-              key={child.id}
-              node={child as WorkspaceTreeNode}
-              depth={depth + 1}
-              activeId={activeId}
-              onSelect={onSelect}
-              collapsed={sidebarCollapsed}
+              onDrop={onDrop}
             />
           ))}
         </div>
@@ -286,7 +303,7 @@ function SortableWorkspaceItem({
 
 // ── Profile switcher ──────────────────────────────────────────────────────────
 
-function ProfileSwitcher({ collapsed: sidebarCollapsed }: { collapsed: boolean }): React.ReactElement {
+function ProfileSwitcher({ collapsed: sidebarCollapsed, onNavigate }: { collapsed: boolean; onNavigate: (id: ActiveView) => void }): React.ReactElement {
   const [open, setOpen] = useState(false);
   const profiles = useProfileStore((s) => s.profiles);
   const activeProfileId = useProfileStore((s) => s.activeProfileId);
@@ -341,6 +358,21 @@ function ProfileSwitcher({ collapsed: sidebarCollapsed }: { collapsed: boolean }
               <span className="truncate">{p.name}</span>
             </button>
           ))}
+          {/* Add profile button */}
+          <div className="mt-1 border-t border-border pt-1">
+            <button
+              onClick={() => {
+                setOpen(false);
+                onNavigate('settings');
+                // Small delay then emit to switch to profile tab
+                setTimeout(() => eventBus.emit('settings:open-tab', 'profiles'), 50);
+              }}
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            >
+              <IconPlus className="h-3.5 w-3.5" />
+              <span>Add Profile</span>
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -403,11 +435,130 @@ function ThemeToggle({ collapsed: sidebarCollapsed }: { collapsed: boolean }): R
   );
 }
 
+// ── Add Tool Modal ────────────────────────────────────────────────────────────
+
+interface WorkspaceTool {
+  id: string;
+  tool_id: string;
+  name: string;
+  sort_order: number;
+  config: string; // JSON with { shortcut?: string }
+}
+
+function AddToolModal({
+  open,
+  onClose,
+  onToolAdded,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onToolAdded: () => void;
+}): React.ReactElement | null {
+  const [search, setSearch] = useState('');
+  const allTools = getAllTools();
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+
+  const filtered = search
+    ? allTools.filter(
+        (t) =>
+          t.name.toLowerCase().includes(search.toLowerCase()) ||
+          t.id.toLowerCase().includes(search.toLowerCase()) ||
+          (t.manifest?.description ?? '').toLowerCase().includes(search.toLowerCase()),
+      )
+    : allTools;
+
+  const addTool = async (tool: Tool): Promise<void> => {
+    if (!activeWorkspaceId) return;
+    try {
+      const db = getWorkspaceDB();
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+
+      // Count existing tools for sort_order
+      const countRows = await db.select<{ cnt: number }[]>(
+        `SELECT COUNT(*) as cnt FROM workspace_tools`,
+      );
+      const sortOrder = countRows[0]?.cnt ?? 0;
+
+      await db.execute(
+        `INSERT INTO workspace_tools (id, tool_id, name, description, config, sort_order, created_at)
+         VALUES (?, ?, ?, ?, '{}', ?, ?)`,
+        [id, tool.id, tool.name, tool.manifest?.description ?? '', sortOrder, now],
+      );
+
+      eventBus.emit('workspace:tool-added', {
+        workspaceId: activeWorkspaceId,
+        toolInstanceId: id,
+        toolId: tool.id,
+      });
+
+      onToolAdded();
+      onClose();
+    } catch (err) {
+      console.error('[sidebar] add tool failed:', err);
+    }
+  };
+
+  if (!open) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-md max-h-[70vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>Add Tool to Workspace</DialogTitle>
+        </DialogHeader>
+
+        <Input
+          placeholder="Search tools…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="mb-3"
+          autoFocus
+        />
+
+        <div className="flex-1 space-y-1.5 overflow-auto">
+          {filtered.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">No tools found</p>
+          ) : (
+            filtered.map((tool) => {
+              const Icon = tool.icon;
+              return (
+                <button
+                  key={tool.id}
+                  onClick={() => void addTool(tool)}
+                  className="flex w-full items-center gap-3 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-primary/30 hover:bg-accent"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                    <Icon className="h-4.5 w-4.5" />
+                  </div>
+                  <div className="flex-1 overflow-hidden">
+                    <p className="text-sm font-medium text-foreground">{tool.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {tool.manifest?.description ?? `${tool.id} module`}
+                    </p>
+                  </div>
+                  {tool.shortcut && (
+                    <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                      ^{tool.shortcut}
+                    </kbd>
+                  )}
+                </button>
+              );
+            })
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Main Sidebar ──────────────────────────────────────────────────────────────
 
 export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElement {
   const [collapsed, setCollapsed] = useState(false);
   const { enabledTools } = useEnabledTools();
+  const [showAddTool, setShowAddTool] = useState(false);
+  const [workspaceTools, setWorkspaceTools] = useState<WorkspaceTool[]>([]);
 
   // Auto-collapse on narrow windows
   useEffect(() => {
@@ -424,33 +575,214 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
   const createWorkspace = useWorkspaceStore((s) => s.createWorkspace);
-  const reorderWorkspaces = useWorkspaceStore((s) => s.reorderWorkspaces);
+  const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
 
   const tree = buildWorkspaceTree(workspaces);
-  const rootIds = tree.map((n) => n.id);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  /** Handle drag-and-drop: reparent item to target folder */
+  const handleTreeDrop = useCallback(
+    (dragId: string, targetFolderId: string) => {
+      const dragItem = workspaces.find((w) => w.id === dragId);
+      const target = workspaces.find((w) => w.id === targetFolderId);
+      if (!dragItem || !target) return;
+      // Target must be a folder
+      if (target.icon !== 'folder-group') return;
+      // Cannot drop a folder into itself
+      if (dragId === targetFolderId) return;
+      // Cannot drop a parent into its own descendant
+      const isDescendant = (parentId: string, checkId: string): boolean => {
+        const children = workspaces.filter((w) => w.parent_id === parentId);
+        for (const child of children) {
+          if (child.id === checkId) return true;
+          if (isDescendant(child.id, checkId)) return true;
+        }
+        return false;
+      };
+      if (isDescendant(dragId, targetFolderId)) return;
+
+      void updateWorkspace(dragId, { parent_id: targetFolderId });
+    },
+    [workspaces, updateWorkspace],
   );
 
-  const handleDragEnd = (event: DragEndEvent): void => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
+  /** Handle drop on root area (unparent item) */
+  const handleRootDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      const dragId = e.dataTransfer.getData('text/plain');
+      if (!dragId) return;
+      const item = workspaces.find((w) => w.id === dragId);
+      if (item && item.parent_id !== null) {
+        void updateWorkspace(dragId, { parent_id: null });
+      }
+    },
+    [workspaces, updateWorkspace],
+  );
 
-    const oldIndex = rootIds.indexOf(active.id as string);
-    const newIndex = rootIds.indexOf(over.id as string);
-    if (oldIndex === -1 || newIndex === -1) return;
+  // ── Load workspace tools from workspace DB ──────────────────────────────
 
-    const newOrder = [...rootIds];
-    newOrder.splice(oldIndex, 1);
-    newOrder.splice(newIndex, 0, active.id as string);
-    void reorderWorkspaces(newOrder);
-  };
+  const loadWorkspaceTools = useCallback(async () => {
+    if (!activeWorkspaceId) {
+      setWorkspaceTools([]);
+      return;
+    }
+    try {
+      const db = getWorkspaceDB();
+      const rows = await db.select<WorkspaceTool[]>(
+        `SELECT id, tool_id, name, sort_order, config FROM workspace_tools ORDER BY sort_order ASC`,
+      );
+      setWorkspaceTools(rows);
+    } catch (err) {
+      console.warn('[sidebar] loadWorkspaceTools failed, resetting:', err);
+      setWorkspaceTools([]);
+    }
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    void loadWorkspaceTools();
+  }, [loadWorkspaceTools]);
+
+  useEffect(() => {
+    const handler = (): void => void loadWorkspaceTools();
+    eventBus.on('workspace:tool-added', handler);
+    eventBus.on('workspace:tool-removed', handler);
+    eventBus.on('workspace:switched', handler);
+    return () => {
+      eventBus.off('workspace:tool-added', handler);
+      eventBus.off('workspace:tool-removed', handler);
+      eventBus.off('workspace:switched', handler);
+    };
+  }, [loadWorkspaceTools]);
+
+  // ── Workspace create dialogs ────────────────────────────────────────────
+
+  const [showCreateWs, setShowCreateWs] = useState(false);
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const [newWsName, setNewWsName] = useState('');
+  const [newWsColor, setNewWsColor] = useState('#6366f1');
 
   const handleCreateWorkspace = async (): Promise<void> => {
-    const name = prompt('Workspace name:');
-    if (!name?.trim()) return;
-    await createWorkspace({ name: name.trim() });
+    if (!newWsName.trim()) return;
+    await createWorkspace({ name: newWsName.trim(), color: newWsColor });
+    setNewWsName('');
+    setNewWsColor('#6366f1');
+    setShowCreateWs(false);
+  };
+
+  const handleCreateFolder = async (): Promise<void> => {
+    if (!newWsName.trim()) return;
+    await createWorkspace({
+      name: newWsName.trim(),
+      color: newWsColor,
+      icon: 'folder-group',
+    });
+    setNewWsName('');
+    setNewWsColor('#6366f1');
+    setShowCreateFolder(false);
+  };
+
+  // Navigate via workspace tools (map tool_id → registered tool, then navigate)
+  const handleToolNav = (toolId: string): void => {
+    onNavigate(toolId);
+  };
+
+  // ── Tool actions (3-dot menu) ───────────────────────────────────────────
+
+  const [editShortcutToolId, setEditShortcutToolId] = useState<string | null>(null);
+  const [shortcutInput, setShortcutInput] = useState('');
+  const [confirmResetTool, setConfirmResetTool] = useState<{ id: string; toolId: string; name: string } | null>(null);
+
+  const handleRemoveTool = async (toolInstanceId: string): Promise<void> => {
+    if (!activeWorkspaceId) return;
+    try {
+      const db = getWorkspaceDB();
+      await db.execute(`DELETE FROM workspace_tools WHERE id = ?`, [toolInstanceId]);
+      eventBus.emit('workspace:tool-removed', {
+        workspaceId: activeWorkspaceId,
+        toolInstanceId,
+      });
+      void loadWorkspaceTools();
+    } catch (err) {
+      console.error('[sidebar] remove tool failed:', err);
+    }
+  };
+
+  const handleResetTool = async (toolInstanceId: string, toolId: string): Promise<void> => {
+    if (!activeWorkspaceId) return;
+    try {
+      const db = getWorkspaceDB();
+      const tool = enabledTools.find((t) => t.id === toolId);
+      if (tool?.entityTypes) {
+        for (const entityType of tool.entityTypes) {
+          await db.execute(
+            `DELETE FROM base_entities WHERE type = ?`,
+            [entityType],
+          );
+        }
+      }
+      // Remove the tool instance
+      await db.execute(`DELETE FROM workspace_tools WHERE id = ?`, [toolInstanceId]);
+      eventBus.emit('workspace:tool-removed', {
+        workspaceId: activeWorkspaceId,
+        toolInstanceId,
+      });
+      void loadWorkspaceTools();
+      // Trigger view refresh
+      eventBus.emit('entity:deleted', { id: '_reset_', type: 'note' as const });
+      eventBus.emit('notification:show', {
+        title: 'Tool Reset',
+        body: `All data for "${tool?.name ?? toolId}" has been removed.`,
+        type: 'info',
+      });
+    } catch (err) {
+      console.error('[sidebar] reset tool failed:', err);
+    }
+    setConfirmResetTool(null);
+  };
+
+  const handleSaveShortcut = async (): Promise<void> => {
+    if (!editShortcutToolId) return;
+    // Check duplicate shortcut in current workspace
+    if (shortcutInput) {
+      const duplicate = workspaceTools.find((wt) => {
+        if (wt.id === editShortcutToolId) return false;
+        try {
+          const cfg = JSON.parse(wt.config || '{}');
+          return cfg.shortcut === shortcutInput;
+        } catch { return false; }
+      });
+      if (duplicate) {
+        eventBus.emit('notification:show', {
+          title: 'Shortcut conflict',
+          body: `Ctrl+${shortcutInput} is already used by "${duplicate.name}".`,
+          type: 'warning',
+        });
+        return;
+      }
+    }
+    try {
+      const db = getWorkspaceDB();
+      const configStr = JSON.stringify({ shortcut: shortcutInput || undefined });
+      await db.execute(
+        `UPDATE workspace_tools SET config = ? WHERE id = ?`,
+        [configStr, editShortcutToolId],
+      );
+      setEditShortcutToolId(null);
+      setShortcutInput('');
+      void loadWorkspaceTools();
+    } catch (err) {
+      console.error('[sidebar] save shortcut failed:', err);
+    }
+  };
+
+  /** Parse workspace tool config JSON to get custom shortcut (default: none) */
+  const getToolShortcut = (wt: WorkspaceTool): string | undefined => {
+    try {
+      const cfg = JSON.parse(wt.config || '{}');
+      return cfg.shortcut || undefined;
+    } catch {
+      return undefined;
+    }
   };
 
   return (
@@ -502,70 +834,187 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
               Workspaces
             </span>
           )}
-          <button
-            onClick={handleCreateWorkspace}
-            title="New workspace"
-            className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          >
-            <IconPlus className="h-3.5 w-3.5" />
-          </button>
+          <div className="flex items-center gap-0.5">
+            {!collapsed && (
+              <button
+                onClick={() => { setNewWsName(''); setShowCreateFolder(true); }}
+                title="New folder"
+                className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              >
+                <IconFolderPlus className="h-3.5 w-3.5" />
+              </button>
+            )}
+            <button
+              onClick={() => { setNewWsName(''); setShowCreateWs(true); }}
+              title="New workspace"
+              className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              <IconPlus className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
-        <div className="max-h-40 overflow-y-auto">
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={rootIds} strategy={verticalListSortingStrategy}>
-              {tree.map((node) => (
-                <SortableWorkspaceItem
-                  key={node.id}
-                  node={node as WorkspaceTreeNode}
-                  depth={0}
-                  activeId={activeWorkspaceId}
-                  onSelect={(id) => void switchWorkspace(id)}
-                  collapsed={collapsed}
-                />
-              ))}
-            </SortableContext>
-          </DndContext>
+        <div
+          className="max-h-40 overflow-y-auto"
+          onDragOver={(e) => { e.preventDefault(); }}
+          onDrop={handleRootDrop}
+        >
+          {tree.map((node) => (
+            <WorkspaceTreeItem
+              key={node.id}
+              node={node as WorkspaceTreeNode}
+              depth={0}
+              activeId={activeWorkspaceId}
+              onSelect={(id) => void switchWorkspace(id)}
+              collapsed={collapsed}
+              onDrop={handleTreeDrop}
+            />
+          ))}
         </div>
       </div>
 
       {/* Divider */}
       <div className="mx-3 my-2 border-t border-border" />
 
-      {/* Module nav — dynamically from ToolRegistry filtered by active_tools */}
+      {/* Module nav — workspace tools or enabled tools */}
       <nav className="flex flex-1 flex-col gap-0.5 px-2 overflow-y-auto">
-        {enabledTools.map((tool) => {
-          const Icon = tool.icon;
-          return (
+        {activeWorkspaceId && workspaceTools.length > 0 ? (
+          <>
+            {workspaceTools.map((wt) => {
+              const tool = enabledTools.find((t) => t.id === wt.tool_id);
+              if (!tool) return null;
+              const Icon = tool.icon;
+              const shortcut = getToolShortcut(wt);
+              return (
+                <div key={wt.id} className="group relative flex items-center">
+                  <button
+                    onClick={() => handleToolNav(tool.id)}
+                    title={collapsed ? `${wt.name}${shortcut ? ` (Ctrl+${shortcut})` : ''}` : undefined}
+                    className={cn(
+                      'flex flex-1 items-center gap-2.5 rounded-md px-2 py-2 text-sm transition-colors',
+                      active === tool.id
+                        ? 'bg-accent text-accent-foreground font-medium'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                    )}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {!collapsed && (
+                      <>
+                        <span className="flex-1 text-left truncate">{wt.name}</span>
+                        {shortcut && (
+                          <kbd className="mr-5 rounded border border-border bg-muted px-1 text-[10px] font-mono text-muted-foreground">
+                            ^{shortcut}
+                          </kbd>
+                        )}
+                      </>
+                    )}
+                  </button>
+                  {!collapsed && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          className="absolute right-1 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 text-muted-foreground hover:text-foreground hover:bg-accent"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <IconMoreVertical className="h-3.5 w-3.5" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setEditShortcutToolId(wt.id);
+                            setShortcutInput((() => {
+                              try { return JSON.parse(wt.config || '{}').shortcut ?? ''; }
+                              catch { return ''; }
+                            })());
+                          }}
+                        >
+                          <IconEdit className="mr-2 h-3.5 w-3.5" />
+                          Edit Shortcut
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => void handleRemoveTool(wt.id)}
+                        >
+                          <IconPlus className="mr-2 h-3.5 w-3.5 rotate-45" />
+                          Remove Tool
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onClick={() => setConfirmResetTool({ id: wt.id, toolId: wt.tool_id, name: wt.name })}
+                        >
+                          <IconTrash className="mr-2 h-3.5 w-3.5" />
+                          Reset Data
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
+              );
+            })}
+            {/* Add tool button */}
             <button
-              key={tool.id}
-              onClick={() => onNavigate(tool.id)}
-              title={collapsed ? `${tool.name}${tool.shortcut ? ` (Ctrl+${tool.shortcut})` : ''}` : undefined}
+              onClick={() => setShowAddTool(true)}
+              className="flex items-center gap-2.5 rounded-md px-2 py-2 text-sm text-muted-foreground/60 transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              <IconPlus className="h-4 w-4 shrink-0" />
+              {!collapsed && <span className="flex-1 text-left">Add Tool</span>}
+            </button>
+          </>
+        ) : activeWorkspaceId ? (
+          /* Empty workspace — show prominent add tool */
+          <div className={cn('flex flex-col items-center gap-2 py-4', collapsed && 'py-2')}>
+            {!collapsed && (
+              <p className="text-xs text-muted-foreground text-center">
+                No tools added yet
+              </p>
+            )}
+            <button
+              onClick={() => setShowAddTool(true)}
               className={cn(
-                'flex items-center gap-2.5 rounded-md px-2 py-2 text-sm transition-colors',
-                active === tool.id
-                  ? 'bg-accent text-accent-foreground font-medium'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                'border border-dashed border-border text-muted-foreground hover:border-primary hover:text-foreground hover:bg-accent',
               )}
             >
-              <Icon className="h-4 w-4 shrink-0" />
-              {!collapsed && (
-                <>
-                  <span className="flex-1 text-left">{tool.name}</span>
-                  {tool.shortcut && (
-                    <kbd className="rounded border border-border bg-muted px-1 text-[10px] font-mono text-muted-foreground">
-                      ^{tool.shortcut}
-                    </kbd>
-                  )}
-                </>
-              )}
+              <IconPlus className="h-4 w-4" />
+              {!collapsed && <span>Add Tool</span>}
             </button>
-          );
-        })}
+          </div>
+        ) : (
+          /* No workspace selected — show all enabled tools */
+          enabledTools.map((tool) => {
+            const Icon = tool.icon;
+            return (
+              <button
+                key={tool.id}
+                onClick={() => onNavigate(tool.id)}
+                title={collapsed ? `${tool.name}${tool.shortcut ? ` (Ctrl+${tool.shortcut})` : ''}` : undefined}
+                className={cn(
+                  'flex items-center gap-2.5 rounded-md px-2 py-2 text-sm transition-colors',
+                  active === tool.id
+                    ? 'bg-accent text-accent-foreground font-medium'
+                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {!collapsed && (
+                  <>
+                    <span className="flex-1 text-left">{tool.name}</span>
+                    {tool.shortcut && (
+                      <kbd className="rounded border border-border bg-muted px-1 text-[10px] font-mono text-muted-foreground">
+                        ^{tool.shortcut}
+                      </kbd>
+                    )}
+                  </>
+                )}
+              </button>
+            );
+          })
+        )}
       </nav>
 
       {/* Profile switcher + Theme + Settings + Collapse */}
       <div className="border-t border-border p-2 space-y-0.5">
-        <ProfileSwitcher collapsed={collapsed} />
+        <ProfileSwitcher collapsed={collapsed} onNavigate={onNavigate} />
         <ThemeToggle collapsed={collapsed} />
         <button
           onClick={() => onNavigate('settings')}
@@ -588,6 +1037,144 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
           <IconChevron className="h-4 w-4" collapsed={!collapsed} />
         </button>
       </div>
+
+      {/* ── Add Tool Modal ─────────────────────────────────────────────── */}
+      <AddToolModal
+        open={showAddTool}
+        onClose={() => setShowAddTool(false)}
+        onToolAdded={() => void loadWorkspaceTools()}
+      />
+
+      {/* ── Create Workspace Dialog ────────────────────────────────────── */}
+      <Dialog open={showCreateWs} onOpenChange={setShowCreateWs}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>New Workspace</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-2">
+            <Input
+              placeholder="Workspace name"
+              value={newWsName}
+              onChange={(e) => setNewWsName(e.target.value)}
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && void handleCreateWorkspace()}
+            />
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground">Color</label>
+              <input
+                type="color"
+                value={newWsColor}
+                onChange={(e) => setNewWsColor(e.target.value)}
+                className="h-7 w-7 cursor-pointer rounded border border-border"
+              />
+            </div>
+            <Button onClick={() => void handleCreateWorkspace()} className="w-full" disabled={!newWsName.trim()}>
+              Create
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Create Folder Dialog ───────────────────────────────────────── */}
+      <Dialog open={showCreateFolder} onOpenChange={setShowCreateFolder}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>New Folder</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-2">
+            <Input
+              placeholder="Folder name"
+              value={newWsName}
+              onChange={(e) => setNewWsName(e.target.value)}
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && void handleCreateFolder()}
+            />
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground">Color</label>
+              <input
+                type="color"
+                value={newWsColor}
+                onChange={(e) => setNewWsColor(e.target.value)}
+                className="h-7 w-7 cursor-pointer rounded border border-border"
+              />
+            </div>
+            <Button onClick={() => void handleCreateFolder()} className="w-full" disabled={!newWsName.trim()}>
+              Create Folder
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit Shortcut Dialog ───────────────────────────────────────── */}
+      <Dialog open={editShortcutToolId !== null} onOpenChange={(v) => !v && setEditShortcutToolId(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Edit Shortcut</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-2">
+            <p className="text-sm text-muted-foreground">
+              Enter a number (1–9) for Ctrl+Number shortcut, or leave empty to remove.
+            </p>
+            <Input
+              placeholder="e.g. 1"
+              value={shortcutInput}
+              onChange={(e) => {
+                const v = e.target.value.replace(/[^1-9]/g, '').slice(0, 1);
+                setShortcutInput(v);
+              }}
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && void handleSaveShortcut()}
+              maxLength={1}
+            />
+            <div className="flex gap-2">
+              <Button onClick={() => void handleSaveShortcut()} className="flex-1">
+                Save
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShortcutInput('');
+                  void handleSaveShortcut();
+                }}
+                className="flex-1"
+                disabled={!shortcutInput}
+              >
+                Clear
+              </Button>
+              <Button variant="ghost" onClick={() => setEditShortcutToolId(null)} className="flex-1">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Reset Confirmation Dialog ──────────────────────────────────── */}
+      <Dialog open={confirmResetTool !== null} onOpenChange={(v) => !v && setConfirmResetTool(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Reset Tool Data</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-2">
+            <p className="text-sm text-muted-foreground">
+              This will permanently delete all data for <strong>{confirmResetTool?.name}</strong> and remove the tool from this workspace.
+              This action cannot be undone.
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="destructive"
+                onClick={() => confirmResetTool && void handleResetTool(confirmResetTool.id, confirmResetTool.toolId)}
+                className="flex-1"
+              >
+                Reset & Remove
+              </Button>
+              <Button variant="outline" onClick={() => setConfirmResetTool(null)} className="flex-1">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }

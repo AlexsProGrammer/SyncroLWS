@@ -101,8 +101,10 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         workspaces: [...state.workspaces, workspace],
       }));
 
-      // Auto-switch to the new workspace
-      await get().switchWorkspace(id);
+      // Auto-switch to the new workspace (but not for folders)
+      if (data.icon !== 'folder-group') {
+        await get().switchWorkspace(id);
+      }
 
       eventBus.emit('workspace:created', { id, name: workspace.name });
       return workspace;
@@ -112,6 +114,11 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       const ws = get().workspaces.find((w) => w.id === id);
       if (!ws) {
         console.error(`[workspace] cannot switch — workspace ${id} not found`);
+        return;
+      }
+
+      // Folders don't have a workspace DB — ignore switch
+      if (ws.icon === 'folder-group') {
         return;
       }
 

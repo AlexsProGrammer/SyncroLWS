@@ -46,6 +46,8 @@ export type AppEvents = {
   // ── Settings ──────────────────────────────────────────────────────────────
   /** Emitted when tool toggle state changes in the Settings UI */
   'settings:tools-changed': void;
+  /** Emitted to switch to a specific settings tab */
+  'settings:open-tab': string;
 
   // ── Workspace ─────────────────────────────────────────────────────────────
   'workspace:created': { id: string; name: string };

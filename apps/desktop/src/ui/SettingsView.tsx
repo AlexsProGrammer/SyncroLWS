@@ -1,14 +1,20 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Switch } from '@/ui/components/switch';
 import { Input } from '@/ui/components/input';
 import { Button } from '@/ui/components/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/ui/components/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/components/select';
 import { Separator } from '@/ui/components/separator';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/ui/components/dialog';
 import { getAllTools } from '@/registry/ToolRegistry';
 import { getDB } from '@/core/db';
 import { eventBus } from '@/core/events';
-import { useProfileStore } from '@/store/profileStore';
+import { useProfileStore, type Profile } from '@/store/profileStore';
 import { useSyncStore } from '@/store/syncStore';
 import { useThemeStore } from '@/store/themeStore';
 
@@ -36,12 +42,54 @@ export { IconSettings };
 
 export function SettingsView(): React.ReactElement {
   const [toolStates, setToolStates] = useState<ToolToggleState[]>([]);
+  const [activeTab, setActiveTab] = useState('general');
   const activeProfileId = useProfileStore((s) => s.activeProfileId);
   const profiles = useProfileStore((s) => s.profiles);
+  const createProfile = useProfileStore((s) => s.createProfile);
+  const updateProfile = useProfileStore((s) => s.updateProfile);
+  const deleteProfile = useProfileStore((s) => s.deleteProfile);
   const activeProfile = profiles.find((p) => p.id === activeProfileId);
   const tools = getAllTools();
   const theme = useThemeStore((s) => s.theme);
   const setTheme = useThemeStore((s) => s.setTheme);
+
+  // ── Profile edit modal ─────────────────────────────────────────────────────
+  const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
+  const [profileName, setProfileName] = useState('');
+  const [profileColor, setProfileColor] = useState('#6366f1');
+  const [isCreatingProfile, setIsCreatingProfile] = useState(false);
+
+  const openEditProfile = (profile: Profile): void => {
+    setEditingProfile(profile);
+    setProfileName(profile.name);
+    setProfileColor(profile.color ?? '#6366f1');
+    setIsCreatingProfile(false);
+  };
+
+  const openCreateProfile = (): void => {
+    setEditingProfile(null);
+    setProfileName('');
+    setProfileColor('#6366f1');
+    setIsCreatingProfile(true);
+  };
+
+  const handleSaveProfile = async (): Promise<void> => {
+    if (!profileName.trim()) return;
+    if (isCreatingProfile) {
+      await createProfile(profileName.trim(), profileColor);
+    } else if (editingProfile) {
+      updateProfile(editingProfile.id, { name: profileName.trim(), color: profileColor });
+    }
+    setEditingProfile(null);
+    setIsCreatingProfile(false);
+  };
+
+  // ── Listen for tab switch events from sidebar ProfileSwitcher ──────────────
+  useEffect(() => {
+    const handler = (tab: string): void => setActiveTab(tab);
+    eventBus.on('settings:open-tab', handler);
+    return () => { eventBus.off('settings:open-tab', handler); };
+  }, []);
 
   // ── Sync store ─────────────────────────────────────────────────────────────
   const syncUrl = useSyncStore((s) => s.syncUrl);
@@ -174,11 +222,14 @@ export function SettingsView(): React.ReactElement {
       </div>
 
       {/* ── Tabs ─────────────────────────────────────────────────────── */}
-      <Tabs defaultValue="general" className="flex flex-1 flex-col overflow-hidden">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-1 flex-col overflow-hidden">
         <div className="border-b border-border px-6">
           <TabsList className="h-10 bg-transparent p-0">
             <TabsTrigger value="general" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
               General
+            </TabsTrigger>
+            <TabsTrigger value="profiles" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+              Profiles
             </TabsTrigger>
             <TabsTrigger value="tools" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
               Tools
@@ -226,6 +277,118 @@ export function SettingsView(): React.ReactElement {
                 </p>
               </div>
             </section>
+          </TabsContent>
+
+          {/* ── Profiles tab ────────────────────────────────────────── */}
+          <TabsContent value="profiles">
+          <section className="max-w-lg space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Profiles</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Manage your profiles. Each profile has its own set of tools,
+                  workspaces, and data.
+                </p>
+              </div>
+              <Button onClick={openCreateProfile} size="sm">
+                Add Profile
+              </Button>
+            </div>
+
+            <div className="space-y-3">
+              {profiles.map((profile) => (
+                <div
+                  key={profile.id}
+                  className="flex items-center justify-between rounded-lg border border-border p-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <span
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white"
+                      style={{ backgroundColor: profile.color ?? '#6366f1' }}
+                    >
+                      {profile.name[0]?.toUpperCase()}
+                    </span>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">{profile.name}</p>
+                      <p className="text-xs text-muted-foreground font-mono">
+                        {profile.id.slice(0, 8)}…
+                        {profile.id === activeProfileId && (
+                          <span className="ml-1 text-primary font-sans">(active)</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openEditProfile(profile)}
+                    >
+                      Edit
+                    </Button>
+                    {profiles.length > 1 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => deleteProfile(profile.id)}
+                      >
+                        Delete
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Profile edit/create modal */}
+          <Dialog
+            open={isCreatingProfile || editingProfile !== null}
+            onOpenChange={(v) => {
+              if (!v) { setEditingProfile(null); setIsCreatingProfile(false); }
+            }}
+          >
+            <DialogContent className="max-w-xs">
+              <DialogHeader>
+                <DialogTitle>{isCreatingProfile ? 'New Profile' : 'Edit Profile'}</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 mt-2">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-foreground">Name</label>
+                  <Input
+                    placeholder="Profile name"
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                    autoFocus
+                    onKeyDown={(e) => e.key === 'Enter' && void handleSaveProfile()}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-foreground">Color</label>
+                  <input
+                    type="color"
+                    value={profileColor}
+                    onChange={(e) => setProfileColor(e.target.value)}
+                    className="h-7 w-7 cursor-pointer rounded border border-border"
+                  />
+                  <span
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white"
+                    style={{ backgroundColor: profileColor }}
+                  >
+                    {profileName?.[0]?.toUpperCase() ?? 'P'}
+                  </span>
+                </div>
+                <Button
+                  onClick={() => void handleSaveProfile()}
+                  className="w-full"
+                  disabled={!profileName.trim()}
+                >
+                  {isCreatingProfile ? 'Create' : 'Save'}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
           </TabsContent>
 
           {/* ── Tools tab ───────────────────────────────────────────── */}

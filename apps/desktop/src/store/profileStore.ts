@@ -18,11 +18,13 @@ interface ProfileState {
 
 interface ProfileActions {
   /** Create a new profile, persist it, and set it as active. */
-  createProfile: (name: string) => Promise<Profile>;
+  createProfile: (name: string, color?: string) => Promise<Profile>;
   /** Switch to an existing profile by UUID. */
   setActiveProfile: (id: string) => void;
   /** Rename an existing profile. */
   renameProfile: (id: string, name: string) => void;
+  /** Update profile fields (name, color, avatar_url). */
+  updateProfile: (id: string, data: Partial<Pick<Profile, 'name' | 'color' | 'avatar_url'>>) => void;
   /** Delete a profile (does NOT delete files on disk). */
   deleteProfile: (id: string) => void;
 }
@@ -35,13 +37,13 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
       profiles: [],
       activeProfileId: null,
 
-      createProfile: async (name: string): Promise<Profile> => {
+      createProfile: async (name: string, color?: string): Promise<Profile> => {
         const id = crypto.randomUUID();
 
         // Create the physical folder via Tauri command
         await invoke<string>('create_profile_folder', { uuid: id });
 
-        const profile: Profile = { id, name };
+        const profile: Profile = { id, name, color: color ?? '#6366f1' };
         set((state) => ({
           profiles: [...state.profiles, profile],
           activeProfileId: id,
@@ -63,6 +65,14 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
         set((state) => ({
           profiles: state.profiles.map((p) =>
             p.id === id ? { ...p, name } : p,
+          ),
+        }));
+      },
+
+      updateProfile: (id: string, data: Partial<Pick<Profile, 'name' | 'color' | 'avatar_url'>>) => {
+        set((state) => ({
+          profiles: state.profiles.map((p) =>
+            p.id === id ? { ...p, ...data } : p,
           ),
         }));
       },

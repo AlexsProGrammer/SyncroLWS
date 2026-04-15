@@ -14,6 +14,7 @@ import { eventBus } from '@/core/events';
 import { Button } from '@/ui/components/button';
 import { Input } from '@/ui/components/input';
 import { Badge } from '@/ui/components/badge';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -126,9 +127,11 @@ export function PomodoroView(): React.ReactElement {
   const [completedToday, setCompletedToday] = useState(0);
   const [label, setLabel] = useState('');
   const [showConfig, setShowConfig] = useState(false);
+  const [pipActive, setPipActive] = useState(false);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const phaseStartRef = useRef<string | null>(null);
+  const pipWindowRef = useRef<WebviewWindow | null>(null);
 
   // ── Load today's completed sessions ───────────────────────────────────────
 
@@ -202,6 +205,124 @@ export function PomodoroView(): React.ReactElement {
     },
     [config, label, stopTimer],
   );
+
+  // ── Picture-in-Picture via Tauri WebviewWindow ─────────────────────────────
+
+  const pipHtmlUrl = `data:text/html,${encodeURIComponent(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#1a1a2e; display:flex; align-items:center; justify-content:center; height:100vh; font-family:system-ui,sans-serif; overflow:hidden; -webkit-user-select:none; }
+  .wrap { position:relative; display:flex; flex-direction:column; align-items:center; }
+  .text { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; text-align:center; }
+  .time { font-size:28px; font-weight:bold; font-variant-numeric:tabular-nums; }
+  .label { font-size:11px; text-transform:uppercase; letter-spacing:1px; margin-top:2px; }
+</style></head><body>
+<div class="wrap">
+  <svg width="140" height="140" viewBox="0 0 140 140" style="transform:rotate(-90deg)">
+    <circle cx="70" cy="70" r="50" fill="none" stroke="#333" stroke-width="6"/>
+    <circle id="arc" cx="70" cy="70" r="50" fill="none" stroke="#6366f1" stroke-width="6" stroke-linecap="round"
+      stroke-dasharray="314.16" stroke-dashoffset="0"/>
+  </svg>
+  <div class="text">
+    <div id="time" class="time">00:00</div>
+    <div id="label" class="label" style="color:#6366f1">Ready</div>
+  </div>
+</div>
+<script>
+  const C = 2 * Math.PI * 50;
+  function update(d) {
+    document.body.style.background = d.bg;
+    document.getElementById('arc').setAttribute('stroke', d.color);
+    document.getElementById('arc').setAttribute('stroke-dashoffset', String(d.offset));
+    document.getElementById('time').textContent = d.time;
+    const lbl = document.getElementById('label');
+    lbl.textContent = d.label;
+    lbl.style.color = d.color;
+  }
+  if (window.__TAURI__) {
+    window.__TAURI__.event.listen('pip-update', function(e) { update(e.payload); });
+  }
+</script>
+</body></html>`)}`;
+
+  const getPipData = useCallback(() => {
+    const progress = totalSeconds > 0 ? remaining / totalSeconds : 0;
+    const circumference = 2 * Math.PI * 50;
+    const offset = circumference * (1 - progress);
+    const bg = phase === 'focus' ? '#1a1a2e' : phase === 'idle' ? '#1a1a2e' : '#1a2e1a';
+    const color = phase === 'focus' ? '#6366f1' : phase === 'short_break' ? '#22c55e' : phase === 'long_break' ? '#3b82f6' : '#888';
+    return { bg, color, offset, time: formatTimer(remaining), label: phaseLabel(phase) };
+  }, [remaining, totalSeconds, phase]);
+
+  // Send timer updates to PiP window
+  useEffect(() => {
+    if (!pipActive || !pipWindowRef.current) return;
+    pipWindowRef.current.emitTo('pomodoro-pip', 'pip-update', getPipData()).catch(() => {});
+  }, [pipActive, getPipData]);
+
+  const openPip = useCallback(async () => {
+    if (pipWindowRef.current) {
+      try {
+        await pipWindowRef.current.setFocus();
+        return;
+      } catch {
+        pipWindowRef.current = null;
+      }
+    }
+
+    try {
+      const pip = new WebviewWindow('pomodoro-pip', {
+        title: 'Pomodoro Timer',
+        width: 220,
+        height: 240,
+        resizable: false,
+        alwaysOnTop: true,
+        decorations: true,
+        center: false,
+        x: 100,
+        y: 100,
+        url: pipHtmlUrl,
+      });
+
+      pip.once('tauri://created', () => {
+        // Send initial data after a short delay so the webview JS is ready
+        setTimeout(() => {
+          pip.emitTo('pomodoro-pip', 'pip-update', getPipData()).catch(() => {});
+        }, 300);
+      });
+
+      pip.once('tauri://destroyed', () => {
+        pipWindowRef.current = null;
+        setPipActive(false);
+      });
+
+      pipWindowRef.current = pip;
+      setPipActive(true);
+    } catch (err) {
+      console.error('[pomodoro] PiP window failed:', err);
+      eventBus.emit('notification:show', {
+        title: 'Picture-in-Picture',
+        body: 'Could not open PiP window.',
+        type: 'warning',
+      });
+    }
+  }, [pipHtmlUrl, getPipData]);
+
+  const closePip = useCallback(async () => {
+    if (pipWindowRef.current) {
+      try { await pipWindowRef.current.destroy(); } catch { /* already closed */ }
+      pipWindowRef.current = null;
+    }
+    setPipActive(false);
+  }, []);
+
+  // Clean up PiP on unmount
+  useEffect(() => () => {
+    if (pipWindowRef.current) {
+      pipWindowRef.current.destroy().catch(() => {});
+      pipWindowRef.current = null;
+    }
+  }, []);
 
   // ── Handle timer reaching 0 ──────────────────────────────────────────────
 
@@ -363,6 +484,17 @@ export function PomodoroView(): React.ReactElement {
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.68 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => void (pipActive ? closePip() : openPip())}
+          title="Picture-in-Picture"
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" />
+            <rect x="12" y="9" width="8" height="6" rx="1" fill="currentColor" opacity="0.3" />
           </svg>
         </Button>
       </div>

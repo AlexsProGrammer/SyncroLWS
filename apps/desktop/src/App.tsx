@@ -11,6 +11,7 @@ import { startBackupScheduler } from './core/backup';
 import { useWorkspaceStore } from './store/workspaceStore';
 import { useProfileStore } from './store/profileStore';
 import { toast } from './ui/hooks/use-toast';
+import { getWorkspaceDB } from './core/db';
 import type { BaseEntity } from '@syncrohws/shared-types';
 
 interface ConflictState {
@@ -45,13 +46,28 @@ export default function App(): React.ReactElement {
         eventBus.emit('nav:open-command-palette', undefined);
         return;
       }
-      // Ctrl+1…9 → switch to tool by shortcut (dynamic from registry)
-      if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-        const tool = enabledTools.find((t) => t.shortcut === e.key);
-        if (tool) {
-          e.preventDefault();
-          setActiveView(tool.id);
+      // Ctrl+1…9 → switch to tool by workspace shortcut config
+      if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
+        // Try workspace tool shortcuts first
+        try {
+          const db = getWorkspaceDB();
+          db.select<{ tool_id: string; config: string }[]>(
+            `SELECT tool_id, config FROM workspace_tools`,
+          ).then((rows) => {
+            for (const row of rows) {
+              try {
+                const cfg = JSON.parse(row.config || '{}');
+                if (cfg.shortcut === e.key) {
+                  setActiveView(row.tool_id);
+                  return;
+                }
+              } catch { /* skip */ }
+            }
+          }).catch(() => { /* no workspace DB loaded */ });
+        } catch {
+          // No workspace DB loaded — ignore
         }
+        e.preventDefault();
       }
     };
     window.addEventListener('keydown', onKey);

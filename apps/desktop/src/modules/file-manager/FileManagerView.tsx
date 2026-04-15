@@ -7,6 +7,7 @@
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { getWorkspaceDB, getCurrentProfileId, getCurrentWorkspaceId } from '@/core/db';
 import { eventBus } from '@/core/events';
 import { Button } from '@/ui/components/button';
@@ -158,6 +159,7 @@ export function FileManagerView(): React.ReactElement {
       if (!profileId || !workspaceId) return;
 
       const db = getWorkspaceDB();
+      let successCount = 0;
 
       for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
@@ -233,6 +235,8 @@ export function FileManagerView(): React.ReactElement {
               deleted_at: null,
             },
           });
+
+          successCount++;
         } catch (err) {
           console.error(`[file-manager] upload failed for ${file.name}:`, err);
           eventBus.emit('notification:show', {
@@ -245,11 +249,13 @@ export function FileManagerView(): React.ReactElement {
 
       eventBus.emit('notification:show', {
         title: 'Upload complete',
-        body: `${fileList.length} file(s) uploaded`,
+        body: `${successCount} file(s) imported`,
         type: 'info',
       });
+
+      void loadFiles();
     },
-    [],
+    [loadFiles],
   );
 
   // ── Drag and drop ─────────────────────────────────────────────────────────
@@ -443,7 +449,16 @@ export function FileManagerView(): React.ReactElement {
                 className="group relative flex flex-col items-center gap-2 rounded-lg border border-border bg-card p-3 transition-colors hover:border-primary/30 cursor-pointer"
                 onClick={() => isPreviewable(f.mime_type) ? void openPreview(f) : undefined}
               >
-                <span className="text-3xl">{getFileIcon(f.mime_type)}</span>
+                {f.mime_type.startsWith('image/') ? (
+                  <img
+                    src={convertFileSrc(f.local_path)}
+                    alt={f.name}
+                    className="h-20 w-full rounded object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <span className="text-3xl">{getFileIcon(f.mime_type)}</span>
+                )}
                 <p className="w-full truncate text-center text-xs font-medium text-foreground">
                   {f.name}
                 </p>
@@ -511,7 +526,7 @@ export function FileManagerView(): React.ReactElement {
             <div className="mt-2">
               {previewFile.mime_type.startsWith('image/') && (
                 <img
-                  src={`asset://localhost/${encodeURIComponent(previewFile.local_path)}`}
+                  src={convertFileSrc(previewFile.local_path)}
                   alt={previewFile.name}
                   className="max-h-[60vh] w-full rounded-lg object-contain"
                 />
