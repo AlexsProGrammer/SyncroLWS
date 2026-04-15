@@ -4,6 +4,22 @@ export { CalendarView } from './CalendarView';
 export { EventDetailModal } from './EventDetailModal';
 export type { CalendarEventItem } from './EventDetailModal';
 
+/** Extract display title from a calendar event payload. */
+export function getEntityTitle(payload: Record<string, unknown>): string {
+  return (typeof payload['title'] === 'string' && payload['title']) || 'Untitled Event';
+}
+
+/** Extract subtitle from a calendar event payload (date + location). */
+export function getEntitySubtitle(payload: Record<string, unknown>): string | undefined {
+  const parts: string[] = [];
+  if (typeof payload['start'] === 'string') {
+    const d = new Date(payload['start']);
+    parts.push(d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+  }
+  if (typeof payload['location'] === 'string' && payload['location']) parts.push(payload['location']);
+  return parts.length ? parts.join(' · ') : undefined;
+}
+
 /**
  * Calendar module — registers all Event Bus listeners.
  * Call init() once at app startup.

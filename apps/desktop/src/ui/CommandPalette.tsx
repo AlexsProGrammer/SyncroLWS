@@ -2,9 +2,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Command } from 'cmdk';
 import { eventBus } from '@/core/events';
 import { ftsSearch, getWorkspaceDB } from '@/core/db';
+import { getToolByEntityType } from '@/registry/ToolRegistry';
 import type { BaseEntity } from '@syncrohws/shared-types';
 
-type SearchResult = Pick<BaseEntity, 'id' | 'type'> & { title: string };
+type SearchResult = Pick<BaseEntity, 'id' | 'type'> & {
+  title: string;
+  subtitle?: string;
+  payload: Record<string, unknown>;
+};
 
 export function CommandPalette(): React.ReactElement {
   const [open, setOpen] = useState(false);
@@ -48,14 +53,20 @@ export function CommandPalette(): React.ReactElement {
         ids,
       );
       const mapped: SearchResult[] = rows.map((r) => {
-        let title = r.id;
-        try {
-          const payload = JSON.parse(r.payload) as Record<string, unknown>;
-          if (typeof payload['title'] === 'string') title = payload['title'];
-        } catch {
-          // keep id as fallback
-        }
-        return { id: r.id, type: r.type as BaseEntity['type'], title };
+        const payload = (() => {
+          try { return JSON.parse(r.payload) as Record<string, unknown>; }
+          catch { return {}; }
+        })();
+
+        const tool = getToolByEntityType(r.type);
+        const title = tool?.getEntityTitle
+          ? tool.getEntityTitle(payload)
+          : (typeof payload['title'] === 'string' && payload['title'])
+            || (typeof payload['name'] === 'string' && payload['name'])
+            || r.id;
+        const subtitle = tool?.getEntitySubtitle?.(payload);
+
+        return { id: r.id, type: r.type as BaseEntity['type'], title, subtitle, payload };
       });
       console.log('[fts] results:', mapped);
       setResults(mapped);
@@ -89,23 +100,58 @@ export function CommandPalette(): React.ReactElement {
               No results for "{query}"
             </Command.Empty>
           )}
-          {results.map((r) => (
-            <Command.Item
-              key={r.id}
-              value={r.id}
-              onSelect={() => {
-                eventBus.emit('nav:open-entity', { id: r.id, type: r.type });
-                setOpen(false);
-                setQuery('');
-              }}
-              className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-accent aria-selected:bg-accent"
-            >
-              <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-                {r.type}
-              </span>
-              <span className="truncate">{r.title}</span>
-            </Command.Item>
-          ))}
+          {results.map((r) => {
+            const tool = getToolByEntityType(r.type);
+            const ToolIcon = tool?.icon;
+
+            // Allow module to provide a full custom render
+            if (tool?.renderSearchResult) {
+              return (
+                <Command.Item
+                  key={r.id}
+                  value={r.id}
+                  onSelect={() => {
+                    eventBus.emit('nav:open-entity', { id: r.id, type: r.type });
+                    setOpen(false);
+                    setQuery('');
+                  }}
+                  className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-accent aria-selected:bg-accent"
+                >
+                  {tool.renderSearchResult({ id: r.id, type: r.type, title: r.title, payload: r.payload })}
+                </Command.Item>
+              );
+            }
+
+            return (
+              <Command.Item
+                key={r.id}
+                value={r.id}
+                onSelect={() => {
+                  eventBus.emit('nav:open-entity', { id: r.id, type: r.type });
+                  setOpen(false);
+                  setQuery('');
+                }}
+                className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-accent aria-selected:bg-accent"
+              >
+                {ToolIcon ? (
+                  <ToolIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                ) : (
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+                    {r.type}
+                  </span>
+                )}
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate">{r.title}</span>
+                  {r.subtitle && (
+                    <span className="truncate text-xs text-muted-foreground">{r.subtitle}</span>
+                  )}
+                </div>
+                <span className="shrink-0 text-[10px] text-muted-foreground/60 capitalize">
+                  {tool?.name ?? r.type}
+                </span>
+              </Command.Item>
+            );
+          })}
         </Command.List>
       </Command>
     </div>

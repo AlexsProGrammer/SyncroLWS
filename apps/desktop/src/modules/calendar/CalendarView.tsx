@@ -168,6 +168,20 @@ export function CalendarView(): React.ReactElement {
     };
   }, [loadEvents, loadCrossModuleEvents]);
 
+  // Handle nav:open-entity for calendar events — open the detail modal
+  useEffect(() => {
+    const onNav = ({ id, type }: { id: string; type: string }): void => {
+      if (type !== 'calendar_event') return;
+      const found = events.find((e) => e.id === id);
+      if (found) {
+        setEditingEvent(found);
+        setModalOpen(true);
+      }
+    };
+    eventBus.on('nav:open-entity', onNav);
+    return () => { eventBus.off('nav:open-entity', onNav); };
+  }, [events]);
+
   // ── Convert to FullCalendar events ────────────────────────────────────────
 
   const fcEvents: EventInput[] = useMemo(() => {

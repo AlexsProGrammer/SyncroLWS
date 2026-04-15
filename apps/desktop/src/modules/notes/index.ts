@@ -9,6 +9,19 @@ export { TagHighlight } from './TagExtension';
 export { BacklinksPanel } from './BacklinksPanel';
 export { EditorToolbar } from './EditorToolbar';
 
+/** Extract display title from a note payload. */
+export function getEntityTitle(payload: Record<string, unknown>): string {
+  return (typeof payload['title'] === 'string' && payload['title']) || 'Untitled Note';
+}
+
+/** Extract subtitle from a note payload (first ~80 chars of content). */
+export function getEntitySubtitle(payload: Record<string, unknown>): string | undefined {
+  const md = typeof payload['content_md'] === 'string' ? payload['content_md'] : '';
+  if (!md) return undefined;
+  const plain = md.replace(/[#*_~`>\[\]()!|]/g, '').trim();
+  return plain.length > 80 ? plain.slice(0, 80) + '…' : plain || undefined;
+}
+
 /**
  * Notes module — registers all Event Bus listeners.
  * Call init() once at app startup.

@@ -8,6 +8,23 @@ export { formatDuration } from './TimeTrackerView';
 export { ManualEntryForm } from './ManualEntryForm';
 export { TimeTrackerReports } from './TimeTrackerReports';
 
+/** Extract display title from a time log payload. */
+export function getEntityTitle(payload: Record<string, unknown>): string {
+  return (typeof payload['description'] === 'string' && payload['description']) || 'Time Log';
+}
+
+/** Extract subtitle from a time log payload (duration + project). */
+export function getEntitySubtitle(payload: Record<string, unknown>): string | undefined {
+  const parts: string[] = [];
+  if (typeof payload['duration_seconds'] === 'number' && payload['duration_seconds'] > 0) {
+    const mins = Math.round(payload['duration_seconds'] / 60);
+    parts.push(mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`);
+  }
+  if (typeof payload['project'] === 'string' && payload['project']) parts.push(payload['project']);
+  if (payload['billable'] === true) parts.push('billable');
+  return parts.length ? parts.join(' · ') : undefined;
+}
+
 const POLL_INTERVAL_MS = 60_000; // 60 seconds — as specified in IMPLEMENTATION.md
 
 let _lastWindowTitle = '';

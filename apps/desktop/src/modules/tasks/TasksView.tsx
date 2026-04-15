@@ -161,6 +161,20 @@ export function TasksView(): React.ReactElement {
     };
   }, [loadTasks]);
 
+  // Handle nav:open-entity for tasks — open the detail panel
+  useEffect(() => {
+    const onNav = ({ id, type }: { id: string; type: string }): void => {
+      if (type !== 'task') return;
+      const found = tasks.find((t) => t.id === id);
+      if (found) {
+        setDetailTask(found);
+        setDetailOpen(true);
+      }
+    };
+    eventBus.on('nav:open-entity', onNav);
+    return () => { eventBus.off('nav:open-entity', onNav); };
+  }, [tasks]);
+
   // ── Create task ───────────────────────────────────────────────────────────
 
   const createTask = useCallback(

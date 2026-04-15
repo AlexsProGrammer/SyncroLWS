@@ -110,6 +110,17 @@ export function BookmarksView(): React.ReactElement {
     };
   }, [loadBookmarks]);
 
+  // Handle nav:open-entity for bookmarks — open the edit dialog
+  useEffect(() => {
+    const onNav = ({ id, type }: { id: string; type: string }): void => {
+      if (type !== 'bookmark') return;
+      const found = bookmarks.find((b) => b.id === id);
+      if (found) setEditBookmark(found);
+    };
+    eventBus.on('nav:open-entity', onNav);
+    return () => { eventBus.off('nav:open-entity', onNav); };
+  }, [bookmarks]);
+
   // ── Create ────────────────────────────────────────────────────────────────
 
   const createBookmark = useCallback(async () => {

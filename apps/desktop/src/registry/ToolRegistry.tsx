@@ -111,6 +111,15 @@ export interface ToolManifest {
 
 // ── Tool interface ────────────────────────────────────────────────────────────
 
+/** Minimal entity data passed to cross-module renderers. */
+export interface SearchResultEntity {
+  id: string;
+  type: string;
+  title: string;
+  /** Raw parsed payload for module-specific rendering. */
+  payload: Record<string, unknown>;
+}
+
 export interface Tool {
   id: string;
   name: string;
@@ -124,6 +133,21 @@ export interface Tool {
   init?: () => void;
   /** Full manifest metadata. */
   manifest?: ToolManifest;
+  /**
+   * Optional custom renderer for search results in the command palette.
+   * If omitted, the default title + type badge is used.
+   */
+  renderSearchResult?: (entity: SearchResultEntity) => React.ReactNode;
+  /**
+   * Extract a display title from a raw entity payload.
+   * If omitted, falls back to payload.title or payload.name or entity id.
+   */
+  getEntityTitle?: (payload: Record<string, unknown>) => string;
+  /**
+   * Extract a short subtitle / description from a raw entity payload.
+   * Shown below the title in search results.
+   */
+  getEntitySubtitle?: (payload: Record<string, unknown>) => string | undefined;
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────
@@ -161,8 +185,13 @@ const manifests = import.meta.glob<{ default: ToolManifest } | ToolManifest>(
   { eager: true },
 );
 
-// Eagerly import all module index.ts files (for init functions)
-const moduleInits = import.meta.glob<{ init?: () => void }>(
+// Eagerly import all module index.ts files (for init + entity hooks)
+const moduleInits = import.meta.glob<{
+  init?: () => void;
+  renderSearchResult?: (entity: SearchResultEntity) => React.ReactNode;
+  getEntityTitle?: (payload: Record<string, unknown>) => string;
+  getEntitySubtitle?: (payload: Record<string, unknown>) => string | undefined;
+}>(
   '../modules/*/index.ts',
   { eager: true },
 );
@@ -236,6 +265,9 @@ export function discoverAndRegisterTools(): void {
       entityTypes: manifest.entityTypes,
       init,
       manifest,
+      renderSearchResult: initModule?.renderSearchResult,
+      getEntityTitle: initModule?.getEntityTitle,
+      getEntitySubtitle: initModule?.getEntitySubtitle,
     });
   }
 

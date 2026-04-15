@@ -9,6 +9,22 @@ export type { KanbanTaskItem } from './KanbanCard';
 export type { KanbanColumn } from './TasksView';
 export type { KanbanFilterState } from './KanbanFilters';
 
+/** Extract display title from a task payload. */
+export function getEntityTitle(payload: Record<string, unknown>): string {
+  return (typeof payload['title'] === 'string' && payload['title']) || 'Untitled Task';
+}
+
+/** Extract subtitle from a task payload (status + priority + due date). */
+export function getEntitySubtitle(payload: Record<string, unknown>): string | undefined {
+  const parts: string[] = [];
+  if (typeof payload['status'] === 'string') parts.push(payload['status']);
+  if (typeof payload['priority'] === 'string') parts.push(payload['priority']);
+  if (typeof payload['due_date'] === 'string') {
+    parts.push('due ' + new Date(payload['due_date']).toLocaleDateString());
+  }
+  return parts.length ? parts.join(' · ') : undefined;
+}
+
 /**
  * Tasks module — registers all Event Bus listeners.
  * Call init() once at app startup.

@@ -203,6 +203,17 @@ export function HabitsView(): React.ReactElement {
     };
   }, [loadHabits]);
 
+  // Handle nav:open-entity for habits — open the detail dialog
+  useEffect(() => {
+    const onNav = ({ id, type }: { id: string; type: string }): void => {
+      if (type !== 'habit') return;
+      const found = habits.find((h) => h.id === id);
+      if (found) setSelectedHabit(found);
+    };
+    eventBus.on('nav:open-entity', onNav);
+    return () => { eventBus.off('nav:open-entity', onNav); };
+  }, [habits]);
+
   // ── Create habit ──────────────────────────────────────────────────────────
 
   const createHabit = useCallback(async () => {
