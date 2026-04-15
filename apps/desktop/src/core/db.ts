@@ -40,12 +40,12 @@ export async function loadProfileDB(profileId: string): Promise<Database> {
     _currentProfileId = null;
   }
 
-  // Ensure the profile directory exists on disk
-  await invoke<string>('create_profile_folder', { uuid: profileId });
+  // Ensure the profile directory exists on disk — returns the absolute path
+  const profilePath = await invoke<string>('create_profile_folder', { uuid: profileId });
 
-  // Open the profile-specific SQLite database
-  // The Tauri SQL plugin resolves paths relative to the app data dir
-  _db = await Database.load(`sqlite:profiles/${profileId}/data.sqlite`);
+  // Open the profile-specific SQLite database using the absolute path
+  // (relative paths resolve to app config dir, not app data dir on Linux)
+  _db = await Database.load(`sqlite:${profilePath}/data.sqlite`);
   _currentProfileId = profileId;
 
   // Run schema migrations
