@@ -188,6 +188,7 @@ export function NoteEditor({
   onTagClick,
 }: NoteEditorProps): React.ReactElement {
   const titleRef = useRef<HTMLInputElement>(null);
+  const titleValueRef = useRef(initialTitle);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sourceMode, setSourceMode] = useState(false);
   const [sourceHtml, setSourceHtml] = useState('');
@@ -238,7 +239,7 @@ export function NoteEditor({
 
   const persistNote = useCallback(async (): Promise<void> => {
     if (!editor) return;
-    const title = titleRef.current?.value ?? initialTitle;
+    const title = titleRef.current?.value ?? titleValueRef.current;
     const content_md = editor.getText({ blockSeparator: '\n\n' });
     const content_json = JSON.stringify(editor.getJSON());
     const linked_entity_ids: string[] = [];
@@ -271,7 +272,7 @@ export function NoteEditor({
     } catch (err) {
       console.error('[NoteEditor] save failed:', err);
     }
-  }, [editor, entityId, initialTitle]);
+  }, [editor, entityId]);
 
   const persistNoteRef = useRef(persistNote);
   persistNoteRef.current = persistNote;
@@ -321,7 +322,10 @@ export function NoteEditor({
         defaultValue={initialTitle}
         placeholder="Untitled note"
         className="w-full border-0 bg-transparent text-2xl font-semibold text-foreground outline-none placeholder:text-muted-foreground px-1 mb-2 shrink-0"
-        onChange={() => scheduleSave()}
+        onChange={(e) => {
+          titleValueRef.current = e.target.value;
+          scheduleSave();
+        }}
       />
 
       {/* Formatting toolbar */}
@@ -341,10 +345,17 @@ export function NoteEditor({
           spellCheck={false}
         />
       ) : (
-        <EditorContent
-          editor={editor}
+        <div
           className="note-editor-content prose prose-sm dark:prose-invert max-w-none flex-1 min-h-0 cursor-text rounded-md p-1 outline-none overflow-y-auto"
-        />
+          onClick={(e) => {
+            // Click anywhere in whitespace → focus editor at end
+            if (editor && e.target === e.currentTarget) {
+              editor.commands.focus('end');
+            }
+          }}
+        >
+          <EditorContent editor={editor} className="h-full" />
+        </div>
       )}
 
       {/* Image picker dialog */}

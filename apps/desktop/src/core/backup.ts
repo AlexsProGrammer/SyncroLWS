@@ -1,28 +1,47 @@
 import { path } from '@tauri-apps/api';
 import { copyFile, mkdir } from '@tauri-apps/plugin-fs';
+import { getCurrentProfileId, getCurrentWorkspaceId } from './db';
 
 const BACKUP_INTERVAL_MS = 30 * 60 * 1000; // every 30 minutes
 
 /**
  * Starts a periodic SQLite backup scheduler.
- * Copies the live .db file to the configured backup directory.
+ * Copies the active profile + workspace DB files to a timestamped backup folder.
  *
  * Returns a cleanup function to cancel the interval.
  */
 export function startBackupScheduler(): () => void {
   const run = async (): Promise<void> => {
+    const profileId = getCurrentProfileId();
+    if (!profileId) return; // no profile loaded yet
+
     try {
       const appDataDir = await path.appDataDir();
-      const backupDir = await path.join(appDataDir, 'backups');
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const backupDir = await path.join(appDataDir, 'backups', profileId, timestamp);
 
       await mkdir(backupDir, { recursive: true });
 
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const dbSrc = await path.join(appDataDir, 'syncrohws.db');
-      const dbDest = await path.join(backupDir, `syncrohws_${timestamp}.db`);
+      // Back up profile DB
+      const profileDbSrc = await path.join(appDataDir, 'profiles', profileId, 'data.sqlite');
+      const profileDbDest = await path.join(backupDir, 'profile.sqlite');
+      await copyFile(profileDbSrc, profileDbDest);
 
-      await copyFile(dbSrc, dbDest);
-      console.log(`[backup] SQLite snapshot saved → ${dbDest}`);
+      // Back up active workspace DB if one is loaded
+      const workspaceId = getCurrentWorkspaceId();
+      if (workspaceId) {
+        const wsDbSrc = await path.join(
+          appDataDir, 'profiles', profileId, 'workspaces', workspaceId, 'data.sqlite',
+        );
+        const wsDbDest = await path.join(backupDir, `workspace_${workspaceId}.sqlite`);
+        try {
+          await copyFile(wsDbSrc, wsDbDest);
+        } catch {
+          // Workspace DB may not exist yet — skip silently
+        }
+      }
+
+      console.log(`[backup] Snapshot saved → ${backupDir}`);
     } catch (err) {
       // Backup failure must never crash the app
       console.error('[backup] Failed to create backup:', err);

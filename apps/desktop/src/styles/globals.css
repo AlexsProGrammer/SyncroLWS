@@ -108,6 +108,21 @@ html {
 
 /* ── Note Editor Styles ────────────────────────────────────────────────────── */
 
+/* ProseMirror — fill available space, click anywhere to type */
+.note-editor-content .ProseMirror {
+  min-height: 100%;
+  height: 100%;
+  outline: none;
+  padding: 0.25rem;
+}
+.note-editor-content .ProseMirror p.is-editor-empty:first-child::before {
+  color: hsl(var(--muted-foreground));
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
 /* Wiki-links */
 .note-editor-content .wiki-link {
   cursor: pointer;
