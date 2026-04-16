@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { getDB, loadWorkspaceDB, closeWorkspaceDB } from '@/core/db';
+import { getDB, loadWorkspaceDB, closeWorkspaceDB, getWorkspaceDB, setProfileSetting, getProfileSetting } from '@/core/db';
 import { eventBus } from '@/core/events';
+import { getAllTools } from '@/registry/ToolRegistry';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,8 @@ interface WorkspaceActions {
   deleteWorkspace: (id: string) => Promise<void>;
   /** Batch-update sort_order for a list of workspace IDs (in order). */
   reorderWorkspaces: (orderedIds: string[]) => Promise<void>;
+  /** Get the last active workspace ID from profile DB. */
+  getLastWorkspaceId: () => Promise<string | null>;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -104,6 +107,24 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       // Auto-switch to the new workspace (but not for folders)
       if (data.icon !== 'folder-group') {
         await get().switchWorkspace(id);
+
+        // Auto-seed default tools into the new workspace
+        try {
+          const wsDb = getWorkspaceDB();
+          const tools = getAllTools();
+          for (let i = 0; i < tools.length; i++) {
+            const tool = tools[i]!;
+            const toolInstanceId = crypto.randomUUID();
+            await wsDb.execute(
+              `INSERT INTO workspace_tools (id, tool_id, name, description, config, sort_order, created_at)
+               VALUES (?, ?, ?, ?, '{}', ?, ?)`,
+              [toolInstanceId, tool.id, tool.name, tool.manifest?.description ?? '', i, now],
+            );
+          }
+          eventBus.emit('workspace:tool-added', { workspaceId: id, toolInstanceId: '', toolId: '' });
+        } catch (err) {
+          console.warn('[workspace] auto-seed tools failed:', err);
+        }
       }
 
       eventBus.emit('workspace:created', { id, name: workspace.name });
@@ -127,6 +148,8 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       try {
         await loadWorkspaceDB(id);
         set({ activeWorkspaceId: id, loading: false });
+        // Persist last active workspace for this profile
+        void setProfileSetting('last_workspace_id', id);
         eventBus.emit('workspace:switched', { id, name: ws.name });
       } catch (err) {
         console.error('[workspace] failed to switch:', err);
@@ -208,6 +231,10 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           })
           .sort((a, b) => a.sort_order - b.sort_order),
       }));
+    },
+
+    getLastWorkspaceId: async () => {
+      return getProfileSetting('last_workspace_id');
     },
   }),
 );

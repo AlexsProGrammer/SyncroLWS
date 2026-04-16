@@ -201,6 +201,17 @@ interface WorkspaceTreeNode extends Workspace {
   children: WorkspaceTreeNode[];
 }
 
+/** Collect all descendant workspaces of a parent (for cascade delete). */
+function collectDescendants(parentId: string, allWorkspaces: Workspace[]): Workspace[] {
+  const children = allWorkspaces.filter((w) => w.parent_id === parentId);
+  const result: Workspace[] = [];
+  for (const child of children) {
+    result.push(...collectDescendants(child.id, allWorkspaces));
+    result.push(child);
+  }
+  return result;
+}
+
 function WorkspaceTreeItem({
   node,
   depth,
@@ -208,6 +219,8 @@ function WorkspaceTreeItem({
   onSelect,
   collapsed: sidebarCollapsed,
   onDrop,
+  onRename,
+  onDelete,
 }: {
   node: WorkspaceTreeNode;
   depth: number;
@@ -215,6 +228,8 @@ function WorkspaceTreeItem({
   onSelect: (id: string) => void;
   collapsed: boolean;
   onDrop?: (dragId: string, targetId: string) => void;
+  onRename?: (id: string, currentName: string) => void;
+  onDelete?: (id: string, name: string, isFolder: boolean, hasChildren: boolean) => void;
 }): React.ReactElement {
   const [expanded, setExpanded] = useState(true);
   const [dragOver, setDragOver] = useState(false);
@@ -249,7 +264,7 @@ function WorkspaceTreeItem({
   };
 
   return (
-    <div>
+    <div className="group/ws relative">
       <button
         draggable
         onDragStart={handleDragStart}
@@ -282,6 +297,32 @@ function WorkspaceTreeItem({
         )}
         {!sidebarCollapsed && <span className="truncate flex-1 text-left">{node.name}</span>}
       </button>
+      {!sidebarCollapsed && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 opacity-0 transition-opacity group-hover/ws:opacity-100 text-muted-foreground hover:text-foreground hover:bg-accent"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <IconMoreVertical className="h-3 w-3" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-40">
+            <DropdownMenuItem onClick={() => onRename?.(node.id, node.name)}>
+              <IconEdit className="mr-2 h-3.5 w-3.5" />
+              Rename
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onClick={() => onDelete?.(node.id, node.name, isFolder, hasChildren)}
+            >
+              <IconTrash className="mr-2 h-3.5 w-3.5" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
       {isFolder && expanded && !sidebarCollapsed && (
         <div>
           {node.children.map((child) => (
@@ -293,6 +334,8 @@ function WorkspaceTreeItem({
               onSelect={onSelect}
               collapsed={sidebarCollapsed}
               onDrop={onDrop}
+              onRename={onRename}
+              onDelete={onDelete}
             />
           ))}
         </div>
@@ -573,6 +616,7 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
   const createWorkspace = useWorkspaceStore((s) => s.createWorkspace);
   const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
+  const deleteWorkspace = useWorkspaceStore((s) => s.deleteWorkspace);
 
   const tree = buildWorkspaceTree(workspaces);
 
@@ -676,6 +720,33 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
     setNewWsName('');
     setNewWsColor('#6366f1');
     setShowCreateFolder(false);
+  };
+
+  // ── Workspace rename / delete ───────────────────────────────────────────
+
+  const [renameWs, setRenameWs] = useState<{ id: string; name: string } | null>(null);
+  const [renameInput, setRenameInput] = useState('');
+  const [confirmDeleteWs, setConfirmDeleteWs] = useState<{
+    id: string; name: string; isFolder: boolean; hasChildren: boolean;
+  } | null>(null);
+
+  const handleRenameWorkspace = async (): Promise<void> => {
+    if (!renameWs || !renameInput.trim()) return;
+    await updateWorkspace(renameWs.id, { name: renameInput.trim() });
+    setRenameWs(null);
+  };
+
+  const handleDeleteWorkspace = async (): Promise<void> => {
+    if (!confirmDeleteWs) return;
+    // For folders with children, also soft-delete all descendants
+    if (confirmDeleteWs.isFolder && confirmDeleteWs.hasChildren) {
+      const descendants = collectDescendants(confirmDeleteWs.id, workspaces);
+      for (const d of descendants) {
+        await deleteWorkspace(d.id);
+      }
+    }
+    await deleteWorkspace(confirmDeleteWs.id);
+    setConfirmDeleteWs(null);
   };
 
   // Navigate via workspace tools (map tool_id → registered tool, then navigate)
@@ -864,6 +935,10 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
               onSelect={(id) => void switchWorkspace(id)}
               collapsed={collapsed}
               onDrop={handleTreeDrop}
+              onRename={(id, name) => { setRenameInput(name); setRenameWs({ id, name }); }}
+              onDelete={(id, name, isFolder, hasChildren) =>
+                setConfirmDeleteWs({ id, name, isFolder, hasChildren })
+              }
             />
           ))}
         </div>
@@ -1168,6 +1243,62 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
                 Reset & Remove
               </Button>
               <Button variant="outline" onClick={() => setConfirmResetTool(null)} className="flex-1">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Workspace Rename Dialog ────────────────────────────────────── */}
+      <Dialog open={renameWs !== null} onOpenChange={(v) => !v && setRenameWs(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Rename {renameWs?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-2">
+            <Input
+              value={renameInput}
+              onChange={(e) => setRenameInput(e.target.value)}
+              placeholder="New name"
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && void handleRenameWorkspace()}
+            />
+            <div className="flex gap-2">
+              <Button onClick={() => void handleRenameWorkspace()} className="flex-1">
+                Rename
+              </Button>
+              <Button variant="outline" onClick={() => setRenameWs(null)} className="flex-1">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Workspace Delete Confirmation Dialog ───────────────────────── */}
+      <Dialog open={confirmDeleteWs !== null} onOpenChange={(v) => !v && setConfirmDeleteWs(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Delete {confirmDeleteWs?.isFolder ? 'Folder' : 'Workspace'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-2">
+            <p className="text-sm text-muted-foreground">
+              {confirmDeleteWs?.isFolder && confirmDeleteWs.hasChildren ? (
+                <>This will delete the folder <strong>{confirmDeleteWs.name}</strong> and all workspaces inside it. This action cannot be undone.</>
+              ) : (
+                <>Are you sure you want to delete <strong>{confirmDeleteWs?.name}</strong>? All data inside will be lost. This action cannot be undone.</>
+              )}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="destructive"
+                onClick={() => void handleDeleteWorkspace()}
+                className="flex-1"
+              >
+                Delete
+              </Button>
+              <Button variant="outline" onClick={() => setConfirmDeleteWs(null)} className="flex-1">
                 Cancel
               </Button>
             </div>

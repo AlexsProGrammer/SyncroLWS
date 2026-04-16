@@ -76,6 +76,25 @@ export function getCurrentProfileId(): string | null {
   return _currentProfileId;
 }
 
+// ── Profile Settings Helpers ──────────────────────────────────────────────────
+
+export async function getProfileSetting(key: string): Promise<string | null> {
+  const db = getDB();
+  const rows = await db.select<{ value: string }[]>(
+    `SELECT value FROM profile_settings WHERE key = ?`,
+    [key],
+  );
+  return rows[0]?.value ?? null;
+}
+
+export async function setProfileSetting(key: string, value: string): Promise<void> {
+  const db = getDB();
+  await db.execute(
+    `INSERT OR REPLACE INTO profile_settings (key, value) VALUES (?, ?)`,
+    [key, value],
+  );
+}
+
 // ── Workspace DB ──────────────────────────────────────────────────────────────
 
 /**
@@ -157,6 +176,10 @@ CREATE TABLE IF NOT EXISTS \`active_tools\` (
   \`profile_id\` text NOT NULL,
   \`tool_id\` text NOT NULL,
   \`is_enabled\` integer DEFAULT 1 NOT NULL
+);
+CREATE TABLE IF NOT EXISTS \`profile_settings\` (
+  \`key\` text PRIMARY KEY NOT NULL,
+  \`value\` text NOT NULL
 );
 `;
 

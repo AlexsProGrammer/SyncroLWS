@@ -44,7 +44,12 @@ async function bootstrap(): Promise<void> {
   if (workspaces.length === 0) {
     await wsStore.createWorkspace({ name: 'Personal', icon: 'folder', color: '#6366f1' });
   } else {
-    await wsStore.switchWorkspace(workspaces[0]!.id);
+    // Restore last active workspace, or fall back to the first one
+    const lastId = await wsStore.getLastWorkspaceId();
+    const target = (lastId && workspaces.some((w) => w.id === lastId))
+      ? lastId
+      : workspaces[0]!.id;
+    await wsStore.switchWorkspace(target);
   }
 
   // ── 2. Expose helpers on window in dev mode for console verification ───────
