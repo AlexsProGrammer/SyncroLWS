@@ -29,6 +29,7 @@ const POLL_INTERVAL_MS = 60_000; // 60 seconds — as specified in IMPLEMENTATIO
 
 let _lastWindowTitle = '';
 let _pollHandle: ReturnType<typeof setInterval> | null = null;
+const _eventHandlers: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
 
 /**
  * Time Tracker module — registers all Event Bus listeners.
@@ -37,27 +38,36 @@ let _pollHandle: ReturnType<typeof setInterval> | null = null;
 export function init(): void {
   _startWindowPoller();
 
-  eventBus.on('tracker:window-changed', ({ window_title, timestamp }) => {
-    // Auto-suggest a time log entry based on the active window
-    const suggestedDescription = `Working on: ${window_title}`;
+  const onWindowChanged = ({ window_title, timestamp }: { window_title: string; timestamp: string }): void => {
     console.log(`[module:time-tracker] window changed → "${window_title}" at ${timestamp}`);
-    // Emit a notification so the user can confirm the time log
-    eventBus.emit('notification:show', {
-      title: 'Time tracker suggestion',
-      body: suggestedDescription,
-      type: 'info',
-    });
-  });
+    // Log only — no notification spam. UI shows suggestions in TimeTrackerView.
+  };
+  eventBus.on('tracker:window-changed', onWindowChanged);
+  _eventHandlers.push({ event: 'tracker:window-changed', handler: onWindowChanged as (...args: unknown[]) => void });
 
-  eventBus.on('tracker:start', ({ description }) => {
+  const onStart = ({ description }: { description: string }): void => {
     console.log('[module:time-tracker] tracking started:', description);
-  });
+  };
+  eventBus.on('tracker:start', onStart);
+  _eventHandlers.push({ event: 'tracker:start', handler: onStart as (...args: unknown[]) => void });
 
-  eventBus.on('tracker:stop', ({ time_log_id }) => {
+  const onStop = ({ time_log_id }: { time_log_id: string }): void => {
     console.log('[module:time-tracker] tracking stopped, log id:', time_log_id);
-  });
+  };
+  eventBus.on('tracker:stop', onStop);
+  _eventHandlers.push({ event: 'tracker:stop', handler: onStop as (...args: unknown[]) => void });
 
   console.log('[module:time-tracker] initialised');
+}
+
+/** Clean up poller and event listeners. Call on shutdown / profile switch. */
+export function destroy(): void {
+  _stopWindowPoller();
+  for (const { event, handler } of _eventHandlers) {
+    eventBus.off(event as Parameters<typeof eventBus.off>[0], handler as never);
+  }
+  _eventHandlers.length = 0;
+  console.log('[module:time-tracker] destroyed');
 }
 
 function _startWindowPoller(): void {
@@ -77,6 +87,13 @@ function _startWindowPoller(): void {
       // get_active_window may not be available on all platforms — fail silently
     }
   }, POLL_INTERVAL_MS);
+}
+
+function _stopWindowPoller(): void {
+  if (_pollHandle !== null) {
+    clearInterval(_pollHandle);
+    _pollHandle = null;
+  }
 }
 
 export function createTimeLog(

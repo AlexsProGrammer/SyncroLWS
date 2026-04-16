@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { CommandPalette } from './ui/CommandPalette';
 import { DiffEditor } from './ui/DiffEditor';
 import { Sidebar, useEnabledTools, type ActiveView } from './ui/Sidebar';
@@ -29,6 +29,10 @@ export default function App(): React.ReactElement {
     setActiveView(id);
   }, []);
 
+  // Keep a ref to enabledTools so event handlers always see current value
+  const enabledToolsRef = useRef(enabledTools);
+  enabledToolsRef.current = enabledTools;
+
   // If the active tool gets disabled, fall back to the first enabled tool or settings
   useEffect(() => {
     if (activeView === 'settings') return;
@@ -38,6 +42,7 @@ export default function App(): React.ReactElement {
     }
   }, [enabledTools, activeView]);
 
+  // ── Stable one-time effect: keyboard, events, backup ──────────────────────
   useEffect(() => {
     // Ctrl+K / Cmd+K → command palette
     const onKey = (e: KeyboardEvent): void => {
@@ -73,9 +78,10 @@ export default function App(): React.ReactElement {
     window.addEventListener('keydown', onKey);
 
     // nav:open-entity → switch to the matching tool
-    const onOpenEntity = ({ id, type }: { id: string; type: BaseEntity['type'] }): void => {
+    const onOpenEntity = ({ type }: { id: string; type: BaseEntity['type'] }): void => {
       try {
-        const tool = getToolByEntityType(type) ?? enabledTools.find((t) => t.entityTypes?.includes(type));
+        const tools = enabledToolsRef.current;
+        const tool = getToolByEntityType(type) ?? tools.find((t) => t.entityTypes?.includes(type));
         if (tool) setActiveView(tool.id);
       } catch (err) {
         console.error('[app] nav:open-entity failed:', err);
@@ -101,7 +107,7 @@ export default function App(): React.ReactElement {
     // Profile switch → reset active view to first enabled tool
     const onProfileSwitched = (): void => {
       const firstTool = useWorkspaceStore.getState().activeWorkspaceId
-        ? enabledTools[0]?.id
+        ? enabledToolsRef.current[0]?.id
         : undefined;
       setActiveView(firstTool ?? 'settings');
     };
@@ -113,18 +119,25 @@ export default function App(): React.ReactElement {
     };
     eventBus.on('sync:conflict', onConflict);
 
+    // New workspace with seeded tools → auto-navigate to first tool
+    const onToolsSeeded = ({ firstToolId }: { firstToolId: string }): void => {
+      setActiveView(firstToolId);
+    };
+    eventBus.on('workspace:tools-seeded', onToolsSeeded);
+
     return () => {
       window.removeEventListener('keydown', onKey);
       eventBus.off('nav:open-entity', onOpenEntity);
       eventBus.off('deeplink:received', onDeepLink);
       eventBus.off('sync:conflict', onConflict);
       eventBus.off('profile:switched', onProfileSwitched);
+      eventBus.off('workspace:tools-seeded', onToolsSeeded);
       stopBackup();
     };
-  }, [enabledTools]);
+  }, []); // stable — no deps, uses refs for mutable state
 
-  // Resolve the active view's component
-  const renderView = (): React.ReactElement => {
+  // Resolve the active view's component (memoized to avoid unnecessary remounts)
+  const renderedView = useMemo(() => {
     if (activeView === 'settings') return <SettingsView />;
     const tool = getTool(activeView);
     if (tool) {
@@ -132,7 +145,7 @@ export default function App(): React.ReactElement {
       return <Component />;
     }
     return <SettingsView />;
-  };
+  }, [activeView]);
 
   // Display name for the header
   const headerTitle =
@@ -218,7 +231,7 @@ export default function App(): React.ReactElement {
               </div>
             </div>
           ) : (
-            renderView()
+            renderedView
           )}
         </div>
       </main>

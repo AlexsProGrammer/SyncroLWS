@@ -122,6 +122,10 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
             );
           }
           eventBus.emit('workspace:tool-added', { workspaceId: id, toolInstanceId: '', toolId: '' });
+          // Notify App to auto-navigate to the first tool
+          if (tools.length > 0) {
+            eventBus.emit('workspace:tools-seeded', { firstToolId: tools[0]!.id });
+          }
         } catch (err) {
           console.warn('[workspace] auto-seed tools failed:', err);
         }

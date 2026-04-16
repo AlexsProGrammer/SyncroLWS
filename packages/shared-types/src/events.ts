@@ -56,6 +56,7 @@ export type AppEvents = {
   'workspace:updated': { id: string };
   'workspace:tool-added': { workspaceId: string; toolInstanceId: string; toolId: string };
   'workspace:tool-removed': { workspaceId: string; toolInstanceId: string };
+  'workspace:tools-seeded': { firstToolId: string };
 
   // ── Profile ───────────────────────────────────────────────────────────────
   'profile:switched': { id: string };

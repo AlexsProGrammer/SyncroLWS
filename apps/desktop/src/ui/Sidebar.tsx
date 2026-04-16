@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { eventBus } from '@/core/events';
 import { getAllTools, type Tool } from '@/registry/ToolRegistry';
@@ -188,9 +188,11 @@ export function useEnabledTools(): { enabledTools: Tool[]; reload: () => void } 
   }, [reload]);
 
   const allTools = getAllTools();
-  const enabledTools = enabledIds === null
-    ? allTools
-    : allTools.filter((t) => enabledIds.has(t.id));
+  const enabledTools = useMemo(() => {
+    return enabledIds === null
+      ? allTools
+      : allTools.filter((t) => enabledIds.has(t.id));
+  }, [allTools, enabledIds]);
 
   return { enabledTools, reload };
 }

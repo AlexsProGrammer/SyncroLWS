@@ -34,10 +34,13 @@ fn get_active_window_impl() -> Result<String, String> {
 // ── Tauri commands ────────────────────────────────────────────────────────────
 
 /// Returns the title of the currently focused OS window.
+/// Runs the subprocess on a blocking thread so it doesn't block the IPC channel.
 /// Frontend: `invoke('get_active_window')`
 #[tauri::command]
-pub fn get_active_window() -> Result<String, String> {
-    get_active_window_impl()
+pub async fn get_active_window() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(get_active_window_impl)
+        .await
+        .map_err(|e| format!("spawn_blocking failed: {e}"))?
 }
 
 /// Validates a UUID string (loose: 36 chars, hex digits + hyphens).
