@@ -5,6 +5,7 @@ import { Sidebar, useEnabledTools, type ActiveView } from './ui/Sidebar';
 import { SettingsView } from './ui/SettingsView';
 import { Toaster } from './ui/Toaster';
 import { Separator } from './ui/components/separator';
+import { EntityDetailSheetHost } from './ui/components/EntityDetailSheetHost';
 import { getTool, getToolByEntityType } from './registry/ToolRegistry';
 import { eventBus } from './core/events';
 import { startBackupScheduler } from './core/backup';
@@ -239,6 +240,7 @@ export default function App(): React.ReactElement {
       {/* ── Global overlays ─────────────────────────────────────────────── */}
       <CommandPalette />
       <Toaster />
+      <EntityDetailSheetHost />
 
       {conflict && (
         <DiffEditor

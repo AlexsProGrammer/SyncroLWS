@@ -1,4 +1,4 @@
-import type { BaseEntity } from './base-entity';
+import type { BaseEntity, EntityAspect, EntityCore, EntityRelation, AspectType } from './base-entity';
 
 /**
  * All events emitted on the global Event Bus (mitt).
@@ -22,8 +22,25 @@ export type AppEvents = {
   'entity:updated': { entity: BaseEntity };
   'entity:deleted': { id: string; type: BaseEntity['type'] };
 
+  // ── Hybrid entity model (Phase A) ─────────────────────────────────────────
+  // Emitted by the new entityStore. The legacy 'entity:*' events above remain
+  // for modules that haven't migrated yet — they will be removed in Phase F.
+  /** A new base entity (with optional initial aspects) was created. */
+  'core:created': { core: EntityCore; aspects: EntityAspect[] };
+  /** Shared core fields (title/description/color/icon/tags/parent_id) changed. */
+  'core:updated': { core: EntityCore };
+  /** Soft-deleted (hidden everywhere). */
+  'core:deleted': { id: string };
+  'aspect:added': { aspect: EntityAspect };
+  'aspect:updated': { aspect: EntityAspect };
+  'aspect:removed': { id: string; entity_id: string; aspect_type: AspectType };
+  'relation:added': { relation: EntityRelation };
+  'relation:removed': { id: string; from_entity_id: string; to_entity_id: string };
+
   // ── Navigation ────────────────────────────────────────────────────────────
   'nav:open-entity': { id: string; type: BaseEntity['type'] };
+  /** Phase C — open the universal hybrid-entity detail sheet. */
+  'nav:open-detail-sheet': { id: string; initialAspectType?: AspectType };
   'nav:open-command-palette': void;
   'nav:close-command-palette': void;
 

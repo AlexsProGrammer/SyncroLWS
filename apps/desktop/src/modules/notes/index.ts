@@ -2,12 +2,10 @@ import { eventBus } from '@/core/events';
 import { getWorkspaceDB } from '@/core/db';
 import type { BaseEntity, NotePayload } from '@syncrohws/shared-types';
 
-export { NoteEditor } from './NoteEditor';
 export { NotesView } from './NotesView';
 export { WikiLink } from './WikiLinkExtension';
 export { TagHighlight } from './TagExtension';
-export { BacklinksPanel } from './BacklinksPanel';
-export { EditorToolbar } from './EditorToolbar';
+export { AspectEditor } from './AspectEditor';
 
 /** Extract display title from a note payload. */
 export function getEntityTitle(payload: Record<string, unknown>): string {

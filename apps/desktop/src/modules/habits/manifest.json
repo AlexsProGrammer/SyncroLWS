@@ -8,5 +8,11 @@
   "shortcut": "7",
   "hasPortalView": false,
   "portalPermissions": [],
-  "configSchema": {}
+  "configSchema": {},
+  "aspect": {
+    "type": "habit",
+    "label": "Habit",
+    "defaultData": { "frequency": "daily", "target_count": 1, "completions": {}, "archived": false },
+    "requiresToolInstance": false
+  }
 }

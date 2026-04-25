@@ -215,11 +215,34 @@ CREATE TABLE IF NOT EXISTS \`base_entities\` (
   \`type\` text NOT NULL,
   \`payload\` text DEFAULT '{}' NOT NULL,
   \`metadata\` text DEFAULT '{}' NOT NULL,
+  \`title\` text DEFAULT '' NOT NULL,
+  \`description\` text DEFAULT '' NOT NULL,
+  \`color\` text DEFAULT '#6366f1' NOT NULL,
+  \`icon\` text DEFAULT 'box' NOT NULL,
   \`tags\` text DEFAULT '[]' NOT NULL,
   \`parent_id\` text,
   \`created_at\` text NOT NULL,
   \`updated_at\` text NOT NULL,
   \`deleted_at\` text
+);
+CREATE TABLE IF NOT EXISTS \`entity_aspects\` (
+  \`id\` text PRIMARY KEY NOT NULL,
+  \`entity_id\` text NOT NULL,
+  \`aspect_type\` text NOT NULL,
+  \`data\` text DEFAULT '{}' NOT NULL,
+  \`tool_instance_id\` text,
+  \`sort_order\` integer DEFAULT 0 NOT NULL,
+  \`created_at\` text NOT NULL,
+  \`updated_at\` text NOT NULL,
+  \`deleted_at\` text
+);
+CREATE TABLE IF NOT EXISTS \`entity_relations\` (
+  \`id\` text PRIMARY KEY NOT NULL,
+  \`from_entity_id\` text NOT NULL,
+  \`to_entity_id\` text NOT NULL,
+  \`kind\` text NOT NULL,
+  \`metadata\` text DEFAULT '{}' NOT NULL,
+  \`created_at\` text NOT NULL
 );
 CREATE TABLE IF NOT EXISTS \`workspace_tools\` (
   \`id\` text PRIMARY KEY NOT NULL,
@@ -240,6 +263,26 @@ CREATE TABLE IF NOT EXISTS \`local_files\` (
 );
 `;
 
+/**
+ * Idempotent ALTER TABLE — adds the column only if it isn't already present.
+ * Used to upgrade existing dev DBs to the Phase A hybrid schema without
+ * requiring a full reset.
+ */
+async function ensureColumn(
+  db: Database,
+  table: string,
+  column: string,
+  ddl: string,
+): Promise<void> {
+  const rows = await db.select<{ name: string }[]>(
+    `SELECT name FROM pragma_table_info(?) WHERE name = ?`,
+    [table, column],
+  );
+  if (rows.length === 0) {
+    await db.execute(`ALTER TABLE \`${table}\` ADD COLUMN ${ddl};`);
+  }
+}
+
 async function runWorkspaceMigrations(db: Database): Promise<void> {
   const statements = WORKSPACE_MIGRATION
     .split(';')
@@ -250,10 +293,27 @@ async function runWorkspaceMigrations(db: Database): Promise<void> {
     await db.execute(stmt);
   }
 
+  // Phase A: backfill new core columns on pre-existing dev DBs.
+  await ensureColumn(db, 'base_entities', 'title', `\`title\` text DEFAULT '' NOT NULL`);
+  await ensureColumn(db, 'base_entities', 'description', `\`description\` text DEFAULT '' NOT NULL`);
+  await ensureColumn(db, 'base_entities', 'color', `\`color\` text DEFAULT '#6366f1' NOT NULL`);
+  await ensureColumn(db, 'base_entities', 'icon', `\`icon\` text DEFAULT 'box' NOT NULL`);
+
   // Indexes
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_base_entities_type ON base_entities(type);`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_base_entities_parent ON base_entities(parent_id);`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_base_entities_deleted ON base_entities(deleted_at);`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_entity_aspects_entity ON entity_aspects(entity_id);`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_entity_aspects_type ON entity_aspects(aspect_type);`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_entity_aspects_tool ON entity_aspects(tool_instance_id);`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_entity_aspects_deleted ON entity_aspects(deleted_at);`);
+  await db.execute(
+    `CREATE UNIQUE INDEX IF NOT EXISTS uniq_entity_aspects_scope
+       ON entity_aspects(entity_id, aspect_type, IFNULL(tool_instance_id, ''));`,
+  );
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_entity_relations_from ON entity_relations(from_entity_id);`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_entity_relations_to ON entity_relations(to_entity_id);`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_entity_relations_kind ON entity_relations(kind);`);
 
   // FTS5 virtual table
   await db.execute(`

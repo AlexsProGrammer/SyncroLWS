@@ -107,6 +107,17 @@ export interface ToolManifest {
   hasPortalView: boolean;
   portalPermissions: string[];
   configSchema: Record<string, unknown>;
+  /**
+   * Phase B — Optional aspect plugin block. Modules that own an aspect type
+   * declare it here; ToolRegistry then exposes an editor + summary component
+   * to the universal `EntityDetailSheet`.
+   */
+  aspect?: {
+    type: string;
+    label: string;
+    defaultData: Record<string, unknown>;
+    requiresToolInstance: boolean;
+  };
 }
 
 // ── Tool interface ────────────────────────────────────────────────────────────
@@ -177,6 +188,64 @@ export function getToolByEntityType(entityType: string): Tool | undefined {
   return getAllTools().find((t) => t.entityTypes?.includes(entityType));
 }
 
+// ── Aspect plugin registry (Phase B) ──────────────────────────────────────────
+//
+// Aspect plugins describe how a single aspect type is rendered + edited inside
+// the universal `EntityDetailSheet`. A module declares its aspect in
+// manifest.json (`aspect: { … }`) and contributes an `AspectEditor.tsx` file;
+// the registry stitches them together at boot.
+
+import type { EntityAspect, EntityCore } from '@syncrohws/shared-types';
+
+export interface AspectEditorProps {
+  /** Shared core (read-only here — edited via the General tab). */
+  core: EntityCore;
+  /** The aspect being edited. */
+  aspect: EntityAspect;
+  /** Patch this aspect's `data` (deep-merged + revalidated by the entityStore). */
+  onChange: (data: Record<string, unknown>) => void;
+  /** Detach this aspect from the entity. */
+  onRemove: () => void;
+}
+
+export interface AspectSummaryProps {
+  core: EntityCore;
+  aspect: EntityAspect;
+}
+
+export interface AspectPlugin {
+  /** Aspect type id (must match an entry in ASPECT_TYPES). */
+  type: string;
+  /** Display label for the detail-sheet tab. */
+  label: string;
+  /** Owning tool (manifest.id) — used to resolve target tool instances. */
+  toolId: string;
+  /** Lucide-style icon component (re-uses tool's icon by default). */
+  icon: React.FC<{ className?: string }>;
+  /** Default `data` payload when this aspect is freshly attached. */
+  defaultData: Record<string, unknown>;
+  /** Whether the aspect must be scoped to a tool instance (board/calendar). */
+  requiresToolInstance: boolean;
+  /** React component rendered inside the corresponding tab of EntityDetailSheet. */
+  editorComponent: React.FC<AspectEditorProps>;
+  /** Optional compact summary (used in list-row badges, link previews, …). */
+  summaryComponent?: React.FC<AspectSummaryProps>;
+}
+
+const _aspectPlugins: Map<string, AspectPlugin> = new Map();
+
+export function registerAspectPlugin(plugin: AspectPlugin): void {
+  _aspectPlugins.set(plugin.type, plugin);
+}
+
+export function getAspectPlugin(type: string): AspectPlugin | undefined {
+  return _aspectPlugins.get(type);
+}
+
+export function getAllAspectPlugins(): AspectPlugin[] {
+  return [..._aspectPlugins.values()];
+}
+
 // ── Manifest-based auto-discovery ─────────────────────────────────────────────
 
 // Eagerly import all manifest.json files under modules/
@@ -199,6 +268,16 @@ const moduleInits = import.meta.glob<{
 // Eagerly import all view components — convention: *View.tsx in each module folder
 const moduleViews = import.meta.glob<{ [key: string]: React.FC }>(
   '../modules/*/*.tsx',
+  { eager: true },
+);
+
+// Eagerly import all aspect editors — convention: AspectEditor.tsx in each module folder
+const aspectEditors = import.meta.glob<{
+  default?: React.FC<AspectEditorProps>;
+  AspectEditor?: React.FC<AspectEditorProps>;
+  AspectSummary?: React.FC<AspectSummaryProps>;
+}>(
+  '../modules/*/AspectEditor.tsx',
   { eager: true },
 );
 
@@ -269,7 +348,32 @@ export function discoverAndRegisterTools(): void {
       getEntityTitle: initModule?.getEntityTitle,
       getEntitySubtitle: initModule?.getEntitySubtitle,
     });
+
+    // Phase B — Register aspect plugin if both the manifest declares one
+    // AND the module ships an AspectEditor.tsx.
+    if (manifest.aspect) {
+      const editorModule = aspectEditors[`../modules/${folder}/AspectEditor.tsx`];
+      const editorComponent = editorModule?.AspectEditor ?? editorModule?.default;
+      if (editorComponent) {
+        registerAspectPlugin({
+          type: manifest.aspect.type,
+          label: manifest.aspect.label,
+          toolId: manifest.id,
+          icon,
+          defaultData: manifest.aspect.defaultData,
+          requiresToolInstance: manifest.aspect.requiresToolInstance,
+          editorComponent,
+          summaryComponent: editorModule?.AspectSummary,
+        });
+      } else {
+        console.warn(
+          `[registry] Module "${manifest.id}" declares aspect "${manifest.aspect.type}" but no AspectEditor.tsx was found.`,
+        );
+      }
+    }
   }
 
-  console.log(`[registry] Discovered ${_tools.size} tools`);
+  console.log(
+    `[registry] Discovered ${_tools.size} tools, ${_aspectPlugins.size} aspect plugins`,
+  );
 }

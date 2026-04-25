@@ -8,5 +8,11 @@
   "shortcut": "2",
   "hasPortalView": true,
   "portalPermissions": ["read"],
-  "configSchema": {}
+  "configSchema": {},
+  "aspect": {
+    "type": "task",
+    "label": "Task",
+    "defaultData": { "status": "todo", "priority": "medium", "column_id": "todo" },
+    "requiresToolInstance": true
+  }
 }

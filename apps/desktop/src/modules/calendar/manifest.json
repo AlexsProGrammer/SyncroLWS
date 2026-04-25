@@ -8,5 +8,11 @@
   "shortcut": "3",
   "hasPortalView": true,
   "portalPermissions": ["read"],
-  "configSchema": {}
+  "configSchema": {},
+  "aspect": {
+    "type": "calendar_event",
+    "label": "Calendar event",
+    "defaultData": { "all_day": false, "location": "" },
+    "requiresToolInstance": true
+  }
 }

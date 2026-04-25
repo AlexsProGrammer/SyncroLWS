@@ -8,5 +8,11 @@
   "shortcut": "8",
   "hasPortalView": true,
   "portalPermissions": ["read"],
-  "configSchema": {}
+  "configSchema": {},
+  "aspect": {
+    "type": "bookmark",
+    "label": "Bookmark",
+    "defaultData": { "url": "", "favicon_hash": null, "pinned": false },
+    "requiresToolInstance": false
+  }
 }

@@ -1,9 +1,4 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { NoteEditor } from './NoteEditor';
-import { BacklinksPanel } from './BacklinksPanel';
-import { NOTE_TEMPLATES, type NoteTemplate } from './templates';
-import { getWorkspaceDB } from '@/core/db';
-import { eventBus } from '@/core/events';
 import { Button } from '@/ui/components/button';
 import {
   DropdownMenu,
@@ -12,7 +7,15 @@ import {
   DropdownMenuTrigger,
 } from '@/ui/components/dropdown-menu';
 import { cn } from '@/lib/utils';
-import type { NotePayload } from '@syncrohws/shared-types';
+import { eventBus } from '@/core/events';
+import {
+  createEntity,
+  listByAspect,
+  softDeleteEntity,
+  type AspectWithCore,
+} from '@/core/entityStore';
+import { NOTE_TEMPLATES, type NoteTemplate } from './templates';
+import type { NoteAspectData } from '@syncrohws/shared-types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -22,21 +25,27 @@ interface NoteListItem {
   preview: string;
   updated_at: string;
   tags: string[];
+  color: string;
+}
+
+function rowFrom(item: AspectWithCore): NoteListItem {
+  const data = item.aspect.data as Partial<NoteAspectData>;
+  return {
+    id: item.core.id,
+    title: item.core.title || 'Untitled',
+    preview: (data.content_md ?? '').slice(0, 120),
+    updated_at: item.aspect.updated_at,
+    tags: item.core.tags,
+    color: item.core.color,
+  };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function NotesView(): React.ReactElement {
   const [notes, setNotes] = useState<NoteListItem[]>([]);
-  const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
-  const [activeNoteData, setActiveNoteData] = useState<{
-    title: string;
-    content_md: string;
-    content_json: string;
-  } | null>(null);
   const [activeTag, setActiveTag] = useState<string | null>(null);
 
-  // Derived state
   const allTags = useMemo(
     () => [...new Set(notes.flatMap((n) => n.tags))].sort(),
     [notes],
@@ -46,34 +55,11 @@ export function NotesView(): React.ReactElement {
     [notes, activeTag],
   );
 
-  // ── Load notes list ───────────────────────────────────────────────────────
   const loadNotes = useCallback(async () => {
     try {
-      const db = getWorkspaceDB();
-      const rows = await db.select<
-        { id: string; payload: string; tags: string; updated_at: string }[]
-      >(
-        `SELECT id, payload, tags, updated_at FROM base_entities
-         WHERE type = 'note' AND deleted_at IS NULL
-         ORDER BY updated_at DESC`,
-      );
-      const items: NoteListItem[] = rows.map((r) => {
-        const p = JSON.parse(r.payload) as Partial<NotePayload>;
-        let parsedTags: string[] = [];
-        try {
-          parsedTags = JSON.parse(r.tags) as string[];
-        } catch {
-          /* empty */
-        }
-        return {
-          id: r.id,
-          title: p.title || 'Untitled',
-          preview: (p.content_md ?? '').slice(0, 120),
-          updated_at: r.updated_at,
-          tags: Array.isArray(parsedTags) ? parsedTags : [],
-        };
-      });
-      setNotes(items);
+      const items = await listByAspect('note');
+      items.sort((a, b) => b.aspect.updated_at.localeCompare(a.aspect.updated_at));
+      setNotes(items.map(rowFrom));
     } catch (err) {
       console.error('[notes] load failed:', err);
     }
@@ -83,120 +69,78 @@ export function NotesView(): React.ReactElement {
     void loadNotes();
   }, [loadNotes]);
 
-  // Reload on entity events
   useEffect(() => {
     const onUpdate = (): void => {
       void loadNotes();
     };
+    eventBus.on('core:created', onUpdate);
+    eventBus.on('core:updated', onUpdate);
+    eventBus.on('core:deleted', onUpdate);
+    eventBus.on('aspect:added', onUpdate);
+    eventBus.on('aspect:updated', onUpdate);
+    eventBus.on('aspect:removed', onUpdate);
     eventBus.on('entity:created', onUpdate);
     eventBus.on('entity:updated', onUpdate);
     eventBus.on('entity:deleted', onUpdate);
     return () => {
+      eventBus.off('core:created', onUpdate);
+      eventBus.off('core:updated', onUpdate);
+      eventBus.off('core:deleted', onUpdate);
+      eventBus.off('aspect:added', onUpdate);
+      eventBus.off('aspect:updated', onUpdate);
+      eventBus.off('aspect:removed', onUpdate);
       eventBus.off('entity:created', onUpdate);
       eventBus.off('entity:updated', onUpdate);
       eventBus.off('entity:deleted', onUpdate);
     };
   }, [loadNotes]);
 
-  // Handle nav:open-entity for notes
+  const openNote = useCallback((id: string): void => {
+    eventBus.emit('nav:open-detail-sheet', { id, initialAspectType: 'note' });
+  }, []);
+
   useEffect(() => {
     const handler = ({ id, type }: { id: string; type: string }): void => {
-      if (type === 'note') void openNote(id);
+      if (type === 'note') openNote(id);
     };
     eventBus.on('nav:open-entity', handler);
     return () => {
       eventBus.off('nav:open-entity', handler);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [openNote]);
 
-  // ── Open a note ───────────────────────────────────────────────────────────
-  const openNote = useCallback(async (noteId: string) => {
-    try {
-      const db = getWorkspaceDB();
-      const rows = await db.select<{ payload: string }[]>(
-        `SELECT payload FROM base_entities WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
-        [noteId],
-      );
-      if (!rows[0]) return;
-      const p = JSON.parse(rows[0].payload) as Partial<NotePayload>;
-      setActiveNoteId(noteId);
-      setActiveNoteData({
-        title: p.title ?? '',
-        content_md: p.content_md ?? '',
-        content_json: p.content_json ?? '',
-      });
-    } catch (err) {
-      console.error('[notes] open failed:', err);
-    }
-  }, []);
+  const createNote = useCallback(
+    async (template?: NoteTemplate) => {
+      const title = template ? template.getTitle() : '';
+      const content = template ? template.getContent() : null;
+      const content_json = content ? JSON.stringify(content) : '';
 
-  // ── Create note (optionally from template) ────────────────────────────────
-  const createNote = useCallback(async (template?: NoteTemplate) => {
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-
-    const title = template ? template.getTitle() : '';
-    const content = template ? template.getContent() : null;
-    const content_json = content ? JSON.stringify(content) : '';
-
-    const payload: NotePayload = {
-      title,
-      content_md: '',
-      content_json,
-      linked_entity_ids: [],
-    };
-
-    try {
-      const db = getWorkspaceDB();
-      await db.execute(
-        `INSERT INTO base_entities (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
-         VALUES (?, 'note', ?, '{}', '[]', NULL, ?, ?)`,
-        [id, JSON.stringify(payload), now, now],
-      );
-
-      eventBus.emit('entity:created', {
-        entity: {
-          id,
-          type: 'note',
-          payload,
-          metadata: {},
-          tags: [],
-          parent_id: null,
-          created_at: now,
-          updated_at: now,
-          deleted_at: null,
-        },
-      });
-
-      setActiveNoteId(id);
-      setActiveNoteData({ title, content_md: '', content_json });
-    } catch (err) {
-      console.error('[notes] create failed:', err);
-    }
-  }, []);
-
-  // ── Delete note ───────────────────────────────────────────────────────────
-  const deleteNote = useCallback(
-    async (noteId: string) => {
       try {
-        const db = getWorkspaceDB();
-        await db.execute(
-          `UPDATE base_entities SET deleted_at = ? WHERE id = ?`,
-          [new Date().toISOString(), noteId],
-        );
-        if (activeNoteId === noteId) {
-          setActiveNoteId(null);
-          setActiveNoteData(null);
-        }
-        setNotes((prev) => prev.filter((n) => n.id !== noteId));
-        eventBus.emit('entity:deleted', { id: noteId, type: 'note' });
+        const hybrid = await createEntity({
+          core: { title },
+          aspects: [
+            {
+              aspect_type: 'note',
+              data: { content_md: '', content_json },
+            },
+          ],
+        });
+        openNote(hybrid.core.id);
       } catch (err) {
-        console.error('[notes] delete failed:', err);
+        console.error('[notes] create failed:', err);
       }
     },
-    [activeNoteId],
+    [openNote],
   );
+
+  const deleteNote = useCallback(async (id: string) => {
+    try {
+      await softDeleteEntity(id);
+      setNotes((prev) => prev.filter((n) => n.id !== id));
+    } catch (err) {
+      console.error('[notes] delete failed:', err);
+    }
+  }, []);
 
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -224,10 +168,7 @@ export function NotesView(): React.ReactElement {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 {NOTE_TEMPLATES.map((t) => (
-                  <DropdownMenuItem
-                    key={t.id}
-                    onClick={() => void createNote(t)}
-                  >
+                  <DropdownMenuItem key={t.id} onClick={() => void createNote(t)}>
                     {t.name}
                   </DropdownMenuItem>
                 ))}
@@ -239,7 +180,6 @@ export function NotesView(): React.ReactElement {
           </div>
         </div>
 
-        {/* Tag filter */}
         {allTags.length > 0 && (
           <div className="flex flex-wrap gap-1 border-b border-border px-3 py-2">
             {allTags.map((tag) => (
@@ -259,28 +199,30 @@ export function NotesView(): React.ReactElement {
           </div>
         )}
 
-        {/* Note list */}
         <div className="flex-1 overflow-y-auto">
           {filteredNotes.map((note) => (
             <button
               key={note.id}
-              onClick={() => void openNote(note.id)}
-              className={cn(
-                'group flex w-full flex-col gap-0.5 border-b border-border/50 px-3 py-2.5 text-left transition-colors hover:bg-accent/50',
-                activeNoteId === note.id && 'bg-accent',
-              )}
+              onClick={() => openNote(note.id)}
+              className="group flex w-full flex-col gap-0.5 border-b border-border/50 px-3 py-2.5 text-left transition-colors hover:bg-accent/50"
             >
-              <div className="flex items-center justify-between">
-                <span className="truncate text-sm font-medium text-foreground">
-                  {note.title || 'Untitled'}
-                </span>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: note.color }}
+                  />
+                  <span className="truncate text-sm font-medium text-foreground">
+                    {note.title}
+                  </span>
+                </div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     void deleteNote(note.id);
                   }}
-                  className="shrink-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 transition-opacity"
-                  title="Delete note"
+                  className="shrink-0 opacity-0 transition-opacity text-muted-foreground hover:text-red-400 group-hover:opacity-100"
+                  title="Delete entity"
                 >
                   <svg
                     className="h-3 w-3"
@@ -313,11 +255,7 @@ export function NotesView(): React.ReactElement {
             <div className="flex flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
               <p>{activeTag ? `No notes with #${activeTag}` : 'No notes yet'}</p>
               {!activeTag && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void createNote()}
-                >
+                <Button variant="outline" size="sm" onClick={() => void createNote()}>
                   Create your first note
                 </Button>
               )}
@@ -326,32 +264,16 @@ export function NotesView(): React.ReactElement {
         </div>
       </div>
 
-      {/* ── Editor pane ──────────────────────────────────────────────── */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {activeNoteId && activeNoteData ? (
-          <NoteEditor
-            key={activeNoteId}
-            entityId={activeNoteId}
-            initialTitle={activeNoteData.title}
-            initialContentMd={activeNoteData.content_md}
-            initialContentJson={activeNoteData.content_json}
-            onTagClick={(tag) => setActiveTag(tag)}
-            className="flex-1 overflow-y-auto p-4"
-          />
-        ) : (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            Select a note or create a new one
-          </div>
-        )}
+      {/* ── Empty pane (editor lives in EntityDetailSheet now) ───────── */}
+      <div className="flex flex-1 items-center justify-center px-8 text-center text-sm text-muted-foreground">
+        <div>
+          <p>Select a note from the list to open the editor.</p>
+          <p className="mt-2 text-xs opacity-70">
+            Editing happens in the universal detail sheet — every note is also a base entity
+            that can gain task, calendar, or time-log aspects.
+          </p>
+        </div>
       </div>
-
-      {/* ── Backlinks panel ──────────────────────────────────────────── */}
-      {activeNoteId && activeNoteData && (
-        <BacklinksPanel
-          noteId={activeNoteId}
-          noteTitle={activeNoteData.title}
-        />
-      )}
     </div>
   );
 }

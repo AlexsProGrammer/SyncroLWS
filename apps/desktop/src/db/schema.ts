@@ -39,19 +39,67 @@ export const activeTools = sqliteTable('active_tools', {
 // ── base_entities ─────────────────────────────────────────────────────────────
 /**
  * Central store for ALL domain objects within a workspace.
- * The payload column holds module-specific JSON — validated at the app layer.
- * This keeps the DB schema stable across feature additions.
+ *
+ * Phase A — Hybrid model:
+ *  - Shared "core" fields live as real columns: title, description, color,
+ *    icon, tags. Aspect-specific data lives in `entity_aspects`.
+ *  - The legacy `type` and `payload` columns are kept for backwards
+ *    compatibility while modules migrate. They will be removed in Phase F.
  */
 export const baseEntities = sqliteTable('base_entities', {
   id: text('id').primaryKey(),
+  // Legacy fields (Phase A: still in use; Phase F: drop)
   type: text('type').notNull(),
   payload: text('payload').notNull().default('{}'),
   metadata: text('metadata').notNull().default('{}'),
+  // Shared core fields (Phase A: new)
+  title: text('title').notNull().default(''),
+  description: text('description').notNull().default(''),
+  color: text('color').notNull().default('#6366f1'),
+  icon: text('icon').notNull().default('box'),
   tags: text('tags').notNull().default('[]'),
   parent_id: text('parent_id'),
   created_at: text('created_at').notNull(),
   updated_at: text('updated_at').notNull(),
   deleted_at: text('deleted_at'),
+});
+
+// ── entity_aspects ────────────────────────────────────────────────────────────
+/**
+ * One *personality* of a base entity (note / task / calendar_event / …).
+ * A single base_entity row can have multiple aspects → "this is simultaneously
+ * a note and a kanban card and a calendar event".
+ *
+ * Uniqueness:  (entity_id, aspect_type, tool_instance_id)
+ *   tool_instance_id is the `workspace_tools.id` of the kanban board /
+ *   calendar / etc. that scopes this aspect, or NULL for workspace-wide
+ *   aspects (notes, habits, bookmarks).
+ */
+export const entityAspects = sqliteTable('entity_aspects', {
+  id: text('id').primaryKey(),
+  entity_id: text('entity_id').notNull(),
+  aspect_type: text('aspect_type').notNull(),
+  data: text('data').notNull().default('{}'),
+  tool_instance_id: text('tool_instance_id'),
+  sort_order: integer('sort_order').notNull().default(0),
+  created_at: text('created_at').notNull(),
+  updated_at: text('updated_at').notNull(),
+  deleted_at: text('deleted_at'),
+});
+
+// ── entity_relations ──────────────────────────────────────────────────────────
+/**
+ * Soft links between distinct base entities (wiki-links, references, embeds).
+ * Replaces the inline `linked_entity_id` / `linked_entity_ids` payload fields
+ * once Phase E ships.
+ */
+export const entityRelations = sqliteTable('entity_relations', {
+  id: text('id').primaryKey(),
+  from_entity_id: text('from_entity_id').notNull(),
+  to_entity_id: text('to_entity_id').notNull(),
+  kind: text('kind').notNull(),
+  metadata: text('metadata').notNull().default('{}'),
+  created_at: text('created_at').notNull(),
 });
 
 // ── workspace_tools ──────────────────────────────────────────────────────────

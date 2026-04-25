@@ -8,5 +8,11 @@
   "shortcut": "4",
   "hasPortalView": false,
   "portalPermissions": [],
-  "configSchema": {}
+  "configSchema": {},
+  "aspect": {
+    "type": "time_log",
+    "label": "Time log",
+    "defaultData": { "window_title": "", "billable": false, "manual": false, "hourly_rate_cents": 0, "project": "" },
+    "requiresToolInstance": false
+  }
 }

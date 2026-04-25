@@ -8,5 +8,11 @@
   "shortcut": "1",
   "hasPortalView": true,
   "portalPermissions": ["read"],
-  "configSchema": {}
+  "configSchema": {},
+  "aspect": {
+    "type": "note",
+    "label": "Note",
+    "defaultData": { "content_md": "", "content_json": "" },
+    "requiresToolInstance": false
+  }
 }
