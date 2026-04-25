@@ -1,13 +1,11 @@
 /**
- * ManualEntryForm — Create time log entries manually with date, start/end times,
- * description, project, billable toggle, and hourly rate.
+ * ManualEntryForm — Hybrid-entity edition. Creates a new entity with a time_log aspect.
  */
 import React, { useState, useCallback } from 'react';
-import { getWorkspaceDB } from '@/core/db';
-import { eventBus } from '@/core/events';
+import { createEntity } from '@/core/entityStore';
 import { Button } from '@/ui/components/button';
 import { Switch } from '@/ui/components/switch';
-import type { TimeLogPayload } from '@syncrohws/shared-types';
+import type { TimeLogAspectData } from '@syncrohws/shared-types';
 
 interface ManualEntryFormProps {
   onSaved: () => void | Promise<void>;
@@ -50,8 +48,7 @@ export function ManualEntryForm({ onSaved }: ManualEntryFormProps): React.ReactE
         ? Math.round(parseFloat(hourlyRate) * 100)
         : 0;
 
-      const payload: TimeLogPayload = {
-        description: description.trim(),
+      const data: TimeLogAspectData = {
         start: startISO,
         end: endISO,
         duration_seconds: durationSeconds,
@@ -62,28 +59,9 @@ export function ManualEntryForm({ onSaved }: ManualEntryFormProps): React.ReactE
         manual: true,
       };
 
-      const id = crypto.randomUUID();
-      const now = new Date().toISOString();
-      const db = getWorkspaceDB();
-      await db.execute(
-        `INSERT INTO base_entities
-           (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
-         VALUES (?, 'time_log', ?, '{}', '[]', NULL, ?, ?)`,
-        [id, JSON.stringify(payload), now, now],
-      );
-
-      eventBus.emit('entity:created', {
-        entity: {
-          id,
-          type: 'time_log',
-          payload,
-          metadata: {},
-          tags: [],
-          parent_id: null,
-          created_at: now,
-          updated_at: now,
-          deleted_at: null,
-        },
+      await createEntity({
+        core: { title: description.trim(), tags: [] },
+        aspects: [{ aspect_type: 'time_log', data }],
       });
 
       setSuccess(true);
@@ -97,7 +75,6 @@ export function ManualEntryForm({ onSaved }: ManualEntryFormProps): React.ReactE
     }
   }, [description, project, date, startTime, endTime, billable, hourlyRate, reset, onSaved]);
 
-  // Calculate preview duration
   const previewDuration = (() => {
     try {
       const s = new Date(`${date}T${startTime}:00`).getTime();
@@ -111,7 +88,6 @@ export function ManualEntryForm({ onSaved }: ManualEntryFormProps): React.ReactE
     }
   })();
 
-  // Calculate preview cost
   const previewCost = (() => {
     if (!billable || !hourlyRate) return null;
     try {
@@ -131,7 +107,6 @@ export function ManualEntryForm({ onSaved }: ManualEntryFormProps): React.ReactE
       <h2 className="mb-4 text-base font-semibold text-foreground">Add Manual Time Entry</h2>
 
       <div className="flex flex-col gap-4">
-        {/* Description */}
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-muted-foreground">Description *</label>
           <input
@@ -143,7 +118,6 @@ export function ManualEntryForm({ onSaved }: ManualEntryFormProps): React.ReactE
           />
         </div>
 
-        {/* Project */}
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-medium text-muted-foreground">Project / Client</label>
           <input
@@ -155,7 +129,6 @@ export function ManualEntryForm({ onSaved }: ManualEntryFormProps): React.ReactE
           />
         </div>
 
-        {/* Date + Time */}
         <div className="grid grid-cols-3 gap-3">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">Date</label>
@@ -186,7 +159,6 @@ export function ManualEntryForm({ onSaved }: ManualEntryFormProps): React.ReactE
           </div>
         </div>
 
-        {/* Duration preview */}
         <div className="flex items-center gap-4 rounded-lg border border-border bg-muted/50 px-4 py-2.5">
           <div className="flex-1">
             <p className="text-xs text-muted-foreground">Duration</p>
@@ -200,7 +172,6 @@ export function ManualEntryForm({ onSaved }: ManualEntryFormProps): React.ReactE
           )}
         </div>
 
-        {/* Billable toggle */}
         <div className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
           <div className="flex flex-col gap-0.5">
             <p className="text-sm font-medium text-foreground">Billable</p>
@@ -209,7 +180,6 @@ export function ManualEntryForm({ onSaved }: ManualEntryFormProps): React.ReactE
           <Switch checked={billable} onCheckedChange={setBillable} />
         </div>
 
-        {/* Hourly rate (shown when billable) */}
         {billable && (
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">
@@ -227,17 +197,12 @@ export function ManualEntryForm({ onSaved }: ManualEntryFormProps): React.ReactE
           </div>
         )}
 
-        {/* Actions */}
         <div className="flex items-center gap-3 pt-2">
           <Button onClick={() => void handleSave()} disabled={saving || !description.trim()}>
             {saving ? 'Saving…' : 'Add Entry'}
           </Button>
-          <Button variant="outline" onClick={reset}>
-            Reset
-          </Button>
-          {success && (
-            <span className="text-sm text-green-500">✓ Entry added</span>
-          )}
+          <Button variant="outline" onClick={reset}>Reset</Button>
+          {success && <span className="text-sm text-green-500">✓ Entry added</span>}
         </div>
       </div>
     </div>

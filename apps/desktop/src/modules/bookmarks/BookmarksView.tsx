@@ -1,9 +1,17 @@
 /**
- * BookmarksView — Save, tag, pin, and browse bookmarks / links.
+ * BookmarksView — Hybrid-entity edition.
+ * Title/desc/color/tags live on EntityCore; url/pinned on bookmark aspect.
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { getWorkspaceDB } from '@/core/db';
 import { eventBus } from '@/core/events';
+import {
+  createEntity,
+  listByAspect,
+  softDeleteEntity,
+  updateAspect,
+  updateCore,
+  type AspectWithCore,
+} from '@/core/entityStore';
 import { Button } from '@/ui/components/button';
 import { Input } from '@/ui/components/input';
 import { Badge } from '@/ui/components/badge';
@@ -13,19 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/ui/components/dialog';
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface Bookmark {
-  id: string;
-  url: string;
-  title: string;
-  description: string;
-  color: string;
-  pinned: boolean;
-  tags: string[];
-  created_at: string;
-}
+import type { BookmarkAspectData } from '@syncrohws/shared-types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -37,6 +33,10 @@ function getDomain(url: string): string {
   }
 }
 
+function dataOf(item: AspectWithCore): Partial<BookmarkAspectData> {
+  return item.aspect.data as Partial<BookmarkAspectData>;
+}
+
 const PRESET_COLORS = [
   '#3b82f6', '#22c55e', '#ef4444', '#f59e0b', '#8b5cf6',
   '#ec4899', '#06b6d4', '#f97316', '#6366f1', '#14b8a6',
@@ -45,12 +45,11 @@ const PRESET_COLORS = [
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function BookmarksView(): React.ReactElement {
-  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const [bookmarks, setBookmarks] = useState<AspectWithCore[]>([]);
   const [search, setSearch] = useState('');
   const [filterTag, setFilterTag] = useState<string | null>(null);
   const [showPinnedOnly, setShowPinnedOnly] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [editBookmark, setEditBookmark] = useState<Bookmark | null>(null);
 
   // Create form
   const [newUrl, setNewUrl] = useState('');
@@ -62,190 +61,128 @@ export function BookmarksView(): React.ReactElement {
 
   // ── Load ──────────────────────────────────────────────────────────────────
 
-  const loadBookmarks = useCallback(async () => {
+  const load = useCallback(async () => {
     try {
-      const db = getWorkspaceDB();
-      const rows = await db.select<{ id: string; payload: string; tags: string; created_at: string }[]>(
-        `SELECT id, payload, tags, created_at FROM base_entities
-         WHERE type = 'bookmark' AND deleted_at IS NULL
-         ORDER BY created_at DESC`,
-      );
-
-      setBookmarks(
-        rows.map((r) => {
-          const p = JSON.parse(r.payload);
-          const tags: string[] = (() => {
-            try { return JSON.parse(r.tags); } catch { return []; }
-          })();
-          return {
-            id: r.id,
-            url: p.url ?? '',
-            title: p.title ?? '',
-            description: p.description ?? '',
-            color: p.color ?? '#3b82f6',
-            pinned: p.pinned ?? false,
-            tags,
-            created_at: r.created_at,
-          };
-        }),
-      );
+      const items = await listByAspect('bookmark');
+      setBookmarks(items);
     } catch (err) {
       console.error('[bookmarks] load failed:', err);
     }
   }, []);
 
   useEffect(() => {
-    void loadBookmarks();
-  }, [loadBookmarks]);
+    void load();
+  }, [load]);
 
   useEffect(() => {
-    const handler = (): void => void loadBookmarks();
-    eventBus.on('entity:created', handler);
-    eventBus.on('entity:updated', handler);
-    eventBus.on('entity:deleted', handler);
-    return () => {
-      eventBus.off('entity:created', handler);
-      eventBus.off('entity:updated', handler);
-      eventBus.off('entity:deleted', handler);
-    };
-  }, [loadBookmarks]);
-
-  // Handle nav:open-entity for bookmarks — open the edit dialog
-  useEffect(() => {
-    const onNav = ({ id, type }: { id: string; type: string }): void => {
-      if (type !== 'bookmark') return;
-      const found = bookmarks.find((b) => b.id === id);
-      if (found) setEditBookmark(found);
-    };
-    eventBus.on('nav:open-entity', onNav);
-    return () => { eventBus.off('nav:open-entity', onNav); };
-  }, [bookmarks]);
+    const onChange = (): void => void load();
+    const events = [
+      'core:created', 'core:updated', 'core:deleted',
+      'aspect:added', 'aspect:updated', 'aspect:removed',
+      'entity:created', 'entity:updated', 'entity:deleted',
+    ] as const;
+    events.forEach((e) => eventBus.on(e, onChange));
+    return () => events.forEach((e) => eventBus.off(e, onChange));
+  }, [load]);
 
   // ── Create ────────────────────────────────────────────────────────────────
 
   const createBookmark = useCallback(async () => {
     if (!newUrl.trim()) return;
-    const db = getWorkspaceDB();
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-
-    const tags = newTags
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
-
-    const payload = {
-      url: newUrl.trim(),
-      title: newTitle.trim() || getDomain(newUrl.trim()),
-      description: newDescription.trim(),
-      favicon_hash: null,
-      color: newColor,
-      pinned: newPinned,
-    };
-
-    await db.execute(
-      `INSERT INTO base_entities
-         (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
-       VALUES (?, 'bookmark', ?, '{}', ?, NULL, ?, ?)`,
-      [id, JSON.stringify(payload), JSON.stringify(tags), now, now],
-    );
-
-    eventBus.emit('entity:created', {
-      entity: {
-        id,
-        type: 'bookmark',
-        payload,
-        metadata: {},
-        tags,
-        parent_id: null,
-        created_at: now,
-        updated_at: now,
-        deleted_at: null,
-      },
-    });
-
-    setNewUrl('');
-    setNewTitle('');
-    setNewDescription('');
-    setNewColor('#3b82f6');
-    setNewTags('');
-    setNewPinned(false);
-    setShowCreateDialog(false);
+    const url = newUrl.trim();
+    const tags = newTags.split(',').map((t) => t.trim()).filter(Boolean);
+    try {
+      await createEntity({
+        core: {
+          title: newTitle.trim() || getDomain(url),
+          description: newDescription.trim(),
+          color: newColor,
+          tags,
+        },
+        aspects: [
+          { aspect_type: 'bookmark', data: { url, pinned: newPinned, favicon_hash: null } },
+        ],
+      });
+      setNewUrl('');
+      setNewTitle('');
+      setNewDescription('');
+      setNewColor('#3b82f6');
+      setNewTags('');
+      setNewPinned(false);
+      setShowCreateDialog(false);
+    } catch (err) {
+      console.error('[bookmarks] create failed:', err);
+    }
   }, [newUrl, newTitle, newDescription, newColor, newTags, newPinned]);
 
   // ── Toggle pin ────────────────────────────────────────────────────────────
 
-  const togglePin = useCallback(async (bm: Bookmark) => {
-    const db = getWorkspaceDB();
-    const now = new Date().toISOString();
-    await db.execute(
-      `UPDATE base_entities
-       SET payload = json_set(payload, '$.pinned', json(?)),
-           updated_at = ?
-       WHERE id = ?`,
-      [bm.pinned ? 'false' : 'true', now, bm.id],
-    );
-    eventBus.emit('entity:updated', { entity: { id: bm.id, type: 'bookmark', payload: {} as Record<string, unknown>, metadata: {}, tags: [], parent_id: null, created_at: '', updated_at: now, deleted_at: null } });
+  const togglePin = useCallback(async (item: AspectWithCore) => {
+    try {
+      await updateAspect(item.aspect.id, {
+        data: { pinned: !(dataOf(item).pinned ?? false) },
+      });
+    } catch (err) {
+      console.error('[bookmarks] pin toggle failed:', err);
+    }
   }, []);
 
   // ── Delete ────────────────────────────────────────────────────────────────
 
   const deleteBookmark = useCallback(async (id: string) => {
-    const db = getWorkspaceDB();
-    const now = new Date().toISOString();
-    await db.execute(`UPDATE base_entities SET deleted_at = ? WHERE id = ?`, [now, id]);
-    eventBus.emit('entity:deleted', { id, type: 'bookmark' });
-    setEditBookmark(null);
+    try {
+      await softDeleteEntity(id);
+    } catch (err) {
+      console.error('[bookmarks] delete failed:', err);
+    }
   }, []);
 
-  // ── Update ────────────────────────────────────────────────────────────────
+  // ── Open in detail sheet ──────────────────────────────────────────────────
 
-  const updateBookmark = useCallback(
-    async (bm: Bookmark) => {
-      const db = getWorkspaceDB();
-      const now = new Date().toISOString();
-      const payload = {
-        url: bm.url,
-        title: bm.title,
-        description: bm.description,
-        favicon_hash: null,
-        color: bm.color,
-        pinned: bm.pinned,
-      };
-      await db.execute(
-        `UPDATE base_entities
-         SET payload = ?, tags = ?, updated_at = ?
-         WHERE id = ?`,
-        [JSON.stringify(payload), JSON.stringify(bm.tags), now, bm.id],
-      );
-      eventBus.emit('entity:updated', { entity: { id: bm.id, type: 'bookmark', payload: payload as unknown as Record<string, unknown>, metadata: {}, tags: bm.tags, parent_id: null, created_at: bm.created_at, updated_at: now, deleted_at: null } });
-      setEditBookmark(null);
-    },
-    [],
-  );
+  const openDetail = useCallback((id: string) => {
+    eventBus.emit('nav:open-detail-sheet', { id, initialAspectType: 'bookmark' });
+  }, []);
+
+  useEffect(() => {
+    const onNav = ({ id, type }: { id: string; type: string }): void => {
+      if (type === 'bookmark') openDetail(id);
+    };
+    eventBus.on('nav:open-entity', onNav);
+    return () => { eventBus.off('nav:open-entity', onNav); };
+  }, [openDetail]);
+
+  // ── Inline color update via grid border (kept in core) ────────────────────
+
+  // (Removed inline edit dialog — now uses universal sheet.)
 
   // ── All tags ──────────────────────────────────────────────────────────────
 
-  const allTags = Array.from(new Set(bookmarks.flatMap((b) => b.tags))).sort();
+  const allTags = Array.from(new Set(bookmarks.flatMap((b) => b.core.tags))).sort();
 
   // ── Filter ────────────────────────────────────────────────────────────────
 
   let filtered = bookmarks;
-  if (showPinnedOnly) filtered = filtered.filter((b) => b.pinned);
-  if (filterTag) filtered = filtered.filter((b) => b.tags.includes(filterTag));
+  if (showPinnedOnly) filtered = filtered.filter((b) => dataOf(b).pinned);
+  if (filterTag) filtered = filtered.filter((b) => b.core.tags.includes(filterTag));
   if (search) {
     const s = search.toLowerCase();
-    filtered = filtered.filter(
-      (b) =>
-        b.title.toLowerCase().includes(s) ||
-        b.url.toLowerCase().includes(s) ||
-        b.description.toLowerCase().includes(s) ||
-        b.tags.some((t) => t.toLowerCase().includes(s)),
-    );
+    filtered = filtered.filter((b) => {
+      const url = dataOf(b).url ?? '';
+      return (
+        b.core.title.toLowerCase().includes(s) ||
+        url.toLowerCase().includes(s) ||
+        b.core.description.toLowerCase().includes(s) ||
+        b.core.tags.some((t) => t.toLowerCase().includes(s))
+      );
+    });
   }
 
   // Sort: pinned first
-  filtered = [...filtered].sort((a, b) => (a.pinned === b.pinned ? 0 : a.pinned ? -1 : 1));
+  filtered = [...filtered].sort((a, b) => {
+    const ap = dataOf(a).pinned ?? false;
+    const bp = dataOf(b).pinned ?? false;
+    return ap === bp ? 0 : ap ? -1 : 1;
+  });
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden p-4">
@@ -314,81 +251,85 @@ export function BookmarksView(): React.ReactElement {
           </div>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
-            {filtered.map((bm) => (
-              <div
-                key={bm.id}
-                className="group relative flex flex-col gap-2 rounded-lg border bg-card p-3.5 transition-colors hover:border-primary/30"
-                style={{ borderLeftColor: bm.color, borderLeftWidth: '3px' }}
-              >
-                {/* Pin indicator */}
-                {bm.pinned && (
-                  <span className="absolute right-2 top-2 text-xs text-yellow-500">⭐</span>
-                )}
+            {filtered.map((item) => {
+              const data = dataOf(item);
+              const url = data.url ?? '';
+              return (
+                <div
+                  key={item.core.id}
+                  className="group relative flex flex-col gap-2 rounded-lg border bg-card p-3.5 transition-colors hover:border-primary/30"
+                  style={{ borderLeftColor: item.core.color, borderLeftWidth: '3px' }}
+                >
+                  {data.pinned && (
+                    <span className="absolute right-2 top-2 text-xs text-yellow-500">⭐</span>
+                  )}
 
-                {/* Title + domain */}
-                <div>
-                  <a
-                    href={bm.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-medium text-foreground underline-offset-2 hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {bm.title}
-                  </a>
-                  <p className="mt-0.5 text-[10px] text-muted-foreground">{getDomain(bm.url)}</p>
-                </div>
-
-                {/* Description */}
-                {bm.description && (
-                  <p className="line-clamp-2 text-xs text-muted-foreground">{bm.description}</p>
-                )}
-
-                {/* Tags */}
-                {bm.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {bm.tags.map((tag) => (
-                      <Badge key={tag} variant="outline" className="text-[9px]">
-                        {tag}
-                      </Badge>
-                    ))}
+                  <div onClick={() => openDetail(item.core.id)} className="cursor-pointer">
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm font-medium text-foreground underline-offset-2 hover:underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {item.core.title}
+                    </a>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">{getDomain(url)}</p>
                   </div>
-                )}
 
-                {/* Actions */}
-                <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                  <button
-                    onClick={() => void togglePin(bm)}
-                    className="rounded p-1 text-muted-foreground hover:text-yellow-500"
-                    title={bm.pinned ? 'Unpin' : 'Pin'}
-                  >
-                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill={bm.pinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2}>
-                      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={() => setEditBookmark(bm)}
-                    className="rounded p-1 text-muted-foreground hover:text-foreground"
-                    title="Edit"
-                  >
-                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={() => void deleteBookmark(bm.id)}
-                    className="rounded p-1 text-muted-foreground hover:text-destructive"
-                    title="Delete"
-                  >
-                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <polyline points="3 6 5 6 21 6" />
-                      <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
-                    </svg>
-                  </button>
+                  {item.core.description && (
+                    <p
+                      className="line-clamp-2 cursor-pointer text-xs text-muted-foreground"
+                      onClick={() => openDetail(item.core.id)}
+                    >
+                      {item.core.description}
+                    </p>
+                  )}
+
+                  {item.core.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {item.core.tags.map((tag) => (
+                        <Badge key={tag} variant="outline" className="text-[9px]">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    <button
+                      onClick={() => void togglePin(item)}
+                      className="rounded p-1 text-muted-foreground hover:text-yellow-500"
+                      title={data.pinned ? 'Unpin' : 'Pin'}
+                    >
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill={data.pinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2}>
+                        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => openDetail(item.core.id)}
+                      className="rounded p-1 text-muted-foreground hover:text-foreground"
+                      title="Edit"
+                    >
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => void deleteBookmark(item.core.id)}
+                      className="rounded p-1 text-muted-foreground hover:text-destructive"
+                      title="Delete"
+                    >
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -446,79 +387,9 @@ export function BookmarksView(): React.ReactElement {
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* ── Edit dialog ────────────────────────────────────── */}
-      <Dialog open={!!editBookmark} onOpenChange={(open) => !open && setEditBookmark(null)}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Edit Bookmark</DialogTitle>
-          </DialogHeader>
-
-          {editBookmark && (
-            <div className="mt-2 space-y-3">
-              <div>
-                <label className="mb-1 block text-xs text-muted-foreground">URL</label>
-                <Input
-                  value={editBookmark.url}
-                  onChange={(e) => setEditBookmark({ ...editBookmark, url: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-muted-foreground">Title</label>
-                <Input
-                  value={editBookmark.title}
-                  onChange={(e) => setEditBookmark({ ...editBookmark, title: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-muted-foreground">Description</label>
-                <Input
-                  value={editBookmark.description}
-                  onChange={(e) => setEditBookmark({ ...editBookmark, description: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-muted-foreground">Tags</label>
-                <Input
-                  value={editBookmark.tags.join(', ')}
-                  onChange={(e) =>
-                    setEditBookmark({
-                      ...editBookmark,
-                      tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean),
-                    })
-                  }
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs text-muted-foreground">Color</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {PRESET_COLORS.map((c) => (
-                    <button
-                      key={c}
-                      onClick={() => setEditBookmark({ ...editBookmark, color: c })}
-                      className="h-6 w-6 rounded-full border-2 transition-transform hover:scale-110"
-                      style={{
-                        backgroundColor: c,
-                        borderColor: editBookmark.color === c ? 'hsl(var(--foreground))' : 'transparent',
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <Button onClick={() => void updateBookmark(editBookmark)} className="flex-1">
-                  Save
-                </Button>
-                <Button variant="destructive" onClick={() => void deleteBookmark(editBookmark.id)} className="flex-1">
-                  Delete
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
+
+// Re-export updateCore so it's clear how to update bookmark titles/colors externally.
+export { updateCore };

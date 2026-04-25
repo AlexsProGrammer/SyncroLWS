@@ -1,20 +1,20 @@
 /**
- * PomodoroView — Pomodoro focus timer with configurable intervals.
- *
- * Features:
- * – Circular countdown timer
- * – Focus / Short Break / Long Break phases
- * – Configurable durations and interval count
- * – Creates a time_log entity on focus session complete
- * – Persists session data in base_entities (pomodoro_session)
+ * PomodoroView — Hybrid-entity edition.
+ * Persists each completed phase as an entity with a `pomodoro_session` aspect,
+ * and (for focus phases) a sibling `time_log` entity linked via a reference relation.
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { getWorkspaceDB } from '@/core/db';
 import { eventBus } from '@/core/events';
+import {
+  createEntity,
+  listByAspect,
+  addRelation,
+} from '@/core/entityStore';
 import { Button } from '@/ui/components/button';
 import { Input } from '@/ui/components/input';
 import { Badge } from '@/ui/components/badge';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import type { PomodoroAspectData, TimeLogAspectData } from '@syncrohws/shared-types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -63,14 +63,8 @@ function formatTimer(seconds: number): string {
 // ── CircularTimer ─────────────────────────────────────────────────────────────
 
 function CircularTimer({
-  remaining,
-  total,
-  phase,
-}: {
-  remaining: number;
-  total: number;
-  phase: Phase;
-}): React.ReactElement {
+  remaining, total, phase,
+}: { remaining: number; total: number; phase: Phase }): React.ReactElement {
   const radius = 90;
   const circumference = 2 * Math.PI * radius;
   const progress = total > 0 ? remaining / total : 0;
@@ -79,35 +73,16 @@ function CircularTimer({
   return (
     <div className="relative mx-auto flex h-60 w-60 items-center justify-center">
       <svg className="-rotate-90" width="240" height="240" viewBox="0 0 240 240">
-        {/* Background circle */}
+        <circle cx="120" cy="120" r={radius} fill="none" stroke="hsl(var(--muted))" strokeWidth="8" />
         <circle
-          cx="120"
-          cy="120"
-          r={radius}
-          fill="none"
-          stroke="hsl(var(--muted))"
-          strokeWidth="8"
-        />
-        {/* Progress arc */}
-        <circle
-          cx="120"
-          cy="120"
-          r={radius}
-          fill="none"
-          stroke={phaseColor(phase)}
-          strokeWidth="8"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
+          cx="120" cy="120" r={radius} fill="none"
+          stroke={phaseColor(phase)} strokeWidth="8" strokeLinecap="round"
+          strokeDasharray={circumference} strokeDashoffset={offset}
           style={{ transition: 'stroke-dashoffset 0.5s linear' }}
         />
       </svg>
-
-      {/* Center content */}
       <div className="absolute flex flex-col items-center">
-        <span className="text-4xl font-bold tabular-nums text-foreground">
-          {formatTimer(remaining)}
-        </span>
+        <span className="text-4xl font-bold tabular-nums text-foreground">{formatTimer(remaining)}</span>
         <span className="mt-1 text-xs font-medium uppercase tracking-wider" style={{ color: phaseColor(phase) }}>
           {phaseLabel(phase)}
         </span>
@@ -133,27 +108,25 @@ export function PomodoroView(): React.ReactElement {
   const phaseStartRef = useRef<string | null>(null);
   const pipWindowRef = useRef<WebviewWindow | null>(null);
 
-  // ── Load today's completed sessions ───────────────────────────────────────
+  // ── Load today's completed focus sessions ─────────────────────────────────
+
+  const loadTodayCount = useCallback(async () => {
+    try {
+      const items = await listByAspect('pomodoro_session');
+      const today = new Date().toISOString().slice(0, 10);
+      const count = items.filter((i) => {
+        const d = i.aspect.data as Partial<PomodoroAspectData>;
+        return d.phase === 'focus' && (d.started_at ?? '').slice(0, 10) === today;
+      }).length;
+      setCompletedToday(count);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const db = getWorkspaceDB();
-        const today = new Date().toISOString().slice(0, 10);
-        const rows = await db.select<{ cnt: number }[]>(
-          `SELECT COUNT(*) as cnt FROM base_entities
-           WHERE type = 'pomodoro_session'
-             AND json_extract(payload, '$.phase') = 'focus'
-             AND json_extract(payload, '$.started_at') LIKE ?
-             AND deleted_at IS NULL`,
-          [`${today}%`],
-        );
-        setCompletedToday(rows[0]?.cnt ?? 0);
-      } catch {
-        /* ignore on first load */
-      }
-    })();
-  }, []);
+    void loadTodayCount();
+  }, [loadTodayCount]);
 
   // ── Timer tick ────────────────────────────────────────────────────────────
 
@@ -167,25 +140,17 @@ export function PomodoroView(): React.ReactElement {
   const startPhase = useCallback(
     (nextPhase: Phase) => {
       stopTimer();
-
       let seconds: number;
       switch (nextPhase) {
-        case 'focus':
-          seconds = config.focusMinutes * 60;
-          break;
-        case 'short_break':
-          seconds = config.shortBreakMinutes * 60;
-          break;
-        case 'long_break':
-          seconds = config.longBreakMinutes * 60;
-          break;
+        case 'focus': seconds = config.focusMinutes * 60; break;
+        case 'short_break': seconds = config.shortBreakMinutes * 60; break;
+        case 'long_break': seconds = config.longBreakMinutes * 60; break;
         default:
           setPhase('idle');
           setRemaining(config.focusMinutes * 60);
           setTotalSeconds(config.focusMinutes * 60);
           return;
       }
-
       setPhase(nextPhase);
       setRemaining(seconds);
       setTotalSeconds(seconds);
@@ -229,7 +194,6 @@ export function PomodoroView(): React.ReactElement {
   </div>
 </div>
 <script>
-  const C = 2 * Math.PI * 50;
   function update(d) {
     document.body.style.background = d.bg;
     document.getElementById('arc').setAttribute('stroke', d.color);
@@ -254,7 +218,6 @@ export function PomodoroView(): React.ReactElement {
     return { bg, color, offset, time: formatTimer(remaining), label: phaseLabel(phase) };
   }, [remaining, totalSeconds, phase]);
 
-  // Send timer updates to PiP window
   useEffect(() => {
     if (!pipActive || !pipWindowRef.current) return;
     pipWindowRef.current.emitTo('pomodoro-pip', 'pip-update', getPipData()).catch(() => {});
@@ -262,40 +225,26 @@ export function PomodoroView(): React.ReactElement {
 
   const openPip = useCallback(async () => {
     if (pipWindowRef.current) {
-      try {
-        await pipWindowRef.current.setFocus();
-        return;
-      } catch {
-        pipWindowRef.current = null;
-      }
+      try { await pipWindowRef.current.setFocus(); return; }
+      catch { pipWindowRef.current = null; }
     }
-
     try {
       const pip = new WebviewWindow('pomodoro-pip', {
         title: 'Pomodoro Timer',
-        width: 220,
-        height: 240,
-        resizable: false,
-        alwaysOnTop: true,
-        decorations: true,
-        center: false,
-        x: 100,
-        y: 100,
+        width: 220, height: 240,
+        resizable: false, alwaysOnTop: true, decorations: true,
+        center: false, x: 100, y: 100,
         url: pipHtmlUrl,
       });
-
       pip.once('tauri://created', () => {
-        // Send initial data after a short delay so the webview JS is ready
         setTimeout(() => {
           pip.emitTo('pomodoro-pip', 'pip-update', getPipData()).catch(() => {});
         }, 300);
       });
-
       pip.once('tauri://destroyed', () => {
         pipWindowRef.current = null;
         setPipActive(false);
       });
-
       pipWindowRef.current = pip;
       setPipActive(true);
     } catch (err) {
@@ -316,7 +265,6 @@ export function PomodoroView(): React.ReactElement {
     setPipActive(false);
   }, []);
 
-  // Clean up PiP on unmount
   useEffect(() => () => {
     if (pipWindowRef.current) {
       pipWindowRef.current.destroy().catch(() => {});
@@ -330,81 +278,72 @@ export function PomodoroView(): React.ReactElement {
     if (remaining > 0 || phase === 'idle') return;
 
     void (async () => {
-      const db = getWorkspaceDB();
       const now = new Date().toISOString();
+      const startedAt = phaseStartRef.current || now;
 
-      // Save completed session
-      const sessionId = crypto.randomUUID();
-      await db.execute(
-        `INSERT INTO base_entities
-           (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
-         VALUES (?, 'pomodoro_session', ?, '{}', '[]', NULL, ?, ?)`,
-        [
-          sessionId,
-          JSON.stringify({
-            focus_minutes: config.focusMinutes,
-            short_break_minutes: config.shortBreakMinutes,
-            long_break_minutes: config.longBreakMinutes,
-            intervals_before_long: config.intervalsBeforeLong,
-            current_interval: currentInterval,
-            phase,
-            started_at: phaseStartRef.current,
-            completed_sessions: phase === 'focus' ? completedToday + 1 : completedToday,
-            label,
-            linked_time_log_id: null,
-          }),
-          now,
-          now,
-        ],
-      );
+      const sessionData: PomodoroAspectData = {
+        focus_minutes: config.focusMinutes,
+        short_break_minutes: config.shortBreakMinutes,
+        long_break_minutes: config.longBreakMinutes,
+        intervals_before_long: config.intervalsBeforeLong,
+        current_interval: currentInterval,
+        phase: phase as 'focus' | 'short_break' | 'long_break',
+        started_at: startedAt,
+        completed_sessions: phase === 'focus' ? completedToday + 1 : completedToday,
+      };
 
-      // Emit completion event
-      eventBus.emit('pomodoro:completed', { phase: phase as 'focus' | 'short_break' | 'long_break', label });
+      try {
+        const session = await createEntity({
+          core: {
+            title: label || `${phaseLabel(phase)} session`,
+            tags: ['pomodoro'],
+          },
+          aspects: [{ aspect_type: 'pomodoro_session', data: sessionData }],
+        });
 
-      if (phase === 'focus') {
-        // Create a time log entry for the focus session
-        const timeLogId = crypto.randomUUID();
-        const startedAt = phaseStartRef.current || now;
-        await db.execute(
-          `INSERT INTO base_entities
-             (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
-           VALUES (?, 'time_log', ?, '{}', '["pomodoro"]', NULL, ?, ?)`,
-          [
-            timeLogId,
-            JSON.stringify({
-              description: label || 'Focus session',
-              started_at: startedAt,
-              ended_at: now,
-              window_title: '',
-              idle: false,
-              hourly_rate_cents: null,
-              project: '',
-              manual: false,
-            }),
-            now,
-            now,
-          ],
-        );
+        eventBus.emit('pomodoro:completed', { phase: phase as 'focus' | 'short_break' | 'long_break', label });
 
-        // Update the session with linked time log
-        await db.execute(
-          `UPDATE base_entities SET payload = json_set(payload, '$.linked_time_log_id', ?) WHERE id = ?`,
-          [timeLogId, sessionId],
-        );
+        if (phase === 'focus') {
+          // Compute duration
+          const startMs = new Date(startedAt).getTime();
+          const endMs = new Date(now).getTime();
+          const durationSeconds = Math.max(0, Math.floor((endMs - startMs) / 1000));
 
-        setCompletedToday((c) => c + 1);
+          const timeLogData: TimeLogAspectData = {
+            start: startedAt,
+            end: now,
+            duration_seconds: durationSeconds,
+            window_title: '',
+            billable: false,
+            hourly_rate_cents: 0,
+            project: '',
+            manual: false,
+          };
 
-        // Advance interval
-        const nextInterval = currentInterval >= config.intervalsBeforeLong ? 1 : currentInterval + 1;
-        setCurrentInterval(nextInterval);
+          const timeLog = await createEntity({
+            core: {
+              title: label || 'Focus session',
+              tags: ['pomodoro'],
+            },
+            aspects: [{ aspect_type: 'time_log', data: timeLogData }],
+          });
 
-        // Next phase: long break after N intervals, else short break
-        const nextPhase: Phase =
-          currentInterval >= config.intervalsBeforeLong ? 'long_break' : 'short_break';
-        startPhase(nextPhase);
-      } else {
-        // After break, start focus
-        startPhase('focus');
+          // Link via relation
+          await addRelation(session.core.id, timeLog.core.id, 'reference', { source: 'pomodoro' });
+
+          setCompletedToday((c) => c + 1);
+
+          const nextInterval = currentInterval >= config.intervalsBeforeLong ? 1 : currentInterval + 1;
+          setCurrentInterval(nextInterval);
+
+          const nextPhase: Phase =
+            currentInterval >= config.intervalsBeforeLong ? 'long_break' : 'short_break';
+          startPhase(nextPhase);
+        } else {
+          startPhase('focus');
+        }
+      } catch (err) {
+        console.error('[pomodoro] persist failed:', err);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -416,9 +355,9 @@ export function PomodoroView(): React.ReactElement {
 
   // ── Action handlers ───────────────────────────────────────────────────────
 
-  const handleStart = () => startPhase('focus');
+  const handleStart = (): void => startPhase('focus');
 
-  const handleStop = () => {
+  const handleStop = (): void => {
     stopTimer();
     setPhase('idle');
     setRemaining(config.focusMinutes * 60);
@@ -427,7 +366,7 @@ export function PomodoroView(): React.ReactElement {
     eventBus.emit('pomodoro:stopped', undefined as unknown as void);
   };
 
-  const handleSkip = () => {
+  const handleSkip = (): void => {
     stopTimer();
     if (phase === 'focus') {
       const nextPhase: Phase =
@@ -440,7 +379,6 @@ export function PomodoroView(): React.ReactElement {
 
   return (
     <div className="flex flex-1 flex-col items-center overflow-auto p-6">
-      {/* ── Header with stats ──────────────────────────────────── */}
       <div className="mb-6 flex items-center gap-3">
         <Badge variant="outline">
           Session {currentInterval}/{config.intervalsBeforeLong}
@@ -450,10 +388,8 @@ export function PomodoroView(): React.ReactElement {
         </Badge>
       </div>
 
-      {/* ── Timer ──────────────────────────────────────────────── */}
       <CircularTimer remaining={remaining} total={totalSeconds} phase={phase} />
 
-      {/* ── Label input ────────────────────────────────────────── */}
       <div className="mt-4 w-72">
         <Input
           placeholder="What are you focusing on?"
@@ -464,20 +400,13 @@ export function PomodoroView(): React.ReactElement {
         />
       </div>
 
-      {/* ── Controls ───────────────────────────────────────────── */}
       <div className="mt-6 flex items-center gap-3">
         {phase === 'idle' ? (
-          <Button size="lg" onClick={handleStart} className="px-8">
-            Start Focus
-          </Button>
+          <Button size="lg" onClick={handleStart} className="px-8">Start Focus</Button>
         ) : (
           <>
-            <Button variant="outline" size="sm" onClick={handleStop}>
-              Stop
-            </Button>
-            <Button variant="secondary" size="sm" onClick={handleSkip}>
-              Skip
-            </Button>
+            <Button variant="outline" size="sm" onClick={handleStop}>Stop</Button>
+            <Button variant="secondary" size="sm" onClick={handleSkip}>Skip</Button>
           </>
         )}
         <Button variant="ghost" size="sm" onClick={() => setShowConfig(!showConfig)}>
@@ -499,79 +428,58 @@ export function PomodoroView(): React.ReactElement {
         </Button>
       </div>
 
-      {/* ── Config panel ───────────────────────────────────────── */}
       {showConfig && (
         <div className="mt-6 grid w-72 grid-cols-2 gap-3 rounded-lg border border-border bg-card p-4">
           <label className="col-span-2 text-xs font-medium text-muted-foreground">Timer Settings</label>
 
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">Focus (min)</label>
-            <Input
-              type="number"
-              min={1}
-              max={120}
+            <Input type="number" min={1} max={120}
               value={config.focusMinutes}
               onChange={(e) => {
                 const v = Math.max(1, Math.min(120, Number(e.target.value) || 1));
                 setConfig((c) => ({ ...c, focusMinutes: v }));
-                if (phase === 'idle') {
-                  setRemaining(v * 60);
-                  setTotalSeconds(v * 60);
-                }
+                if (phase === 'idle') { setRemaining(v * 60); setTotalSeconds(v * 60); }
               }}
-              disabled={phase !== 'idle'}
-              className="h-8 text-sm"
+              disabled={phase !== 'idle'} className="h-8 text-sm"
             />
           </div>
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">Short Break</label>
-            <Input
-              type="number"
-              min={1}
-              max={30}
+            <Input type="number" min={1} max={30}
               value={config.shortBreakMinutes}
               onChange={(e) => {
                 const v = Math.max(1, Math.min(30, Number(e.target.value) || 1));
                 setConfig((c) => ({ ...c, shortBreakMinutes: v }));
               }}
-              disabled={phase !== 'idle'}
-              className="h-8 text-sm"
+              disabled={phase !== 'idle'} className="h-8 text-sm"
             />
           </div>
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">Long Break</label>
-            <Input
-              type="number"
-              min={1}
-              max={60}
+            <Input type="number" min={1} max={60}
               value={config.longBreakMinutes}
               onChange={(e) => {
                 const v = Math.max(1, Math.min(60, Number(e.target.value) || 1));
                 setConfig((c) => ({ ...c, longBreakMinutes: v }));
               }}
-              disabled={phase !== 'idle'}
-              className="h-8 text-sm"
+              disabled={phase !== 'idle'} className="h-8 text-sm"
             />
           </div>
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">Intervals</label>
-            <Input
-              type="number"
-              min={1}
-              max={10}
+            <Input type="number" min={1} max={10}
               value={config.intervalsBeforeLong}
               onChange={(e) => {
                 const v = Math.max(1, Math.min(10, Number(e.target.value) || 1));
                 setConfig((c) => ({ ...c, intervalsBeforeLong: v }));
               }}
-              disabled={phase !== 'idle'}
-              className="h-8 text-sm"
+              disabled={phase !== 'idle'} className="h-8 text-sm"
             />
           </div>
         </div>
       )}
 
-      {/* ── Interval indicator dots ───────────────────────────── */}
       <div className="mt-6 flex items-center gap-2">
         {Array.from({ length: config.intervalsBeforeLong }, (_, i) => (
           <div

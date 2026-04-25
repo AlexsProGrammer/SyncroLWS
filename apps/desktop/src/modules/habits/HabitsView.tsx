@@ -1,9 +1,16 @@
 /**
- * HabitsView — Daily / weekly habit tracker with streaks and contribution graph.
+ * HabitsView — Hybrid-entity edition.
+ * core.title=name, core.icon, core.color; habit aspect holds frequency/target/completions/archived.
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { getWorkspaceDB } from '@/core/db';
 import { eventBus } from '@/core/events';
+import {
+  createEntity,
+  listByAspect,
+  softDeleteEntity,
+  updateAspect,
+  type AspectWithCore,
+} from '@/core/entityStore';
 import { Button } from '@/ui/components/button';
 import { Input } from '@/ui/components/input';
 import { Badge } from '@/ui/components/badge';
@@ -13,20 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/ui/components/dialog';
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface Habit {
-  id: string;
-  name: string;
-  icon: string;
-  color: string;
-  frequency: 'daily' | 'weekly';
-  target_count: number;
-  completions: Record<string, number>;
-  archived: boolean;
-  created_at: string;
-}
+import type { HabitAspectData } from '@syncrohws/shared-types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -47,16 +41,19 @@ function periodKey(frequency: 'daily' | 'weekly'): string {
   return frequency === 'daily' ? todayKey() : weekKey();
 }
 
-function getStreak(completions: Record<string, number>, targetCount: number, frequency: 'daily' | 'weekly'): number {
+function dataOf(item: AspectWithCore): Partial<HabitAspectData> {
+  return item.aspect.data as Partial<HabitAspectData>;
+}
+
+function getStreak(
+  completions: Record<string, number>,
+  targetCount: number,
+  frequency: 'daily' | 'weekly',
+): number {
   let streak = 0;
   const date = new Date();
-
-  // Start from yesterday for daily (today might be in progress)
-  if (frequency === 'daily') {
-    date.setDate(date.getDate() - 1);
-  } else {
-    date.setDate(date.getDate() - 7);
-  }
+  if (frequency === 'daily') date.setDate(date.getDate() - 1);
+  else date.setDate(date.getDate() - 7);
 
   while (true) {
     const key = frequency === 'daily'
@@ -71,28 +68,17 @@ function getStreak(completions: Record<string, number>, targetCount: number, fre
 
     if ((completions[key] ?? 0) >= targetCount) {
       streak++;
-      if (frequency === 'daily') {
-        date.setDate(date.getDate() - 1);
-      } else {
-        date.setDate(date.getDate() - 7);
-      }
-    } else {
-      break;
-    }
-
-    if (streak > 1000) break; // Safety
+      if (frequency === 'daily') date.setDate(date.getDate() - 1);
+      else date.setDate(date.getDate() - 7);
+    } else break;
+    if (streak > 1000) break;
   }
 
-  // Check if today/this week also counts
   const currentKey = periodKey(frequency);
-  if ((completions[currentKey] ?? 0) >= targetCount) {
-    streak++;
-  }
-
+  if ((completions[currentKey] ?? 0) >= targetCount) streak++;
   return streak;
 }
 
-/** Generate an array of the last N days for the contribution graph. */
 function getLast90Days(): { key: string; label: string }[] {
   const days: { key: string; label: string }[] = [];
   for (let i = 89; i >= 0; i--) {
@@ -109,16 +95,9 @@ function getLast90Days(): { key: string; label: string }[] {
 // ── ContributionGraph ─────────────────────────────────────────────────────────
 
 function ContributionGraph({
-  completions,
-  target,
-  color,
-}: {
-  completions: Record<string, number>;
-  target: number;
-  color: string;
-}): React.ReactElement {
+  completions, target, color,
+}: { completions: Record<string, number>; target: number; color: string }): React.ReactElement {
   const days = getLast90Days();
-
   return (
     <div className="flex flex-wrap gap-[3px]">
       {days.map((d) => {
@@ -143,10 +122,10 @@ function ContributionGraph({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function HabitsView(): React.ReactElement {
-  const [habits, setHabits] = useState<Habit[]>([]);
+  const [habits, setHabits] = useState<AspectWithCore[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [selectedHabit, setSelectedHabit] = useState<Habit | null>(null);
+  const [selectedHabit, setSelectedHabit] = useState<AspectWithCore | null>(null);
 
   // New habit form
   const [newName, setNewName] = useState('');
@@ -155,163 +134,130 @@ export function HabitsView(): React.ReactElement {
   const [newFrequency, setNewFrequency] = useState<'daily' | 'weekly'>('daily');
   const [newTarget, setNewTarget] = useState(1);
 
-  // ── Load habits ───────────────────────────────────────────────────────────
+  // ── Load ──────────────────────────────────────────────────────────────────
 
-  const loadHabits = useCallback(async () => {
+  const load = useCallback(async () => {
     try {
-      const db = getWorkspaceDB();
-      const rows = await db.select<{ id: string; payload: string; created_at: string }[]>(
-        `SELECT id, payload, created_at FROM base_entities
-         WHERE type = 'habit' AND deleted_at IS NULL
-         ORDER BY created_at ASC`,
-      );
-
-      setHabits(
-        rows.map((r) => {
-          const p = JSON.parse(r.payload);
-          return {
-            id: r.id,
-            name: p.name ?? '',
-            icon: p.icon ?? '✅',
-            color: p.color ?? '#22c55e',
-            frequency: p.frequency ?? 'daily',
-            target_count: p.target_count ?? 1,
-            completions: p.completions ?? {},
-            archived: p.archived ?? false,
-            created_at: r.created_at,
-          };
-        }),
-      );
+      const items = await listByAspect('habit');
+      // Stable sort by created_at ascending
+      items.sort((a, b) => a.core.created_at.localeCompare(b.core.created_at));
+      setHabits(items);
     } catch (err) {
       console.error('[habits] load failed:', err);
     }
   }, []);
 
   useEffect(() => {
-    void loadHabits();
-  }, [loadHabits]);
+    void load();
+  }, [load]);
 
   useEffect(() => {
-    const handler = (): void => void loadHabits();
-    eventBus.on('entity:created', handler);
-    eventBus.on('entity:updated', handler);
-    eventBus.on('entity:deleted', handler);
-    return () => {
-      eventBus.off('entity:created', handler);
-      eventBus.off('entity:updated', handler);
-      eventBus.off('entity:deleted', handler);
-    };
-  }, [loadHabits]);
+    const onChange = (): void => void load();
+    const events = [
+      'core:created', 'core:updated', 'core:deleted',
+      'aspect:added', 'aspect:updated', 'aspect:removed',
+      'entity:created', 'entity:updated', 'entity:deleted',
+    ] as const;
+    events.forEach((e) => eventBus.on(e, onChange));
+    return () => events.forEach((e) => eventBus.off(e, onChange));
+  }, [load]);
 
-  // Handle nav:open-entity for habits — open the detail dialog
+  // Keep selectedHabit in sync with reloaded list
+  useEffect(() => {
+    if (!selectedHabit) return;
+    const fresh = habits.find((h) => h.core.id === selectedHabit.core.id);
+    if (fresh && fresh !== selectedHabit) setSelectedHabit(fresh);
+  }, [habits, selectedHabit]);
+
+  // Open detail sheet handlers
+  const openDetail = useCallback((id: string) => {
+    eventBus.emit('nav:open-detail-sheet', { id, initialAspectType: 'habit' });
+  }, []);
+
   useEffect(() => {
     const onNav = ({ id, type }: { id: string; type: string }): void => {
-      if (type !== 'habit') return;
-      const found = habits.find((h) => h.id === id);
-      if (found) setSelectedHabit(found);
+      if (type === 'habit') openDetail(id);
     };
     eventBus.on('nav:open-entity', onNav);
     return () => { eventBus.off('nav:open-entity', onNav); };
-  }, [habits]);
+  }, [openDetail]);
 
   // ── Create habit ──────────────────────────────────────────────────────────
 
   const createHabit = useCallback(async () => {
     if (!newName.trim()) return;
-    const db = getWorkspaceDB();
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-
-    const payload = {
-      name: newName.trim(),
-      icon: newIcon,
-      color: newColor,
-      frequency: newFrequency,
-      target_count: newTarget,
-      completions: {},
-      archived: false,
-    };
-
-    await db.execute(
-      `INSERT INTO base_entities
-         (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
-       VALUES (?, 'habit', ?, '{}', '[]', NULL, ?, ?)`,
-      [id, JSON.stringify(payload), now, now],
-    );
-
-    eventBus.emit('entity:created', {
-      entity: {
-        id,
-        type: 'habit',
-        payload,
-        metadata: {},
-        tags: [],
-        parent_id: null,
-        created_at: now,
-        updated_at: now,
-        deleted_at: null,
-      },
-    });
-
-    setNewName('');
-    setNewIcon('✅');
-    setNewColor('#22c55e');
-    setNewFrequency('daily');
-    setNewTarget(1);
-    setShowCreateDialog(false);
+    try {
+      await createEntity({
+        core: {
+          title: newName.trim(),
+          icon: newIcon,
+          color: newColor,
+        },
+        aspects: [
+          {
+            aspect_type: 'habit',
+            data: {
+              frequency: newFrequency,
+              target_count: newTarget,
+              completions: {},
+              archived: false,
+            },
+          },
+        ],
+      });
+      setNewName('');
+      setNewIcon('✅');
+      setNewColor('#22c55e');
+      setNewFrequency('daily');
+      setNewTarget(1);
+      setShowCreateDialog(false);
+    } catch (err) {
+      console.error('[habits] create failed:', err);
+    }
   }, [newName, newIcon, newColor, newFrequency, newTarget]);
 
   // ── Toggle completion ─────────────────────────────────────────────────────
 
-  const toggleCompletion = useCallback(
-    async (habit: Habit) => {
-      const db = getWorkspaceDB();
-      const key = periodKey(habit.frequency);
-      const current = habit.completions[key] ?? 0;
-      const next = current >= habit.target_count ? 0 : current + 1;
-      const updatedCompletions = { ...habit.completions, [key]: next };
-      const now = new Date().toISOString();
-
-      await db.execute(
-        `UPDATE base_entities
-         SET payload = json_set(payload, '$.completions', json(?)),
-             updated_at = ?
-         WHERE id = ?`,
-        [JSON.stringify(updatedCompletions), now, habit.id],
-      );
-
-      eventBus.emit('entity:updated', { entity: { id: habit.id, type: 'habit', payload: {} as Record<string, unknown>, metadata: {}, tags: [], parent_id: null, created_at: habit.created_at, updated_at: now, deleted_at: null } });
-    },
-    [],
-  );
+  const toggleCompletion = useCallback(async (item: AspectWithCore) => {
+    const data = dataOf(item);
+    const frequency = data.frequency ?? 'daily';
+    const target = data.target_count ?? 1;
+    const key = periodKey(frequency);
+    const completions = { ...(data.completions ?? {}) };
+    const current = completions[key] ?? 0;
+    const next = current >= target ? 0 : current + 1;
+    if (next === 0) delete completions[key];
+    else completions[key] = next;
+    try {
+      await updateAspect(item.aspect.id, { data: { completions } });
+    } catch (err) {
+      console.error('[habits] toggle failed:', err);
+    }
+  }, []);
 
   // ── Archive / delete ──────────────────────────────────────────────────────
 
-  const archiveHabit = useCallback(async (habit: Habit) => {
-    const db = getWorkspaceDB();
-    const now = new Date().toISOString();
-    await db.execute(
-      `UPDATE base_entities
-       SET payload = json_set(payload, '$.archived', json('true')),
-           updated_at = ?
-       WHERE id = ?`,
-      [now, habit.id],
-    );
-    eventBus.emit('entity:updated', { entity: { id: habit.id, type: 'habit', payload: {} as Record<string, unknown>, metadata: {}, tags: [], parent_id: null, created_at: habit.created_at, updated_at: now, deleted_at: null } });
+  const archiveHabit = useCallback(async (item: AspectWithCore) => {
+    try {
+      await updateAspect(item.aspect.id, { data: { archived: true } });
+    } catch (err) {
+      console.error('[habits] archive failed:', err);
+    }
   }, []);
 
-  const deleteHabit = useCallback(async (habit: Habit) => {
-    const db = getWorkspaceDB();
-    const now = new Date().toISOString();
-    await db.execute(`UPDATE base_entities SET deleted_at = ? WHERE id = ?`, [now, habit.id]);
-    eventBus.emit('entity:deleted', { id: habit.id, type: 'habit' });
-    setSelectedHabit(null);
+  const deleteHabit = useCallback(async (item: AspectWithCore) => {
+    try {
+      await softDeleteEntity(item.core.id);
+      setSelectedHabit(null);
+    } catch (err) {
+      console.error('[habits] delete failed:', err);
+    }
   }, []);
 
   // ── Filtered habits ───────────────────────────────────────────────────────
 
-  const activeHabits = habits.filter((h) => !h.archived);
-  const archivedHabits = habits.filter((h) => h.archived);
+  const activeHabits = habits.filter((h) => !dataOf(h).archived);
+  const archivedHabits = habits.filter((h) => dataOf(h).archived);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden p-4">
@@ -320,7 +266,11 @@ export function HabitsView(): React.ReactElement {
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-foreground">Today&apos;s Habits</h2>
           <Badge variant="outline" className="text-[10px]">
-            {activeHabits.filter((h) => (h.completions[periodKey(h.frequency)] ?? 0) >= h.target_count).length}/{activeHabits.length}
+            {activeHabits.filter((h) => {
+              const d = dataOf(h);
+              return (d.completions?.[periodKey(d.frequency ?? 'daily')] ?? 0) >= (d.target_count ?? 1);
+            }).length}
+            /{activeHabits.length}
           </Badge>
         </div>
         <div className="flex items-center gap-2">
@@ -343,66 +293,77 @@ export function HabitsView(): React.ReactElement {
             <p className="text-sm text-muted-foreground">No habits yet — create one to start tracking!</p>
           </div>
         )}
-        {activeHabits.map((habit) => {
-          const key = periodKey(habit.frequency);
-          const current = habit.completions[key] ?? 0;
-          const completed = current >= habit.target_count;
-          const streak = getStreak(habit.completions, habit.target_count, habit.frequency);
+        {activeHabits.map((item) => {
+          const data = dataOf(item);
+          const frequency = data.frequency ?? 'daily';
+          const target = data.target_count ?? 1;
+          const completions = data.completions ?? {};
+          const key = periodKey(frequency);
+          const current = completions[key] ?? 0;
+          const completed = current >= target;
+          const streak = getStreak(completions, target, frequency);
+          const color = item.core.color;
+          const icon = item.core.icon || '✅';
 
           return (
             <div
-              key={habit.id}
+              key={item.core.id}
               className="group flex items-center gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:border-primary/30"
             >
-              {/* Completion button */}
               <button
-                onClick={() => void toggleCompletion(habit)}
+                onClick={() => void toggleCompletion(item)}
                 className="flex h-10 w-10 items-center justify-center rounded-full text-xl transition-transform hover:scale-110"
                 style={{
-                  backgroundColor: completed ? habit.color + '20' : 'transparent',
-                  border: `2px solid ${completed ? habit.color : 'hsl(var(--border))'}`,
+                  backgroundColor: completed ? color + '20' : 'transparent',
+                  border: `2px solid ${completed ? color : 'hsl(var(--border))'}`,
                 }}
               >
-                {completed ? habit.icon : <span className="text-sm text-muted-foreground">{current}</span>}
+                {completed ? icon : <span className="text-sm text-muted-foreground">{current}</span>}
               </button>
 
-              {/* Info */}
               <div
                 className="flex-1 cursor-pointer"
-                onClick={() => setSelectedHabit(habit)}
+                onClick={() => setSelectedHabit(item)}
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-foreground">{habit.name}</span>
-                  <Badge variant="outline" className="text-[10px]">{habit.frequency}</Badge>
-                  {habit.target_count > 1 && (
-                    <span className="text-xs text-muted-foreground">
-                      {current}/{habit.target_count}
-                    </span>
+                  <span className="text-sm font-medium text-foreground">{item.core.title}</span>
+                  <Badge variant="outline" className="text-[10px]">{frequency}</Badge>
+                  {target > 1 && (
+                    <span className="text-xs text-muted-foreground">{current}/{target}</span>
                   )}
                 </div>
                 {streak > 0 && (
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    🔥 {streak} {habit.frequency === 'daily' ? 'day' : 'week'} streak
+                    🔥 {streak} {frequency === 'daily' ? 'day' : 'week'} streak
                   </p>
                 )}
               </div>
 
-              {/* Progress bar */}
               <div className="w-20">
                 <div className="h-1.5 rounded-full bg-muted">
                   <div
                     className="h-1.5 rounded-full transition-all"
                     style={{
-                      width: `${Math.min((current / habit.target_count) * 100, 100)}%`,
-                      backgroundColor: habit.color,
+                      width: `${Math.min((current / target) * 100, 100)}%`,
+                      backgroundColor: color,
                     }}
                   />
                 </div>
               </div>
 
-              {/* Archive button */}
               <button
-                onClick={() => void archiveHabit(habit)}
+                onClick={() => openDetail(item.core.id)}
+                className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+                title="Open in detail sheet"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+              </button>
+
+              <button
+                onClick={() => void archiveHabit(item)}
                 className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
                 title="Archive"
               >
@@ -415,26 +376,24 @@ export function HabitsView(): React.ReactElement {
           );
         })}
 
-        {/* ── Archived ──────────────────────────────────────── */}
-        {showArchived &&
-          archivedHabits.map((habit) => (
-            <div
-              key={habit.id}
-              className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 opacity-50"
+        {showArchived && archivedHabits.map((item) => (
+          <div
+            key={item.core.id}
+            className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 opacity-50"
+          >
+            <span className="text-xl">{item.core.icon || '✅'}</span>
+            <span className="flex-1 text-sm text-muted-foreground line-through">{item.core.title}</span>
+            <button
+              onClick={() => void deleteHabit(item)}
+              className="rounded p-1 text-muted-foreground hover:text-destructive"
             >
-              <span className="text-xl">{habit.icon}</span>
-              <span className="flex-1 text-sm text-muted-foreground line-through">{habit.name}</span>
-              <button
-                onClick={() => void deleteHabit(habit)}
-                className="rounded p-1 text-muted-foreground hover:text-destructive"
-              >
-                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
-                </svg>
-              </button>
-            </div>
-          ))}
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6" />
+              </svg>
+            </button>
+          </div>
+        ))}
       </div>
 
       {/* ── Create dialog ──────────────────────────────────── */}
@@ -527,42 +486,48 @@ export function HabitsView(): React.ReactElement {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <span>{selectedHabit?.icon}</span>
-              <span>{selectedHabit?.name}</span>
+              <span>{selectedHabit?.core.icon || '✅'}</span>
+              <span>{selectedHabit?.core.title}</span>
             </DialogTitle>
           </DialogHeader>
 
-          {selectedHabit && (
-            <div className="mt-2 space-y-4">
-              <div className="flex items-center gap-3">
-                <Badge variant="outline">{selectedHabit.frequency}</Badge>
-                <Badge variant="secondary">
-                  🔥 {getStreak(selectedHabit.completions, selectedHabit.target_count, selectedHabit.frequency)} streak
-                </Badge>
-                <Badge variant="secondary">
-                  Target: {selectedHabit.target_count}x / {selectedHabit.frequency === 'daily' ? 'day' : 'week'}
-                </Badge>
-              </div>
+          {selectedHabit && (() => {
+            const d = dataOf(selectedHabit);
+            const frequency = d.frequency ?? 'daily';
+            const target = d.target_count ?? 1;
+            const completions = d.completions ?? {};
+            const color = selectedHabit.core.color;
+            return (
+              <div className="mt-2 space-y-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <Badge variant="outline">{frequency}</Badge>
+                  <Badge variant="secondary">
+                    🔥 {getStreak(completions, target, frequency)} streak
+                  </Badge>
+                  <Badge variant="secondary">
+                    Target: {target}x / {frequency === 'daily' ? 'day' : 'week'}
+                  </Badge>
+                </div>
 
-              <div>
-                <label className="mb-2 block text-xs font-medium text-muted-foreground">Last 90 days</label>
-                <ContributionGraph
-                  completions={selectedHabit.completions}
-                  target={selectedHabit.target_count}
-                  color={selectedHabit.color}
-                />
-              </div>
+                <div>
+                  <label className="mb-2 block text-xs font-medium text-muted-foreground">Last 90 days</label>
+                  <ContributionGraph completions={completions} target={target} color={color} />
+                </div>
 
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => void archiveHabit(selectedHabit)}>
-                  Archive
-                </Button>
-                <Button variant="destructive" size="sm" onClick={() => void deleteHabit(selectedHabit)}>
-                  Delete
-                </Button>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => openDetail(selectedHabit.core.id)}>
+                    Open in Sheet
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => void archiveHabit(selectedHabit)}>
+                    Archive
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={() => void deleteHabit(selectedHabit)}>
+                    Delete
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </div>

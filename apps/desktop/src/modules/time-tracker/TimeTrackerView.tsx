@@ -1,36 +1,71 @@
 /**
- * TimeTrackerView — Full time tracking panel with tabs.
- *
- * Tab 1 – Timer: prominent start/stop, active window, live elapsed, recent logs with edit/delete
- * Tab 2 – Manual: manual time entry form
- * Tab 3 – Reports: daily/weekly/monthly charts + CSV/PDF export
+ * TimeTrackerView — Hybrid-entity edition.
+ * `description` now lives on EntityCore.title; everything else on the time_log aspect.
+ * The TimeLogItem shape is preserved for compatibility with reports & manual entry.
  */
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { eventBus } from '@/core/events';
-import { getWorkspaceDB } from '@/core/db';
+import {
+  listByAspect,
+  softDeleteEntity,
+  updateAspect,
+  updateCore,
+  type AspectWithCore,
+} from '@/core/entityStore';
 import { Button } from '@/ui/components/button';
 import { Badge } from '@/ui/components/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/ui/components/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/components/tooltip';
-import type { BaseEntity, TimeLogPayload } from '@syncrohws/shared-types';
+import type { TimeLogAspectData } from '@syncrohws/shared-types';
 import { ManualEntryForm } from './ManualEntryForm';
 import { TimeTrackerReports } from './TimeTrackerReports';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+/**
+ * TimeLogItem — adapter shape that carries both the entity core id and the
+ * time_log aspect id, plus a flat payload merging `core.title` (as description)
+ * with the aspect's data fields. Kept for compat with reports & manual entry.
+ */
+export interface TimeLogPayload {
+  description: string;
+  start: string;
+  end: string | null;
+  duration_seconds: number | null;
+  window_title: string;
+  billable: boolean;
+  hourly_rate_cents: number;
+  project: string;
+  manual: boolean;
+}
+
 export interface TimeLogItem {
-  id: string;
+  id: string;          // core entity id
+  aspectId: string;    // aspect id
   payload: TimeLogPayload;
   created_at: string;
   updated_at: string;
 }
 
-interface DBRow {
-  id: string;
-  type: string;
-  payload: string;
-  created_at: string;
-  updated_at: string;
+function toItem(row: AspectWithCore): TimeLogItem {
+  const d = row.aspect.data as Partial<TimeLogAspectData>;
+  return {
+    id: row.core.id,
+    aspectId: row.aspect.id,
+    payload: {
+      description: row.core.title,
+      start: d.start ?? row.core.created_at,
+      end: d.end ?? null,
+      duration_seconds: d.duration_seconds ?? null,
+      window_title: d.window_title ?? '',
+      billable: d.billable ?? false,
+      hourly_rate_cents: d.hourly_rate_cents ?? 0,
+      project: d.project ?? '',
+      manual: d.manual ?? false,
+    },
+    created_at: row.core.created_at,
+    updated_at: row.core.updated_at,
+  };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -56,7 +91,8 @@ function formatDate(iso: string): string {
 export function TimeTrackerView(): React.ReactElement {
   const [currentWindow, setCurrentWindow] = useState<string>('—');
   const [isTracking, setIsTracking] = useState(false);
-  const [activeLogId, setActiveLogId] = useState<string | null>(null);
+  const [activeCoreId, setActiveCoreId] = useState<string | null>(null);
+  const [activeAspectId, setActiveAspectId] = useState<string | null>(null);
   const [activeStart, setActiveStart] = useState<Date | null>(null);
   const [activeDesc, setActiveDesc] = useState('');
   const [elapsed, setElapsed] = useState(0);
@@ -68,63 +104,41 @@ export function TimeTrackerView(): React.ReactElement {
 
   const loadLogs = useCallback(async (): Promise<void> => {
     try {
-      const db = getWorkspaceDB();
-      const rows = await db.select<DBRow[]>(
-        `SELECT id, type, payload, created_at, updated_at FROM base_entities
-         WHERE type = 'time_log' AND deleted_at IS NULL
-         ORDER BY created_at DESC LIMIT 50`,
-      );
-      const items: TimeLogItem[] = rows.map((r) => {
-        const p = JSON.parse(r.payload) as TimeLogPayload;
-        return {
-          id: r.id,
-          payload: {
-            description: p.description ?? '',
-            start: p.start,
-            end: p.end ?? null,
-            duration_seconds: p.duration_seconds ?? null,
-            window_title: p.window_title ?? '',
-            billable: p.billable ?? false,
-            hourly_rate_cents: p.hourly_rate_cents ?? 0,
-            project: p.project ?? '',
-            manual: p.manual ?? false,
-          },
-          created_at: r.created_at,
-          updated_at: r.updated_at,
-        };
-      });
-      setLogs(items);
+      const rows = await listByAspect('time_log', { limit: 100 });
+      const items = rows.map(toItem);
+      // Sort newest first
+      items.sort((a, b) => b.payload.start.localeCompare(a.payload.start));
+      setLogs(items.slice(0, 50));
     } catch (err) {
       console.error('[time-tracker] load failed:', err);
     }
   }, []);
 
-  // ── Window change listener ────────────────────────────────────────────────
+  useEffect(() => {
+    void loadLogs();
+  }, [loadLogs]);
 
+  // Window change listener
   useEffect(() => {
     const handler = ({ window_title }: { window_title: string }): void => {
       setCurrentWindow(window_title);
     };
     eventBus.on('tracker:window-changed', handler);
-    void loadLogs();
     return () => {
       eventBus.off('tracker:window-changed', handler);
     };
-  }, [loadLogs]);
+  }, []);
 
-  // Entity event reload
+  // Reload on entity changes
   useEffect(() => {
-    const handler = (): void => {
-      void loadLogs();
-    };
-    eventBus.on('entity:created', handler);
-    eventBus.on('entity:updated', handler);
-    eventBus.on('entity:deleted', handler);
-    return () => {
-      eventBus.off('entity:created', handler);
-      eventBus.off('entity:updated', handler);
-      eventBus.off('entity:deleted', handler);
-    };
+    const onChange = (): void => void loadLogs();
+    const events = [
+      'core:created', 'core:updated', 'core:deleted',
+      'aspect:added', 'aspect:updated', 'aspect:removed',
+      'entity:created', 'entity:updated', 'entity:deleted',
+    ] as const;
+    events.forEach((e) => eventBus.on(e, onChange));
+    return () => events.forEach((e) => eventBus.off(e, onChange));
   }, [loadLogs]);
 
   // ── Elapsed timer ─────────────────────────────────────────────────────────
@@ -146,11 +160,9 @@ export function TimeTrackerView(): React.ReactElement {
   // ── Start tracking ────────────────────────────────────────────────────────
 
   const startTracking = useCallback(async (): Promise<void> => {
-    const id = crypto.randomUUID();
     const now = new Date();
     const desc = activeDesc.trim() || `Working on: ${currentWindow}`;
-    const payload: TimeLogPayload = {
-      description: desc,
+    const data: TimeLogAspectData = {
       start: now.toISOString(),
       end: null,
       duration_seconds: null,
@@ -162,30 +174,18 @@ export function TimeTrackerView(): React.ReactElement {
     };
 
     try {
-      const db = getWorkspaceDB();
-      await db.execute(
-        `INSERT INTO base_entities
-           (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
-         VALUES (?, 'time_log', ?, '{}', '[]', NULL, ?, ?)`,
-        [id, JSON.stringify(payload), now.toISOString(), now.toISOString()],
-      );
-      setActiveLogId(id);
+      const { createEntity } = await import('@/core/entityStore');
+      const created = await createEntity({
+        core: { title: desc, tags: [] },
+        aspects: [{ aspect_type: 'time_log', data }],
+      });
+      const aspect = created.aspects.find((a) => a.aspect_type === 'time_log');
+      if (!aspect) throw new Error('time_log aspect missing after create');
+      setActiveCoreId(created.core.id);
+      setActiveAspectId(aspect.id);
       setActiveStart(now);
       setIsTracking(true);
       eventBus.emit('tracker:start', { description: desc });
-      eventBus.emit('entity:created', {
-        entity: {
-          id,
-          type: 'time_log',
-          payload,
-          metadata: {},
-          tags: [],
-          parent_id: null,
-          created_at: now.toISOString(),
-          updated_at: now.toISOString(),
-          deleted_at: null,
-        },
-      });
     } catch (err) {
       console.error('[time-tracker] start failed:', err);
     }
@@ -194,119 +194,65 @@ export function TimeTrackerView(): React.ReactElement {
   // ── Stop tracking ─────────────────────────────────────────────────────────
 
   const stopTracking = useCallback(async (): Promise<void> => {
-    if (!activeLogId || !activeStart) return;
+    if (!activeCoreId || !activeAspectId || !activeStart) return;
 
     const now = new Date();
     const duration = Math.floor((now.getTime() - activeStart.getTime()) / 1000);
 
     try {
-      const db = getWorkspaceDB();
-      const row = await db.select<{ payload: string }[]>(
-        `SELECT payload FROM base_entities WHERE id = ?`,
-        [activeLogId],
-      );
-      if (row[0]) {
-        const existing = JSON.parse(row[0].payload) as TimeLogPayload;
-        const updated: TimeLogPayload = {
-          ...existing,
-          end: now.toISOString(),
-          duration_seconds: duration,
-        };
-        await db.execute(
-          `UPDATE base_entities SET payload = ?, updated_at = ? WHERE id = ?`,
-          [JSON.stringify(updated), now.toISOString(), activeLogId],
-        );
-
-        eventBus.emit('entity:updated', {
-          entity: {
-            id: activeLogId,
-            type: 'time_log',
-            payload: updated,
-            metadata: {},
-            tags: [],
-            parent_id: null,
-            created_at: activeStart.toISOString(),
-            updated_at: now.toISOString(),
-            deleted_at: null,
-          },
-        });
-        eventBus.emit('tracker:stop', { time_log_id: activeLogId });
-      }
+      await updateAspect(activeAspectId, {
+        data: { end: now.toISOString(), duration_seconds: duration },
+      });
+      eventBus.emit('tracker:stop', { time_log_id: activeCoreId });
     } catch (err) {
       console.error('[time-tracker] stop failed:', err);
     }
 
     setIsTracking(false);
-    setActiveLogId(null);
+    setActiveCoreId(null);
+    setActiveAspectId(null);
     setActiveStart(null);
     setActiveDesc('');
     void loadLogs();
-  }, [activeLogId, activeStart, loadLogs]);
+  }, [activeCoreId, activeAspectId, activeStart, loadLogs]);
 
   // ── Delete log ────────────────────────────────────────────────────────────
 
-  const deleteLog = useCallback(
-    async (logId: string) => {
-      try {
-        const db = getWorkspaceDB();
-        await db.execute(
-          `UPDATE base_entities SET deleted_at = ? WHERE id = ?`,
-          [new Date().toISOString(), logId],
-        );
-        setLogs((prev) => prev.filter((l) => l.id !== logId));
-        eventBus.emit('entity:deleted', { id: logId, type: 'time_log' });
-      } catch (err) {
-        console.error('[time-tracker] delete failed:', err);
-      }
-    },
-    [],
-  );
+  const deleteLog = useCallback(async (coreId: string) => {
+    try {
+      await softDeleteEntity(coreId);
+      setLogs((prev) => prev.filter((l) => l.id !== coreId));
+    } catch (err) {
+      console.error('[time-tracker] delete failed:', err);
+    }
+  }, []);
 
   // ── Update log (inline edit: billable, project, description) ──────────────
 
   const updateLog = useCallback(
-    async (logId: string, updates: Partial<TimeLogPayload>) => {
+    async (coreId: string, aspectId: string, updates: Partial<TimeLogPayload>) => {
       try {
-        const db = getWorkspaceDB();
-        const row = await db.select<{ payload: string }[]>(
-          `SELECT payload FROM base_entities WHERE id = ?`,
-          [logId],
-        );
-        if (!row[0]) return;
-        const existing = JSON.parse(row[0].payload) as TimeLogPayload;
-        const updated: TimeLogPayload = { ...existing, ...updates };
-        const now = new Date().toISOString();
-        await db.execute(
-          `UPDATE base_entities SET payload = ?, updated_at = ? WHERE id = ?`,
-          [JSON.stringify(updated), now, logId],
-        );
-        setLogs((prev) =>
-          prev.map((l) =>
-            l.id === logId ? { ...l, payload: updated, updated_at: now } : l,
-          ),
-        );
-        eventBus.emit('entity:updated', {
-          entity: {
-            id: logId,
-            type: 'time_log',
-            payload: updated,
-            metadata: {},
-            tags: [],
-            parent_id: null,
-            created_at: '',
-            updated_at: now,
-            deleted_at: null,
-          },
-        });
+        if (updates.description !== undefined) {
+          await updateCore(coreId, { title: updates.description });
+        }
+        const aspectUpdates: Partial<TimeLogAspectData> = {};
+        if (updates.project !== undefined) aspectUpdates.project = updates.project;
+        if (updates.billable !== undefined) aspectUpdates.billable = updates.billable;
+        if (updates.hourly_rate_cents !== undefined) aspectUpdates.hourly_rate_cents = updates.hourly_rate_cents;
+        if (updates.window_title !== undefined) aspectUpdates.window_title = updates.window_title;
+        if (Object.keys(aspectUpdates).length > 0) {
+          await updateAspect(aspectId, { data: aspectUpdates });
+        }
         setEditingId(null);
+        await loadLogs();
       } catch (err) {
         console.error('[time-tracker] update failed:', err);
       }
     },
-    [],
+    [loadLogs],
   );
 
-  // ── Total stats ───────────────────────────────────────────────────────────
+  // ── Today stats ───────────────────────────────────────────────────────────
 
   const todayStats = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -318,6 +264,12 @@ export function TimeTrackerView(): React.ReactElement {
     return { count: todayLogs.length, totalSeconds, billableSeconds };
   }, [logs]);
 
+  // ── Open in detail sheet ──────────────────────────────────────────────────
+
+  const openDetail = useCallback((coreId: string) => {
+    eventBus.emit('nav:open-detail-sheet', { id: coreId, initialAspectType: 'time_log' });
+  }, []);
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <Tabs defaultValue="timer" className="flex flex-1 flex-col overflow-hidden">
@@ -328,7 +280,6 @@ export function TimeTrackerView(): React.ReactElement {
             <TabsTrigger value="reports" className="text-xs">Reports</TabsTrigger>
           </TabsList>
 
-          {/* Today's summary */}
           <div className="flex items-center gap-3 pr-1 text-xs text-muted-foreground">
             <span>Today: <strong className="text-foreground">{formatDuration(todayStats.totalSeconds)}</strong></span>
             {todayStats.billableSeconds > 0 && (
@@ -340,7 +291,6 @@ export function TimeTrackerView(): React.ReactElement {
 
         {/* ── Timer Tab ──────────────────────────────────────────────── */}
         <TabsContent value="timer" className="flex flex-1 flex-col gap-4 overflow-auto p-4">
-          {/* Active window */}
           <section className="rounded-lg border border-border bg-card px-4 py-3">
             <p className="mb-1 text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
               Active Window
@@ -348,10 +298,8 @@ export function TimeTrackerView(): React.ReactElement {
             <p className="truncate font-mono text-sm text-foreground">{currentWindow}</p>
           </section>
 
-          {/* Timer control */}
           <section className="rounded-xl border-2 border-border bg-card p-6">
             <div className="flex items-center gap-4">
-              {/* Description input */}
               <input
                 type="text"
                 placeholder="What are you working on?"
@@ -364,14 +312,12 @@ export function TimeTrackerView(): React.ReactElement {
                 }}
               />
 
-              {/* Elapsed display */}
               <div className="min-w-[100px] text-center">
                 <p className="font-mono text-2xl font-bold tabular-nums text-foreground">
                   {formatDuration(elapsed)}
                 </p>
               </div>
 
-              {/* Start/Stop button */}
               <Button
                 onClick={isTracking ? () => void stopTracking() : () => void startTracking()}
                 size="lg"
@@ -402,7 +348,6 @@ export function TimeTrackerView(): React.ReactElement {
             )}
           </section>
 
-          {/* Recent logs */}
           <section className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
@@ -425,6 +370,7 @@ export function TimeTrackerView(): React.ReactElement {
                     onCancelEdit={() => setEditingId(null)}
                     onUpdate={updateLog}
                     onDelete={deleteLog}
+                    onOpen={() => openDetail(log.id)}
                   />
                 ))}
               </div>
@@ -432,12 +378,10 @@ export function TimeTrackerView(): React.ReactElement {
           </section>
         </TabsContent>
 
-        {/* ── Manual Entry Tab ───────────────────────────────────────── */}
         <TabsContent value="manual" className="flex-1 overflow-auto p-4">
           <ManualEntryForm onSaved={loadLogs} />
         </TabsContent>
 
-        {/* ── Reports Tab ────────────────────────────────────────────── */}
         <TabsContent value="reports" className="flex-1 overflow-auto p-4">
           <TimeTrackerReports logs={logs} />
         </TabsContent>
@@ -453,11 +397,12 @@ interface TimeLogRowProps {
   isEditing: boolean;
   onEdit: () => void;
   onCancelEdit: () => void;
-  onUpdate: (id: string, updates: Partial<TimeLogPayload>) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  onUpdate: (coreId: string, aspectId: string, updates: Partial<TimeLogPayload>) => Promise<void>;
+  onDelete: (coreId: string) => Promise<void>;
+  onOpen: () => void;
 }
 
-function TimeLogRow({ log, isEditing, onEdit, onCancelEdit, onUpdate, onDelete }: TimeLogRowProps): React.ReactElement {
+function TimeLogRow({ log, isEditing, onEdit, onCancelEdit, onUpdate, onDelete, onOpen }: TimeLogRowProps): React.ReactElement {
   const { payload } = log;
   const [desc, setDesc] = useState(payload.description);
   const [project, setProject] = useState(payload.project);
@@ -500,7 +445,7 @@ function TimeLogRow({ log, isEditing, onEdit, onCancelEdit, onUpdate, onDelete }
               size="sm"
               className="h-7 text-xs"
               onClick={() =>
-                void onUpdate(log.id, {
+                void onUpdate(log.id, log.aspectId, {
                   description: desc.trim(),
                   project: project.trim(),
                   billable,
@@ -517,14 +462,15 @@ function TimeLogRow({ log, isEditing, onEdit, onCancelEdit, onUpdate, onDelete }
 
   return (
     <div className="group flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 text-sm transition-colors hover:border-border/80">
-      {/* Billable indicator */}
       <div
         className={`h-8 w-1 shrink-0 rounded-full ${payload.billable ? 'bg-green-500' : 'bg-muted'}`}
         title={payload.billable ? 'Billable' : 'Non-billable'}
       />
 
-      {/* Description + metadata */}
-      <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
+      <div
+        className="flex flex-1 cursor-pointer flex-col gap-0.5 overflow-hidden"
+        onClick={onOpen}
+      >
         <div className="flex items-center gap-2">
           <p className="truncate font-medium text-foreground">{payload.description}</p>
           {payload.manual && (
@@ -541,7 +487,6 @@ function TimeLogRow({ log, isEditing, onEdit, onCancelEdit, onUpdate, onDelete }
         </div>
       </div>
 
-      {/* Duration + time range */}
       <div className="shrink-0 text-right">
         <p className="font-mono text-xs font-medium text-foreground">
           {payload.duration_seconds != null
@@ -554,7 +499,6 @@ function TimeLogRow({ log, isEditing, onEdit, onCancelEdit, onUpdate, onDelete }
         </p>
       </div>
 
-      {/* Actions */}
       <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
         <TooltipProvider delayDuration={300}>
           <Tooltip>

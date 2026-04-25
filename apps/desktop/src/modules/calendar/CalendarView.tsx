@@ -12,132 +12,84 @@ import type {
   EventDropArg,
 } from '@fullcalendar/core';
 import type { EventResizeDoneArg } from '@fullcalendar/interaction';
-import { getWorkspaceDB } from '@/core/db';
 import { eventBus } from '@/core/events';
+import {
+  createEntity,
+  listByAspect,
+  updateAspect,
+  type AspectWithCore,
+} from '@/core/entityStore';
 import { Button } from '@/ui/components/button';
 import type {
-  CalendarEventPayload,
-  TaskPayload,
-  TimeLogPayload,
+  CalendarEventAspectData,
+  TaskAspectData,
+  TimeLogAspectData,
 } from '@syncrohws/shared-types';
-import {
-  EventDetailModal,
-  type CalendarEventItem,
-} from './EventDetailModal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type ViewMode = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek';
 
-interface DBRow {
-  id: string;
-  type: string;
-  payload: string;
-  created_at: string;
-  updated_at: string;
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function CalendarView(): React.ReactElement {
   const calRef = useRef<FullCalendar>(null);
-  const [events, setEvents] = useState<CalendarEventItem[]>([]);
+  const [events, setEvents] = useState<AspectWithCore[]>([]);
   const [taskEvents, setTaskEvents] = useState<EventInput[]>([]);
   const [timeLogEvents, setTimeLogEvents] = useState<EventInput[]>([]);
   const [currentView, setCurrentView] = useState<ViewMode>('dayGridMonth');
 
-  // Modal state
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<CalendarEventItem | null>(null);
-  const [defaultStart, setDefaultStart] = useState<string>('');
-  const [defaultEnd, setDefaultEnd] = useState<string>('');
-  const [defaultAllDay, setDefaultAllDay] = useState(false);
-
-  // ── Load calendar events from DB ──────────────────────────────────────────
+  // ── Load calendar events ──────────────────────────────────────────────────
 
   const loadEvents = useCallback(async () => {
     try {
-      const db = getWorkspaceDB();
-      const rows = await db.select<DBRow[]>(
-        `SELECT id, type, payload, created_at, updated_at FROM base_entities
-         WHERE type = 'calendar_event' AND deleted_at IS NULL ORDER BY created_at DESC`,
-      );
-      const items: CalendarEventItem[] = rows.map((r) => {
-        const p = JSON.parse(r.payload) as CalendarEventPayload;
-        return {
-          id: r.id,
-          payload: {
-            title: p.title ?? '',
-            description: p.description ?? '',
-            start: p.start,
-            end: p.end,
-            all_day: p.all_day ?? false,
-            recurrence_rule: p.recurrence_rule ?? null,
-            location: p.location ?? '',
-            color: p.color ?? '#3b82f6',
-            linked_entity_id: p.linked_entity_id ?? null,
-            linked_entity_type: p.linked_entity_type ?? null,
-          },
-          created_at: r.created_at,
-          updated_at: r.updated_at,
-        };
-      });
+      const items = await listByAspect('calendar_event');
       setEvents(items);
     } catch (err) {
       console.error('[calendar] load failed:', err);
     }
   }, []);
 
-  // ── Load cross-module events (tasks + time logs) ──────────────────────────
+  // ── Load cross-module ghost events ────────────────────────────────────────
 
   const loadCrossModuleEvents = useCallback(async () => {
     try {
-      const db = getWorkspaceDB();
-
-      // Tasks with due dates → virtual calendar events
-      const taskRows = await db.select<DBRow[]>(
-        `SELECT id, type, payload, created_at, updated_at FROM base_entities
-         WHERE type = 'task' AND deleted_at IS NULL`,
-      );
+      const taskItems = await listByAspect('task');
       const tasks: EventInput[] = [];
-      for (const r of taskRows) {
-        const p = JSON.parse(r.payload) as TaskPayload;
-        if (p.due_date) {
+      for (const t of taskItems) {
+        const data = t.aspect.data as Partial<TaskAspectData>;
+        if (data.due_date) {
           tasks.push({
-            id: `task__${r.id}`,
-            title: `📋 ${p.title}`,
-            start: p.due_date,
+            id: `task__${t.core.id}`,
+            title: `📋 ${t.core.title}`,
+            start: data.due_date,
             allDay: true,
             backgroundColor: '#6366f1',
             borderColor: '#6366f1',
             textColor: '#fff',
             editable: false,
-            extendedProps: { sourceType: 'task', sourceId: r.id },
+            extendedProps: { sourceType: 'task', sourceId: t.core.id },
           });
         }
       }
       setTaskEvents(tasks);
 
-      // Time log entries → ghost blocks
-      const logRows = await db.select<DBRow[]>(
-        `SELECT id, type, payload, created_at, updated_at FROM base_entities
-         WHERE type = 'time_log' AND deleted_at IS NULL`,
-      );
+      const logItems = await listByAspect('time_log');
       const logs: EventInput[] = [];
-      for (const r of logRows) {
-        const p = JSON.parse(r.payload) as TimeLogPayload;
-        if (p.start && p.end) {
+      for (const l of logItems) {
+        const data = l.aspect.data as Partial<TimeLogAspectData>;
+        if (data.start && data.end) {
           logs.push({
-            id: `timelog__${r.id}`,
-            title: `⏱ ${p.description || 'Time log'}`,
-            start: p.start,
-            end: p.end,
+            id: `timelog__${l.core.id}`,
+            title: `⏱ ${l.core.title || 'Time log'}`,
+            start: data.start,
+            end: data.end,
             backgroundColor: 'rgba(34, 197, 94, 0.15)',
             borderColor: '#22c55e',
             textColor: '#22c55e',
             editable: false,
             display: 'background',
-            extendedProps: { sourceType: 'time_log', sourceId: r.id },
+            extendedProps: { sourceType: 'time_log', sourceId: l.core.id },
           });
         }
       }
@@ -152,189 +104,122 @@ export function CalendarView(): React.ReactElement {
     void loadCrossModuleEvents();
   }, [loadEvents, loadCrossModuleEvents]);
 
-  // Reload on entity events
   useEffect(() => {
     const handler = (): void => {
       void loadEvents();
       void loadCrossModuleEvents();
     };
+    eventBus.on('core:created', handler);
+    eventBus.on('core:updated', handler);
+    eventBus.on('core:deleted', handler);
+    eventBus.on('aspect:added', handler);
+    eventBus.on('aspect:updated', handler);
+    eventBus.on('aspect:removed', handler);
     eventBus.on('entity:created', handler);
     eventBus.on('entity:updated', handler);
     eventBus.on('entity:deleted', handler);
     return () => {
+      eventBus.off('core:created', handler);
+      eventBus.off('core:updated', handler);
+      eventBus.off('core:deleted', handler);
+      eventBus.off('aspect:added', handler);
+      eventBus.off('aspect:updated', handler);
+      eventBus.off('aspect:removed', handler);
       eventBus.off('entity:created', handler);
       eventBus.off('entity:updated', handler);
       eventBus.off('entity:deleted', handler);
     };
   }, [loadEvents, loadCrossModuleEvents]);
 
-  // Handle nav:open-entity for calendar events — open the detail modal
-  useEffect(() => {
-    const onNav = ({ id, type }: { id: string; type: string }): void => {
-      if (type !== 'calendar_event') return;
-      const found = events.find((e) => e.id === id);
-      if (found) {
-        setEditingEvent(found);
-        setModalOpen(true);
-      }
-    };
-    eventBus.on('nav:open-entity', onNav);
-    return () => { eventBus.off('nav:open-entity', onNav); };
-  }, [events]);
-
-  // ── Convert to FullCalendar events ────────────────────────────────────────
+  // ── FullCalendar input ────────────────────────────────────────────────────
 
   const fcEvents: EventInput[] = useMemo(() => {
     const calEvents: EventInput[] = events.map((e) => {
+      const data = e.aspect.data as Partial<CalendarEventAspectData>;
+      const start = data.start ?? new Date().toISOString();
+      const end = data.end ?? start;
       const base: EventInput = {
-        id: e.id,
-        title: e.payload.title,
-        start: e.payload.start,
-        end: e.payload.end,
-        allDay: e.payload.all_day,
-        backgroundColor: e.payload.color,
-        borderColor: e.payload.color,
+        id: e.core.id,
+        title: e.core.title,
+        start,
+        end,
+        allDay: data.all_day ?? false,
+        backgroundColor: e.core.color,
+        borderColor: e.core.color,
         extendedProps: {
           sourceType: 'calendar_event',
-          sourceId: e.id,
-          location: e.payload.location,
-          description: e.payload.description,
+          sourceId: e.core.id,
+          aspectId: e.aspect.id,
+          location: data.location,
+          description: e.core.description,
         },
       };
-
-      if (e.payload.recurrence_rule) {
-        base.rrule = e.payload.recurrence_rule;
-        base.duration = (() => {
-          const ms = new Date(e.payload.end).getTime() - new Date(e.payload.start).getTime();
-          return { milliseconds: ms > 0 ? ms : 3600000 };
-        })();
+      if (data.recurrence_rule) {
+        base.rrule = data.recurrence_rule;
+        const ms = new Date(end).getTime() - new Date(start).getTime();
+        base.duration = { milliseconds: ms > 0 ? ms : 3600000 };
       }
-
       return base;
     });
-
     return [...calEvents, ...taskEvents, ...timeLogEvents];
   }, [events, taskEvents, timeLogEvents]);
 
-  // ── Save event to DB ──────────────────────────────────────────────────────
+  // ── Quick create ──────────────────────────────────────────────────────────
 
-  const saveEvent = useCallback(
-    async (id: string | null, payload: CalendarEventPayload) => {
+  const quickCreate = useCallback(
+    async (start: string, end: string, allDay: boolean) => {
       try {
-        const db = getWorkspaceDB();
-        const now = new Date().toISOString();
-
-        if (id) {
-          // Update
-          await db.execute(
-            `UPDATE base_entities SET payload = ?, updated_at = ? WHERE id = ?`,
-            [JSON.stringify(payload), now, id],
-          );
-          setEvents((prev) =>
-            prev.map((e) =>
-              e.id === id ? { ...e, payload, updated_at: now } : e,
-            ),
-          );
-          eventBus.emit('entity:updated', {
-            entity: {
-              id,
-              type: 'calendar_event',
-              payload,
-              metadata: {},
-              tags: [],
-              parent_id: null,
-              created_at: '',
-              updated_at: now,
-              deleted_at: null,
+        const created = await createEntity({
+          core: { title: 'New event', color: '#3b82f6' },
+          aspects: [
+            {
+              aspect_type: 'calendar_event',
+              data: { start, end, all_day: allDay },
             },
-          });
-        } else {
-          // Create
-          const newId = crypto.randomUUID();
-          await db.execute(
-            `INSERT INTO base_entities (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
-             VALUES (?, 'calendar_event', ?, '{}', '[]', NULL, ?, ?)`,
-            [newId, JSON.stringify(payload), now, now],
-          );
-          const newItem: CalendarEventItem = {
-            id: newId,
-            payload,
-            created_at: now,
-            updated_at: now,
-          };
-          setEvents((prev) => [newItem, ...prev]);
-          eventBus.emit('entity:created', {
-            entity: {
-              id: newId,
-              type: 'calendar_event',
-              payload,
-              metadata: {},
-              tags: [],
-              parent_id: null,
-              created_at: now,
-              updated_at: now,
-              deleted_at: null,
-            },
-          });
-        }
+          ],
+        });
+        eventBus.emit('nav:open-detail-sheet', {
+          id: created.core.id,
+          initialAspectType: 'calendar_event',
+        });
       } catch (err) {
-        console.error('[calendar] save failed:', err);
+        console.error('[calendar] create failed:', err);
       }
     },
     [],
   );
 
-  // ── Delete event ──────────────────────────────────────────────────────────
-
-  const deleteEvent = useCallback(async (eventId: string) => {
-    try {
-      const db = getWorkspaceDB();
-      await db.execute(
-        `UPDATE base_entities SET deleted_at = ? WHERE id = ?`,
-        [new Date().toISOString(), eventId],
-      );
-      setEvents((prev) => prev.filter((e) => e.id !== eventId));
-      eventBus.emit('entity:deleted', { id: eventId, type: 'calendar_event' });
-    } catch (err) {
-      console.error('[calendar] delete failed:', err);
-    }
-  }, []);
-
   // ── FullCalendar callbacks ────────────────────────────────────────────────
 
-  const handleDateSelect = useCallback((selectInfo: DateSelectArg) => {
-    setEditingEvent(null);
-    setDefaultStart(selectInfo.startStr);
-    setDefaultEnd(selectInfo.endStr);
-    setDefaultAllDay(selectInfo.allDay);
-    setModalOpen(true);
-    selectInfo.view.calendar.unselect();
-  }, []);
-
-  const handleEventClick = useCallback(
-    (clickInfo: EventClickArg) => {
-      const props = clickInfo.event.extendedProps;
-      // Don't open modal for cross-module ghost events
-      if (props.sourceType === 'task' || props.sourceType === 'time_log') {
-        // Navigate to the entity instead
-        eventBus.emit('nav:open-entity', {
-          id: props.sourceId as string,
-          type: props.sourceType as 'task' | 'time_log',
-        });
-        return;
-      }
-
-      const found = events.find((e) => e.id === clickInfo.event.id);
-      if (found) {
-        setEditingEvent(found);
-        setDefaultStart('');
-        setDefaultEnd('');
-        setDefaultAllDay(false);
-        setModalOpen(true);
-      }
+  const handleDateSelect = useCallback(
+    (selectInfo: DateSelectArg) => {
+      void quickCreate(selectInfo.startStr, selectInfo.endStr, selectInfo.allDay);
+      selectInfo.view.calendar.unselect();
     },
-    [events],
+    [quickCreate],
   );
+
+  const handleEventClick = useCallback((clickInfo: EventClickArg) => {
+    const props = clickInfo.event.extendedProps;
+    if (props.sourceType === 'task') {
+      eventBus.emit('nav:open-detail-sheet', {
+        id: props.sourceId as string,
+        initialAspectType: 'task',
+      });
+      return;
+    }
+    if (props.sourceType === 'time_log') {
+      eventBus.emit('nav:open-detail-sheet', {
+        id: props.sourceId as string,
+        initialAspectType: 'time_log',
+      });
+      return;
+    }
+    eventBus.emit('nav:open-detail-sheet', {
+      id: clickInfo.event.id,
+      initialAspectType: 'calendar_event',
+    });
+  }, []);
 
   const handleEventDrop = useCallback(
     (dropInfo: EventDropArg) => {
@@ -343,60 +228,41 @@ export function CalendarView(): React.ReactElement {
         dropInfo.revert();
         return;
       }
-
-      const found = events.find((e) => e.id === dropInfo.event.id);
-      if (!found) return;
-
-      const updatedPayload: CalendarEventPayload = {
-        ...found.payload,
-        start: dropInfo.event.startStr || found.payload.start,
-        end: dropInfo.event.endStr || found.payload.end,
-        all_day: dropInfo.event.allDay,
-      };
-      void saveEvent(found.id, updatedPayload);
-    },
-    [events, saveEvent],
-  );
-
-  const handleEventResize = useCallback(
-    (resizeInfo: EventResizeDoneArg) => {
-      const props = resizeInfo.event.extendedProps;
-      if (props.sourceType !== 'calendar_event') return;
-
-      const found = events.find((e) => e.id === resizeInfo.event.id);
-      if (!found) return;
-
-      const updatedPayload: CalendarEventPayload = {
-        ...found.payload,
-        start: resizeInfo.event.startStr || found.payload.start,
-        end: resizeInfo.event.endStr || found.payload.end,
-      };
-      void saveEvent(found.id, updatedPayload);
-    },
-    [events, saveEvent],
-  );
-
-  // ── View navigation ──────────────────────────────────────────────────────
-
-  const changeView = useCallback(
-    (view: ViewMode) => {
-      setCurrentView(view);
-      calRef.current?.getApi().changeView(view);
+      const aspectId = props.aspectId as string | undefined;
+      if (!aspectId) return;
+      void updateAspect(aspectId, {
+        data: {
+          start: dropInfo.event.startStr,
+          end: dropInfo.event.endStr || dropInfo.event.startStr,
+          all_day: dropInfo.event.allDay,
+        },
+      }).catch((err) => console.error('[calendar] drop save failed:', err));
     },
     [],
   );
 
-  const goToday = useCallback(() => {
-    calRef.current?.getApi().today();
+  const handleEventResize = useCallback((resizeInfo: EventResizeDoneArg) => {
+    const props = resizeInfo.event.extendedProps;
+    if (props.sourceType !== 'calendar_event') return;
+    const aspectId = props.aspectId as string | undefined;
+    if (!aspectId) return;
+    void updateAspect(aspectId, {
+      data: {
+        start: resizeInfo.event.startStr,
+        end: resizeInfo.event.endStr || resizeInfo.event.startStr,
+      },
+    }).catch((err) => console.error('[calendar] resize save failed:', err));
   }, []);
 
-  const goPrev = useCallback(() => {
-    calRef.current?.getApi().prev();
-  }, []);
+  // ── View navigation ──────────────────────────────────────────────────────
 
-  const goNext = useCallback(() => {
-    calRef.current?.getApi().next();
+  const changeView = useCallback((view: ViewMode) => {
+    setCurrentView(view);
+    calRef.current?.getApi().changeView(view);
   }, []);
+  const goToday = useCallback(() => calRef.current?.getApi().today(), []);
+  const goPrev = useCallback(() => calRef.current?.getApi().prev(), []);
+  const goNext = useCallback(() => calRef.current?.getApi().next(), []);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden p-4">
@@ -442,11 +308,9 @@ export function CalendarView(): React.ReactElement {
         <Button
           size="sm"
           onClick={() => {
-            setEditingEvent(null);
-            setDefaultStart(new Date().toISOString());
-            setDefaultEnd(new Date(Date.now() + 3600000).toISOString());
-            setDefaultAllDay(false);
-            setModalOpen(true);
+            const start = new Date().toISOString();
+            const end = new Date(Date.now() + 3600000).toISOString();
+            void quickCreate(start, end, false);
           }}
           className="h-8"
         >
@@ -481,18 +345,6 @@ export function CalendarView(): React.ReactElement {
           }}
         />
       </div>
-
-      {/* ── Event modal ────────────────────────────────────────────── */}
-      <EventDetailModal
-        event={editingEvent}
-        defaultStart={defaultStart}
-        defaultEnd={defaultEnd}
-        defaultAllDay={defaultAllDay}
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        onSave={saveEvent}
-        onDelete={deleteEvent}
-      />
     </div>
   );
 }

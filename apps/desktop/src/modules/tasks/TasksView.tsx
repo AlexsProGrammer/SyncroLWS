@@ -7,6 +7,7 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
+  useDroppable,
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core';
@@ -14,15 +15,18 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { useDroppable } from '@dnd-kit/core';
-import { getWorkspaceDB } from '@/core/db';
 import { eventBus } from '@/core/events';
+import {
+  createEntity,
+  listByAspect,
+  softDeleteEntity,
+  updateAspect,
+} from '@/core/entityStore';
 import { Button } from '@/ui/components/button';
 import { Input } from '@/ui/components/input';
 import { cn } from '@/lib/utils';
-import type { TaskPayload, TaskLabel } from '@syncrohws/shared-types';
+import type { TaskAspectData, TaskLabel } from '@syncrohws/shared-types';
 import { KanbanCard, SortableKanbanCard, type KanbanTaskItem } from './KanbanCard';
-import { TaskDetailPanel } from './TaskDetailPanel';
 import {
   KanbanFilters,
   type KanbanFilterState,
@@ -43,14 +47,16 @@ const DEFAULT_COLUMNS: KanbanColumn[] = [
   { id: 'done', name: 'Done', color: 'border-green-500/40' },
 ];
 
-// ── Main Component ────────────────────────────────────────────────────────────
+function dataOf(item: KanbanTaskItem): Partial<TaskAspectData> {
+  return item.aspect.data as Partial<TaskAspectData>;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export function TasksView(): React.ReactElement {
   const [tasks, setTasks] = useState<KanbanTaskItem[]>([]);
   const [columns, setColumns] = useState<KanbanColumn[]>(DEFAULT_COLUMNS);
   const [activeTask, setActiveTask] = useState<KanbanTaskItem | null>(null);
-  const [detailTask, setDetailTask] = useState<KanbanTaskItem | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [filters, setFilters] = useState<KanbanFilterState>(DEFAULT_FILTERS);
   const [newColName, setNewColName] = useState('');
@@ -60,12 +66,12 @@ export function TasksView(): React.ReactElement {
     useSensor(KeyboardSensor),
   );
 
-  // ── Derived data ──────────────────────────────────────────────────────────
+  // ── Derived ───────────────────────────────────────────────────────────────
 
   const allLabels = useMemo(() => {
     const map = new Map<string, TaskLabel>();
     for (const t of tasks) {
-      for (const l of t.payload.labels ?? []) {
+      for (const l of dataOf(t).labels ?? []) {
         if (!map.has(l.id)) map.set(l.id, l);
       }
     }
@@ -75,12 +81,11 @@ export function TasksView(): React.ReactElement {
   const allAssignees = useMemo(() => {
     const set = new Set<string>();
     for (const t of tasks) {
-      if (t.payload.assigned_to) set.add(t.payload.assigned_to);
+      const a = dataOf(t).assigned_to;
+      if (a) set.add(a);
     }
     return [...set].sort();
   }, [tasks]);
-
-  // ── Filter tasks ──────────────────────────────────────────────────────────
 
   const filteredTasks = useMemo(() => {
     let result = tasks;
@@ -88,58 +93,29 @@ export function TasksView(): React.ReactElement {
       const q = filters.search.toLowerCase();
       result = result.filter(
         (t) =>
-          t.payload.title.toLowerCase().includes(q) ||
-          (t.payload.description ?? '').toLowerCase().includes(q),
+          t.core.title.toLowerCase().includes(q) ||
+          t.core.description.toLowerCase().includes(q),
       );
     }
     if (filters.priority) {
-      result = result.filter((t) => t.payload.priority === filters.priority);
+      result = result.filter((t) => dataOf(t).priority === filters.priority);
     }
     if (filters.assignee) {
-      result = result.filter((t) => t.payload.assigned_to === filters.assignee);
+      result = result.filter((t) => dataOf(t).assigned_to === filters.assignee);
     }
     if (filters.labelId) {
       result = result.filter((t) =>
-        (t.payload.labels ?? []).some((l) => l.id === filters.labelId),
+        (dataOf(t).labels ?? []).some((l) => l.id === filters.labelId),
       );
     }
     return result;
   }, [tasks, filters]);
 
-  // ── Load tasks from DB ────────────────────────────────────────────────────
+  // ── Load ──────────────────────────────────────────────────────────────────
 
   const loadTasks = useCallback(async () => {
     try {
-      const db = getWorkspaceDB();
-      const rows = await db.select<
-        { id: string; payload: string; created_at: string; updated_at: string }[]
-      >(
-        `SELECT id, payload, created_at, updated_at FROM base_entities
-         WHERE type = 'task' AND deleted_at IS NULL ORDER BY created_at DESC`,
-      );
-      const items: KanbanTaskItem[] = rows.map((r) => {
-        const p = JSON.parse(r.payload) as TaskPayload;
-        return {
-          id: r.id,
-          payload: {
-            title: p.title ?? '',
-            description: p.description ?? '',
-            description_json: p.description_json,
-            status: p.status ?? 'todo',
-            priority: p.priority ?? 'medium',
-            due_date: p.due_date ?? null,
-            assigned_to: p.assigned_to ?? null,
-            file_hashes: p.file_hashes ?? [],
-            column_id: p.column_id ?? p.status ?? 'todo',
-            labels: p.labels ?? [],
-            checklist: p.checklist ?? [],
-            attachments: p.attachments ?? [],
-            comments: p.comments ?? [],
-          },
-          created_at: r.created_at,
-          updated_at: r.updated_at,
-        };
-      });
+      const items = await listByAspect('task');
       setTasks(items);
     } catch (err) {
       console.error('[tasks] load failed:', err);
@@ -150,83 +126,68 @@ export function TasksView(): React.ReactElement {
     void loadTasks();
   }, [loadTasks]);
 
-  // Reload on entity events
   useEffect(() => {
-    const handler = (): void => void loadTasks();
-    eventBus.on('entity:created', handler);
-    eventBus.on('entity:deleted', handler);
+    const onChange = (): void => void loadTasks();
+    eventBus.on('core:created', onChange);
+    eventBus.on('core:updated', onChange);
+    eventBus.on('core:deleted', onChange);
+    eventBus.on('aspect:added', onChange);
+    eventBus.on('aspect:updated', onChange);
+    eventBus.on('aspect:removed', onChange);
+    eventBus.on('entity:created', onChange);
+    eventBus.on('entity:updated', onChange);
+    eventBus.on('entity:deleted', onChange);
     return () => {
-      eventBus.off('entity:created', handler);
-      eventBus.off('entity:deleted', handler);
+      eventBus.off('core:created', onChange);
+      eventBus.off('core:updated', onChange);
+      eventBus.off('core:deleted', onChange);
+      eventBus.off('aspect:added', onChange);
+      eventBus.off('aspect:updated', onChange);
+      eventBus.off('aspect:removed', onChange);
+      eventBus.off('entity:created', onChange);
+      eventBus.off('entity:updated', onChange);
+      eventBus.off('entity:deleted', onChange);
     };
   }, [loadTasks]);
 
-  // Handle nav:open-entity for tasks — open the detail panel
+  // ── Open detail (shared sheet) ────────────────────────────────────────────
+
+  const openDetail = useCallback((id: string) => {
+    eventBus.emit('nav:open-detail-sheet', { id, initialAspectType: 'task' });
+  }, []);
+
   useEffect(() => {
     const onNav = ({ id, type }: { id: string; type: string }): void => {
-      if (type !== 'task') return;
-      const found = tasks.find((t) => t.id === id);
-      if (found) {
-        setDetailTask(found);
-        setDetailOpen(true);
-      }
+      if (type === 'task') openDetail(id);
     };
     eventBus.on('nav:open-entity', onNav);
-    return () => { eventBus.off('nav:open-entity', onNav); };
-  }, [tasks]);
+    return () => {
+      eventBus.off('nav:open-entity', onNav);
+    };
+  }, [openDetail]);
 
-  // ── Create task ───────────────────────────────────────────────────────────
+  // ── Create ────────────────────────────────────────────────────────────────
 
   const createTask = useCallback(
     async (columnId?: string) => {
       const title = newTaskTitle.trim();
       if (!title) return;
-
-      const id = crypto.randomUUID();
-      const now = new Date().toISOString();
       const colId = columnId ?? columns[0]?.id ?? 'todo';
-      const payload: TaskPayload = {
-        title,
-        description: '',
-        status: 'todo',
-        priority: 'medium',
-        due_date: null,
-        assigned_to: null,
-        file_hashes: [],
-        column_id: colId,
-        labels: [],
-        checklist: [],
-        attachments: [],
-        comments: [],
-      };
-
       try {
-        const db = getWorkspaceDB();
-        await db.execute(
-          `INSERT INTO base_entities (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
-           VALUES (?, 'task', ?, '{}', '[]', NULL, ?, ?)`,
-          [id, JSON.stringify(payload), now, now],
-        );
-
-        setNewTaskTitle('');
-        setTasks((prev) => [
-          { id, payload, created_at: now, updated_at: now },
-          ...prev,
-        ]);
-
-        eventBus.emit('entity:created', {
-          entity: {
-            id,
-            type: 'task',
-            payload,
-            metadata: {},
-            tags: [],
-            parent_id: null,
-            created_at: now,
-            updated_at: now,
-            deleted_at: null,
-          },
+        await createEntity({
+          core: { title },
+          aspects: [
+            {
+              aspect_type: 'task',
+              data: {
+                status: 'todo',
+                priority: 'medium',
+                column_id: colId,
+              },
+            },
+          ],
         });
+        setNewTaskTitle('');
       } catch (err) {
         console.error('[tasks] create failed:', err);
       }
@@ -234,59 +195,18 @@ export function TasksView(): React.ReactElement {
     [newTaskTitle, columns],
   );
 
-  // ── Save task payload ─────────────────────────────────────────────────────
+  // ── Delete ────────────────────────────────────────────────────────────────
 
-  const saveTask = useCallback(
-    async (taskId: string, payload: TaskPayload) => {
-      try {
-        const db = getWorkspaceDB();
-        const now = new Date().toISOString();
-        await db.execute(
-          `UPDATE base_entities SET payload = ?, updated_at = ? WHERE id = ?`,
-          [JSON.stringify(payload), now, taskId],
-        );
-        setTasks((prev) =>
-          prev.map((t) =>
-            t.id === taskId ? { ...t, payload, updated_at: now } : t,
-          ),
-        );
-        eventBus.emit('entity:updated', {
-          entity: {
-            id: taskId,
-            type: 'task',
-            payload,
-            metadata: {},
-            tags: [],
-            parent_id: null,
-            created_at: '',
-            updated_at: now,
-            deleted_at: null,
-          },
-        });
-      } catch (err) {
-        console.error('[tasks] save failed:', err);
-      }
-    },
-    [],
-  );
-
-  // ── Delete task ───────────────────────────────────────────────────────────
-
-  const deleteTask = useCallback(async (taskId: string) => {
+  const deleteTask = useCallback(async (id: string) => {
     try {
-      const db = getWorkspaceDB();
-      await db.execute(
-        `UPDATE base_entities SET deleted_at = ? WHERE id = ?`,
-        [new Date().toISOString(), taskId],
-      );
-      setTasks((prev) => prev.filter((t) => t.id !== taskId));
-      eventBus.emit('entity:deleted', { id: taskId, type: 'task' });
+      await softDeleteEntity(id);
+      setTasks((prev) => prev.filter((t) => t.core.id !== id));
     } catch (err) {
       console.error('[tasks] delete failed:', err);
     }
   }, []);
 
-  // ── Add / remove columns ─────────────────────────────────────────────────
+  // ── Columns ──────────────────────────────────────────────────────────────
 
   const addColumn = useCallback(() => {
     const name = newColName.trim();
@@ -298,29 +218,29 @@ export function TasksView(): React.ReactElement {
   }, [newColName, columns]);
 
   const removeColumn = useCallback(
-    (colId: string) => {
+    async (colId: string) => {
       if (columns.length <= 1) return;
-      setColumns((prev) => prev.filter((c) => c.id !== colId));
-      // Move tasks from deleted column to first remaining column
       const firstCol = columns.find((c) => c.id !== colId);
-      if (firstCol) {
-        setTasks((prev) =>
-          prev.map((t) =>
-            t.payload.column_id === colId
-              ? { ...t, payload: { ...t.payload, column_id: firstCol.id } }
-              : t,
-          ),
-        );
+      if (!firstCol) return;
+      setColumns((prev) => prev.filter((c) => c.id !== colId));
+      // Reassign tasks in the deleted column
+      const toReassign = tasks.filter((t) => dataOf(t).column_id === colId);
+      for (const t of toReassign) {
+        try {
+          await updateAspect(t.aspect.id, { data: { column_id: firstCol.id } });
+        } catch (err) {
+          console.error('[tasks] column reassign failed:', err);
+        }
       }
     },
-    [columns],
+    [columns, tasks],
   );
 
-  // ── Drag handlers ─────────────────────────────────────────────────────────
+  // ── Drag ─────────────────────────────────────────────────────────────────
 
   const onDragStart = useCallback(
     (event: DragStartEvent) => {
-      const task = tasks.find((t) => t.id === event.active.id);
+      const task = tasks.find((t) => t.core.id === event.active.id);
       setActiveTask(task ?? null);
     },
     [tasks],
@@ -335,55 +255,41 @@ export function TasksView(): React.ReactElement {
       const taskId = active.id as string;
       let newColumnId: string | undefined;
 
-      // Check if dropped over a column directly
       if (columns.some((c) => c.id === over.id)) {
         newColumnId = over.id as string;
       } else {
-        // Dropped over another task — use that task's column
-        const overTask = tasks.find((t) => t.id === over.id);
-        if (overTask) newColumnId = overTask.payload.column_id;
+        const overTask = tasks.find((t) => t.core.id === over.id);
+        if (overTask) newColumnId = dataOf(overTask).column_id;
       }
-
       if (!newColumnId) return;
 
-      const task = tasks.find((t) => t.id === taskId);
-      if (!task || task.payload.column_id === newColumnId) return;
+      const task = tasks.find((t) => t.core.id === taskId);
+      if (!task || dataOf(task).column_id === newColumnId) return;
 
-      const updatedPayload = { ...task.payload, column_id: newColumnId };
+      // Optimistic update
       setTasks((prev) =>
         prev.map((t) =>
-          t.id === taskId ? { ...t, payload: updatedPayload } : t,
+          t.core.id === taskId
+            ? { ...t, aspect: { ...t.aspect, data: { ...t.aspect.data, column_id: newColumnId } } }
+            : t,
         ),
       );
-      void saveTask(taskId, updatedPayload);
+      void updateAspect(task.aspect.id, { data: { column_id: newColumnId } }).catch((err) =>
+        console.error('[tasks] drag save failed:', err),
+      );
     },
-    [tasks, columns, saveTask],
+    [tasks, columns],
   );
-
-  // ── Group tasks by column ─────────────────────────────────────────────────
 
   const tasksByColumn = useCallback(
     (colId: string): KanbanTaskItem[] =>
-      filteredTasks.filter((t) => t.payload.column_id === colId),
+      filteredTasks.filter((t) => (dataOf(t).column_id ?? 'todo') === colId),
     [filteredTasks],
-  );
-
-  // ── Open task detail ──────────────────────────────────────────────────────
-
-  const openDetail = useCallback(
-    (taskId: string) => {
-      const t = tasks.find((x) => x.id === taskId);
-      if (t) {
-        setDetailTask(t);
-        setDetailOpen(true);
-      }
-    },
-    [tasks],
   );
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden p-4">
-      {/* ── Top bar: New task + filters ─────────────────────────────── */}
+      {/* ── Top bar ───────────────────────────────────────────────── */}
       <div className="mb-4 flex flex-col gap-2">
         <div className="flex gap-2">
           <Input
@@ -407,7 +313,7 @@ export function TasksView(): React.ReactElement {
         />
       </div>
 
-      {/* ── Kanban columns ──────────────────────────────────────────── */}
+      {/* ── Kanban columns ────────────────────────────────────────── */}
       <DndContext
         sensors={sensors}
         collisionDetection={closestCorners}
@@ -421,12 +327,12 @@ export function TasksView(): React.ReactElement {
               column={col}
               tasks={tasksByColumn(col.id)}
               canRemove={columns.length > 1}
-              onRemove={() => removeColumn(col.id)}
+              onRemove={() => void removeColumn(col.id)}
               onOpenTask={openDetail}
+              onDeleteTask={deleteTask}
             />
           ))}
 
-          {/* Add column */}
           <div className="flex min-w-[200px] flex-col items-center justify-start gap-2 pt-2">
             <Input
               value={newColName}
@@ -447,25 +353,13 @@ export function TasksView(): React.ReactElement {
           </div>
         </div>
 
-        <DragOverlay>
-          {activeTask ? <KanbanCard task={activeTask} isOverlay /> : null}
-        </DragOverlay>
+        <DragOverlay>{activeTask ? <KanbanCard item={activeTask} isOverlay /> : null}</DragOverlay>
       </DndContext>
-
-      {/* ── Task detail panel ───────────────────────────────────────── */}
-      <TaskDetailPanel
-        task={detailTask}
-        columns={columns}
-        open={detailOpen}
-        onClose={() => setDetailOpen(false)}
-        onSave={saveTask}
-        onDelete={deleteTask}
-      />
     </div>
   );
 }
 
-// ── Kanban Column ─────────────────────────────────────────────────────────────
+// ── Column ────────────────────────────────────────────────────────────────────
 
 interface KanbanColumnViewProps {
   column: KanbanColumn;
@@ -473,6 +367,7 @@ interface KanbanColumnViewProps {
   canRemove: boolean;
   onRemove: () => void;
   onOpenTask: (id: string) => void;
+  onDeleteTask: (id: string) => void;
 }
 
 function KanbanColumnView({
@@ -481,6 +376,7 @@ function KanbanColumnView({
   canRemove,
   onRemove,
   onOpenTask,
+  onDeleteTask,
 }: KanbanColumnViewProps): React.ReactElement {
   const { setNodeRef, isOver } = useDroppable({ id: column.id });
 
@@ -520,17 +416,25 @@ function KanbanColumnView({
         </div>
       </div>
 
-      <SortableContext
-        items={tasks.map((t) => t.id)}
-        strategy={verticalListSortingStrategy}
-      >
+      <SortableContext items={tasks.map((t) => t.core.id)} strategy={verticalListSortingStrategy}>
         <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
           {tasks.map((task) => (
-            <SortableKanbanCard
-              key={task.id}
-              task={task}
-              onClick={() => onOpenTask(task.id)}
-            />
+            <div key={task.core.id} className="group/card relative">
+              <SortableKanbanCard item={task} onClick={() => onOpenTask(task.core.id)} />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteTask(task.core.id);
+                }}
+                className="absolute right-1 top-1 hidden rounded p-1 text-muted-foreground hover:bg-red-500/10 hover:text-red-500 group-hover/card:block"
+                title="Delete entity"
+              >
+                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
           ))}
           {tasks.length === 0 && (
             <div className="flex flex-1 items-center justify-center py-8 text-xs text-muted-foreground">
