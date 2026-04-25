@@ -13,6 +13,18 @@ let _currentProfileId: string | null = null;
 let _workspaceDb: Database | null = null;
 let _currentWorkspaceId: string | null = null;
 
+// ── Pool settle helper ────────────────────────────────────────────────────────
+// @tauri-apps/plugin-sql caches connection pools by path on the Rust/sqlx side.
+// Calling .close() destroys the pool but leaves a dead handle in that cache, so
+// the next Database.load(same path) acquires from the closed pool and throws
+// "attempted to acquire a connection on a closed pool".
+// Fix: never call .close() — just null the JS reference so the pool keeps
+// running and is safely reused on next Database.load(). A short settle delay
+// guards against any in-flight queries that may still be draining.
+function dbSettle(): Promise<void> {
+  return new Promise<void>((resolve) => setTimeout(resolve, 80));
+}
+
 // ── Profile DB ────────────────────────────────────────────────────────────────
 
 /**
@@ -35,18 +47,17 @@ export function getDB(): Database {
 export async function loadProfileDB(profileId: string): Promise<Database> {
   if (_profileDb && _currentProfileId === profileId) return _profileDb;
 
-  // Close previous workspace DB first
+  // Unload the workspace DB first (without closing the underlying pool)
   await closeWorkspaceDB();
 
-  // Close previous profile DB
+  // Drop the JS reference to the old profile DB without calling .close().
+  // Closing destroys the sqlx pool on the Rust side but leaves a dead handle
+  // cached by path — subsequent Database.load(same path) then throws
+  // "attempted to acquire a connection on a closed pool".
   if (_profileDb) {
-    try {
-      await _profileDb.close();
-    } catch {
-      // Ignore close errors on stale handles
-    }
     _profileDb = null;
     _currentProfileId = null;
+    await dbSettle(); // allow any in-flight queries to drain
   }
 
   const profilePath = await invoke<string>('create_profile_folder', { uuid: profileId });
@@ -66,7 +77,7 @@ export async function loadProfileDB(profileId: string): Promise<Database> {
 export async function closeProfileDB(): Promise<void> {
   await closeWorkspaceDB();
   if (_profileDb) {
-    await _profileDb.close();
+    // Drop reference only — do not call .close() to avoid poisoning the cached pool.
     _profileDb = null;
     _currentProfileId = null;
   }
@@ -121,7 +132,7 @@ export async function loadWorkspaceDB(workspaceId: string): Promise<Database> {
 
   if (_workspaceDb && _currentWorkspaceId === workspaceId) return _workspaceDb;
 
-  // Close previous workspace DB
+  // Drop the previous workspace DB reference (no .close() — see loadProfileDB comment)
   await closeWorkspaceDB();
 
   const workspacePath = await invoke<string>('create_workspace_folder', {
@@ -143,13 +154,10 @@ export async function loadWorkspaceDB(workspaceId: string): Promise<Database> {
  */
 export async function closeWorkspaceDB(): Promise<void> {
   if (_workspaceDb) {
-    try {
-      await _workspaceDb.close();
-    } catch {
-      // Ignore close errors on stale handles
-    }
+    // Drop reference only — do not call .close() to avoid poisoning the cached pool.
     _workspaceDb = null;
     _currentWorkspaceId = null;
+    await dbSettle(); // allow any in-flight queries to drain
   }
 }
 
