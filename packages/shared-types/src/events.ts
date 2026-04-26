@@ -41,6 +41,8 @@ export type AppEvents = {
   'nav:open-entity': { id: string; type: BaseEntity['type'] };
   /** Phase C — open the universal hybrid-entity detail sheet. */
   'nav:open-detail-sheet': { id: string; initialAspectType?: AspectType };
+  /** Phase D — open the AddAspectDialog for a given entity. */
+  'nav:add-aspect': { entityId: string; existingTypes: string[]; initialType?: AspectType };
   'nav:open-command-palette': void;
   'nav:close-command-palette': void;
 

@@ -6,6 +6,7 @@ import { SettingsView } from './ui/SettingsView';
 import { Toaster } from './ui/Toaster';
 import { Separator } from './ui/components/separator';
 import { EntityDetailSheetHost } from './ui/components/EntityDetailSheetHost';
+import { AddAspectDialogHost } from './ui/components/AddAspectDialogHost';
 import { getTool, getToolByEntityType } from './registry/ToolRegistry';
 import { eventBus } from './core/events';
 import { startBackupScheduler } from './core/backup';
@@ -241,6 +242,7 @@ export default function App(): React.ReactElement {
       <CommandPalette />
       <Toaster />
       <EntityDetailSheetHost />
+      <AddAspectDialogHost />
 
       {conflict && (
         <DiffEditor

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Button } from '@/ui/components/button';
+import { EntityRowContextMenu } from '@/ui/components/EntityRowContextMenu';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -201,8 +202,14 @@ export function NotesView(): React.ReactElement {
 
         <div className="flex-1 overflow-y-auto">
           {filteredNotes.map((note) => (
-            <button
+            <EntityRowContextMenu
               key={note.id}
+              entityId={note.id}
+              existingTypes={['note']}
+              openInitialAspectType="note"
+              onDelete={() => void deleteNote(note.id)}
+            >
+            <button
               onClick={() => openNote(note.id)}
               className="group flex w-full flex-col gap-0.5 border-b border-border/50 px-3 py-2.5 text-left transition-colors hover:bg-accent/50"
             >
@@ -250,6 +257,7 @@ export function NotesView(): React.ReactElement {
                 )}
               </div>
             </button>
+            </EntityRowContextMenu>
           ))}
           {filteredNotes.length === 0 && (
             <div className="flex flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">

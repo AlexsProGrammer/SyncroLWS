@@ -16,6 +16,7 @@ import { Button } from '@/ui/components/button';
 import { Badge } from '@/ui/components/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/ui/components/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/components/tooltip';
+import { EntityRowContextMenu } from '@/ui/components/EntityRowContextMenu';
 import type { TimeLogAspectData } from '@syncrohws/shared-types';
 import { ManualEntryForm } from './ManualEntryForm';
 import { TimeTrackerReports } from './TimeTrackerReports';
@@ -461,6 +462,12 @@ function TimeLogRow({ log, isEditing, onEdit, onCancelEdit, onUpdate, onDelete, 
   }
 
   return (
+    <EntityRowContextMenu
+      entityId={log.id}
+      existingTypes={['time_log']}
+      openInitialAspectType="time_log"
+      onDelete={() => void onDelete(log.id)}
+    >
     <div className="group flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 text-sm transition-colors hover:border-border/80">
       <div
         className={`h-8 w-1 shrink-0 rounded-full ${payload.billable ? 'bg-green-500' : 'bg-muted'}`}
@@ -537,5 +544,6 @@ function TimeLogRow({ log, isEditing, onEdit, onCancelEdit, onUpdate, onDelete, 
         </TooltipProvider>
       </div>
     </div>
+    </EntityRowContextMenu>
   );
 }

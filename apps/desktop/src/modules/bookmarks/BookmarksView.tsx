@@ -15,6 +15,7 @@ import {
 import { Button } from '@/ui/components/button';
 import { Input } from '@/ui/components/input';
 import { Badge } from '@/ui/components/badge';
+import { EntityRowContextMenu } from '@/ui/components/EntityRowContextMenu';
 import {
   Dialog,
   DialogContent,
@@ -255,8 +256,14 @@ export function BookmarksView(): React.ReactElement {
               const data = dataOf(item);
               const url = data.url ?? '';
               return (
-                <div
+                <EntityRowContextMenu
                   key={item.core.id}
+                  entityId={item.core.id}
+                  existingTypes={['bookmark']}
+                  openInitialAspectType="bookmark"
+                  onDelete={() => void deleteBookmark(item.core.id)}
+                >
+                <div
                   className="group relative flex flex-col gap-2 rounded-lg border bg-card p-3.5 transition-colors hover:border-primary/30"
                   style={{ borderLeftColor: item.core.color, borderLeftWidth: '3px' }}
                 >
@@ -328,6 +335,7 @@ export function BookmarksView(): React.ReactElement {
                     </button>
                   </div>
                 </div>
+                </EntityRowContextMenu>
               );
             })}
           </div>

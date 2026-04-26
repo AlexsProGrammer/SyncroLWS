@@ -14,6 +14,7 @@ import {
 import { Button } from '@/ui/components/button';
 import { Input } from '@/ui/components/input';
 import { Badge } from '@/ui/components/badge';
+import { EntityRowContextMenu } from '@/ui/components/EntityRowContextMenu';
 import {
   Dialog,
   DialogContent,
@@ -306,8 +307,14 @@ export function HabitsView(): React.ReactElement {
           const icon = item.core.icon || '✅';
 
           return (
-            <div
+            <EntityRowContextMenu
               key={item.core.id}
+              entityId={item.core.id}
+              existingTypes={['habit']}
+              openInitialAspectType="habit"
+              onDelete={() => void deleteHabit(item)}
+            >
+            <div
               className="group flex items-center gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:border-primary/30"
             >
               <button
@@ -373,6 +380,7 @@ export function HabitsView(): React.ReactElement {
                 </svg>
               </button>
             </div>
+            </EntityRowContextMenu>
           );
         })}
 

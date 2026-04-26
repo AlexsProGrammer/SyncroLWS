@@ -2,8 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Command } from 'cmdk';
 import { eventBus } from '@/core/events';
 import { ftsSearch, getWorkspaceDB } from '@/core/db';
-import { getToolByEntityType } from '@/registry/ToolRegistry';
-import type { BaseEntity } from '@syncrohws/shared-types';
+import { getToolByEntityType, getAllAspectPlugins } from '@/registry/ToolRegistry';
+import { getEntity } from '@/core/entityStore';
+import type { AspectType, BaseEntity } from '@syncrohws/shared-types';
 
 type SearchResult = Pick<BaseEntity, 'id' | 'type'> & {
   title: string;
@@ -15,6 +16,10 @@ export function CommandPalette(): React.ReactElement {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
+  // Phase D — track current entity in detail sheet for "Add aspect" commands.
+  const [currentEntityId, setCurrentEntityId] = useState<string | null>(null);
+  const [currentEntityTypes, setCurrentEntityTypes] = useState<string[]>([]);
+  const [currentEntityTitle, setCurrentEntityTitle] = useState<string>('');
 
   // Open / close via Event Bus
   useEffect(() => {
@@ -23,6 +28,22 @@ export function CommandPalette(): React.ReactElement {
     return () => {
       eventBus.off('nav:open-command-palette', () => setOpen(true));
       eventBus.off('nav:close-command-palette', () => setOpen(false));
+    };
+  }, []);
+
+  // Phase D — remember the most-recently-opened entity (for promote commands).
+  useEffect(() => {
+    const onSheet = ({ id }: { id: string }): void => {
+      void getEntity(id).then((h) => {
+        if (!h) return;
+        setCurrentEntityId(h.core.id);
+        setCurrentEntityTitle(h.core.title || 'Untitled');
+        setCurrentEntityTypes(h.aspects.map((a) => a.aspect_type));
+      });
+    };
+    eventBus.on('nav:open-detail-sheet', onSheet);
+    return () => {
+      eventBus.off('nav:open-detail-sheet', onSheet);
     };
   }, []);
 
@@ -95,6 +116,42 @@ export function CommandPalette(): React.ReactElement {
           autoFocus
         />
         <Command.List className="max-h-96 overflow-y-auto p-2">
+          {/* Phase D — promote-current-entity actions (no query, entity loaded). */}
+          {!query.trim() && currentEntityId && (() => {
+            const missing = getAllAspectPlugins().filter(
+              (p) => !currentEntityTypes.includes(p.type),
+            );
+            if (missing.length === 0) return null;
+            return (
+              <Command.Group
+                heading={`Add aspect to “${currentEntityTitle}”`}
+                className="mb-1 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground"
+              >
+                {missing.map((p) => {
+                  const Icon = p.icon;
+                  return (
+                    <Command.Item
+                      key={`promote-${p.type}`}
+                      value={`add-${p.type}`}
+                      onSelect={() => {
+                        eventBus.emit('nav:add-aspect', {
+                          entityId: currentEntityId,
+                          existingTypes: currentEntityTypes,
+                          initialType: p.type as AspectType,
+                        });
+                        setOpen(false);
+                        setQuery('');
+                      }}
+                      className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-accent aria-selected:bg-accent"
+                    >
+                      <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="flex-1">Add {p.label}</span>
+                    </Command.Item>
+                  );
+                })}
+              </Command.Group>
+            );
+          })()}
           {results.length === 0 && query.trim() && (
             <Command.Empty className="py-6 text-center text-sm text-muted-foreground">
               No results for "{query}"

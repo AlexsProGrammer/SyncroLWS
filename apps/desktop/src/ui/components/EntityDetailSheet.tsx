@@ -272,6 +272,33 @@ export function EntityDetailSheet({
             {/* General tab */}
             <TabsContent value="general" className="flex-1 overflow-y-auto px-4 py-3">
               <div className="space-y-4">
+                {missingAspectPlugins.length > 0 && (
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">
+                      Quick promote
+                    </label>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {missingAspectPlugins.map((p) => {
+                        const Icon = p.icon;
+                        return (
+                          <Button
+                            key={p.type}
+                            variant="outline"
+                            size="sm"
+                            className="h-7 gap-1.5 text-xs"
+                            onClick={() => {
+                              setAddInitialType(p.type);
+                              setAddOpen(true);
+                            }}
+                          >
+                            <Icon className="h-3.5 w-3.5" />
+                            {labelForQuickAction(p.type, p.label)}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Description</label>
                   <Textarea
@@ -343,6 +370,22 @@ export function EntityDetailSheet({
       />
     </>
   );
+}
+
+// ── Quick-promote labels ─────────────────────────────────────────────────────
+
+const QUICK_LABELS: Record<string, string> = {
+  task: 'Set priority/column',
+  calendar_event: 'Schedule',
+  time_log: 'Track time',
+  bookmark: 'Bookmark this',
+  note: 'Add note',
+  habit: 'Track as habit',
+  pomodoro_session: 'Start pomodoro',
+};
+
+function labelForQuickAction(type: string, fallback: string): string {
+  return QUICK_LABELS[type] ?? `Add ${fallback}`;
 }
 
 // ── Color picker subcomponent ────────────────────────────────────────────────

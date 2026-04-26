@@ -24,6 +24,7 @@ import {
 } from '@/core/entityStore';
 import { Button } from '@/ui/components/button';
 import { Input } from '@/ui/components/input';
+import { EntityRowContextMenu } from '@/ui/components/EntityRowContextMenu';
 import { cn } from '@/lib/utils';
 import type { TaskAspectData, TaskLabel } from '@syncrohws/shared-types';
 import { KanbanCard, SortableKanbanCard, type KanbanTaskItem } from './KanbanCard';
@@ -419,7 +420,14 @@ function KanbanColumnView({
       <SortableContext items={tasks.map((t) => t.core.id)} strategy={verticalListSortingStrategy}>
         <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
           {tasks.map((task) => (
-            <div key={task.core.id} className="group/card relative">
+            <EntityRowContextMenu
+              key={task.core.id}
+              entityId={task.core.id}
+              existingTypes={['task']}
+              openInitialAspectType="task"
+              onDelete={() => onDeleteTask(task.core.id)}
+            >
+            <div className="group/card relative">
               <SortableKanbanCard item={task} onClick={() => onOpenTask(task.core.id)} />
               <button
                 onClick={(e) => {
@@ -435,6 +443,7 @@ function KanbanColumnView({
                 </svg>
               </button>
             </div>
+            </EntityRowContextMenu>
           ))}
           {tasks.length === 0 && (
             <div className="flex flex-1 items-center justify-center py-8 text-xs text-muted-foreground">
