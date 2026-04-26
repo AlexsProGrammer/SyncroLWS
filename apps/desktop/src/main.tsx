@@ -58,16 +58,16 @@ async function bootstrap(): Promise<void> {
       getDB,
       getWorkspaceDB,
       ftsSearch,
-      /** Quick helper: insert a test entity and return its id */
-      async insertTest(type = 'note', payload: Record<string, unknown> = { title: 'Test' }) {
+      /** Quick helper: insert a test entity (Phase F hybrid shape) and return its id */
+      async insertTest(title = 'Test', _aspectType = 'note') {
         const db = getWorkspaceDB();
         const id = crypto.randomUUID();
         const now = new Date().toISOString();
         await db.execute(
           `INSERT OR REPLACE INTO base_entities
-             (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
-           VALUES (?, ?, ?, '{}', '[]', NULL, ?, ?)`,
-          [id, type, JSON.stringify(payload), now, now],
+             (id, title, description, color, icon, tags, parent_id, created_at, updated_at)
+           VALUES (?, ?, '', '#6366f1', 'box', '[]', NULL, ?, ?)`,
+          [id, title, now, now],
         );
         console.log('[db] inserted entity:', id);
         return id;
@@ -75,8 +75,8 @@ async function bootstrap(): Promise<void> {
       /** Quick helper: select all non-deleted entities */
       async listAll() {
         const db = getWorkspaceDB();
-        return db.select<{ id: string; type: string; payload: string }[]>(
-          `SELECT id, type, payload FROM base_entities WHERE deleted_at IS NULL ORDER BY updated_at DESC`,
+        return db.select<{ id: string; title: string; description: string }[]>(
+          `SELECT id, title, description FROM base_entities WHERE deleted_at IS NULL ORDER BY updated_at DESC`,
         );
       },
     };

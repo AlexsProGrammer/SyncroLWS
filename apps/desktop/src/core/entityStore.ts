@@ -10,9 +10,9 @@
  * All mutations emit events on the global Event Bus so other modules stay in
  * sync without direct imports.
  *
- * NOTE: legacy module code that still queries `base_entities.type` / `payload`
- * directly continues to work; this store does not interfere. Migration of
- * each module to this store happens in Phase C.
+ * NOTE: as of Phase F the legacy `base_entities.type` / `payload` / `metadata`
+ * columns have been dropped. All aspect data lives in `entity_aspects`; the
+ * `core:*` and `aspect:*` event-bus events are the only update channel.
  */
 
 import { getWorkspaceDB } from './db';
@@ -149,27 +149,15 @@ export async function createEntity(input: CreateEntityInput): Promise<HybridEnti
     deleted_at: null,
   };
 
-  // Phase A compatibility: legacy `type` and `payload` columns are still NOT
-  // NULL on the base_entities table. Seed them from the first aspect (or
-  // 'general' when none) so the row passes existing FTS triggers and any
-  // not-yet-migrated module queries continue to work.
-  const primaryAspect = input.aspects?.[0];
-  const legacyType = primaryAspect?.aspect_type ?? 'general';
-  const legacyPayload = JSON.stringify({
-    title: core.title,
-    description: core.description,
-    color: core.color,
-    ...(primaryAspect?.data ?? {}),
-  });
+  // Phase F: legacy `type` / `payload` / `metadata` columns have been dropped.
+  // Aspect data lives exclusively in `entity_aspects`.
 
   await db.execute(
     `INSERT INTO base_entities
-       (id, type, payload, metadata, title, description, color, icon, tags, parent_id, created_at, updated_at, deleted_at)
-     VALUES (?, ?, ?, '{}', ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+       (id, title, description, color, icon, tags, parent_id, created_at, updated_at, deleted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     [
       core.id,
-      legacyType,
-      legacyPayload,
       core.title,
       core.description,
       core.color,
@@ -626,4 +614,82 @@ export async function listToolInstances(tool_id?: string): Promise<ToolInstance[
     sort_order: r.sort_order,
     created_at: r.created_at,
   }));
+}
+
+// ── Wiki-link reconciliation (Phase E) ───────────────────────────────────────
+
+const WIKILINK_RE = /\[\[([^\]]+)]]/g;
+
+/** Extract distinct `[[Name]]` targets from a markdown blob. */
+export function extractWikiLinkTargets(content_md: string): string[] {
+  if (!content_md) return [];
+  const out = new Set<string>();
+  let m: RegExpExecArray | null;
+  WIKILINK_RE.lastIndex = 0;
+  while ((m = WIKILINK_RE.exec(content_md)) !== null) {
+    const t = (m[1] ?? '').trim();
+    if (t) out.add(t);
+  }
+  return [...out];
+}
+
+/**
+ * Reconcile wiki-link relations from `from_entity_id` against the current
+ * content_md. Resolves each `[[Name]]` to an entity by case-insensitive title
+ * match and writes/removes `entity_relations` rows of kind `wiki_link`.
+ *
+ * Returns a summary `{ added, removed, unresolved }` for diagnostics.
+ */
+export async function reconcileWikiLinks(
+  from_entity_id: string,
+  content_md: string,
+): Promise<{ added: number; removed: number; unresolved: string[] }> {
+  const db = getWorkspaceDB();
+  const targets = extractWikiLinkTargets(content_md);
+
+  // Resolve target names → ids (case-insensitive title match, exclude self & deleted).
+  const resolved = new Set<string>();
+  const unresolved: string[] = [];
+  for (const name of targets) {
+    const rows = await db.select<{ id: string }[]>(
+      `SELECT id FROM base_entities
+         WHERE LOWER(title) = LOWER(?) AND deleted_at IS NULL
+         LIMIT 1`,
+      [name],
+    );
+    const id = rows[0]?.id;
+    if (id && id !== from_entity_id) resolved.add(id);
+    else if (!id) unresolved.push(name);
+  }
+
+  // Existing wiki_link relations originating from this entity.
+  const existingRows = await db.select<RelationRow[]>(
+    `SELECT id, from_entity_id, to_entity_id, kind, metadata, created_at
+       FROM entity_relations
+       WHERE from_entity_id = ? AND kind = 'wiki_link'`,
+    [from_entity_id],
+  );
+  const existingByTo = new Map<string, RelationRow>();
+  for (const r of existingRows) existingByTo.set(r.to_entity_id, r);
+
+  let added = 0;
+  let removed = 0;
+
+  // Remove relations whose target is no longer linked.
+  for (const [toId, row] of existingByTo) {
+    if (!resolved.has(toId)) {
+      await removeRelation(row.id);
+      removed += 1;
+    }
+  }
+
+  // Add relations for newly-linked targets.
+  for (const toId of resolved) {
+    if (!existingByTo.has(toId)) {
+      await addRelation(from_entity_id, toId, 'wiki_link');
+      added += 1;
+    }
+  }
+
+  return { added, removed, unresolved };
 }

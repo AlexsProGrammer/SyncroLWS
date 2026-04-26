@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Command } from 'cmdk';
 import { eventBus } from '@/core/events';
-import { ftsSearch, getWorkspaceDB } from '@/core/db';
+import { ftsSearch } from '@/core/db';
 import { getToolByEntityType, getAllAspectPlugins } from '@/registry/ToolRegistry';
 import { getEntity } from '@/core/entityStore';
 import type { AspectType, BaseEntity } from '@syncrohws/shared-types';
@@ -67,28 +67,34 @@ export function CommandPalette(): React.ReactElement {
         setResults([]);
         return;
       }
-      const db = getWorkspaceDB();
-      const placeholders = ids.map(() => '?').join(',');
-      const rows = await db.select<{ id: string; type: string; payload: string }[]>(
-        `SELECT id, type, payload FROM base_entities WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
-        ids,
-      );
-      const mapped: SearchResult[] = rows.map((r) => {
-        const payload = (() => {
-          try { return JSON.parse(r.payload) as Record<string, unknown>; }
-          catch { return {}; }
-        })();
-
-        const tool = getToolByEntityType(r.type);
-        const title = tool?.getEntityTitle
-          ? tool.getEntityTitle(payload)
-          : (typeof payload['title'] === 'string' && payload['title'])
-            || (typeof payload['name'] === 'string' && payload['name'])
-            || r.id;
-        const subtitle = tool?.getEntitySubtitle?.(payload);
-
-        return { id: r.id, type: r.type as BaseEntity['type'], title, subtitle, payload };
-      });
+      // Phase F: hydrate via entityStore (HybridEntity); legacy `type`/`payload`
+      // columns no longer exist. Synthesize a payload-like object from the
+      // primary aspect for tool-supplied getEntityTitle/Subtitle helpers.
+      const hydrated = await Promise.all(ids.map((id) => getEntity(id)));
+      const mapped: SearchResult[] = hydrated
+        .filter((h): h is NonNullable<typeof h> => h !== null)
+        .map((h) => {
+          const primary = h.aspects[0];
+          const aspectType = primary?.aspect_type ?? 'general';
+          const payload: Record<string, unknown> = {
+            title: h.core.title,
+            description: h.core.description,
+            color: h.core.color,
+            ...((primary?.data as Record<string, unknown> | undefined) ?? {}),
+          };
+          const tool = getToolByEntityType(aspectType);
+          const title = h.core.title
+            || tool?.getEntityTitle?.(payload)
+            || h.core.id;
+          const subtitle = h.core.description || tool?.getEntitySubtitle?.(payload);
+          return {
+            id: h.core.id,
+            type: aspectType as BaseEntity['type'],
+            title,
+            subtitle,
+            payload,
+          };
+        });
       console.log('[fts] results:', mapped);
       setResults(mapped);
     } catch (err) {

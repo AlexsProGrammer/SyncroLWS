@@ -212,9 +212,6 @@ async function runProfileMigrations(db: Database): Promise<void> {
 const WORKSPACE_MIGRATION = `
 CREATE TABLE IF NOT EXISTS \`base_entities\` (
   \`id\` text PRIMARY KEY NOT NULL,
-  \`type\` text NOT NULL,
-  \`payload\` text DEFAULT '{}' NOT NULL,
-  \`metadata\` text DEFAULT '{}' NOT NULL,
   \`title\` text DEFAULT '' NOT NULL,
   \`description\` text DEFAULT '' NOT NULL,
   \`color\` text DEFAULT '#6366f1' NOT NULL,
@@ -283,6 +280,24 @@ async function ensureColumn(
   }
 }
 
+/**
+ * Idempotent ALTER TABLE — drops the column if it is still present.
+ * Used in Phase F to remove the legacy type/payload/metadata columns.
+ */
+async function dropColumnIfExists(
+  db: Database,
+  table: string,
+  column: string,
+): Promise<void> {
+  const rows = await db.select<{ name: string }[]>(
+    `SELECT name FROM pragma_table_info(?) WHERE name = ?`,
+    [table, column],
+  );
+  if (rows.length > 0) {
+    await db.execute(`ALTER TABLE \`${table}\` DROP COLUMN \`${column}\`;`);
+  }
+}
+
 async function runWorkspaceMigrations(db: Database): Promise<void> {
   const statements = WORKSPACE_MIGRATION
     .split(';')
@@ -299,8 +314,25 @@ async function runWorkspaceMigrations(db: Database): Promise<void> {
   await ensureColumn(db, 'base_entities', 'color', `\`color\` text DEFAULT '#6366f1' NOT NULL`);
   await ensureColumn(db, 'base_entities', 'icon', `\`icon\` text DEFAULT 'box' NOT NULL`);
 
+  // Phase F: drop legacy columns if any older dev DB still has them.
+  // FTS5 tables with content='base_entities' must be torn down first because
+  // they reference the dropped columns.
+  const legacyCols = await db.select<{ name: string }[]>(
+    `SELECT name FROM pragma_table_info('base_entities')
+       WHERE name IN ('type', 'payload', 'metadata')`,
+  );
+  if (legacyCols.length > 0) {
+    await db.execute(`DROP TRIGGER IF EXISTS base_entities_ai;`);
+    await db.execute(`DROP TRIGGER IF EXISTS base_entities_au;`);
+    await db.execute(`DROP TRIGGER IF EXISTS base_entities_ad;`);
+    await db.execute(`DROP TABLE IF EXISTS base_entities_fts;`);
+    await db.execute(`DROP INDEX IF EXISTS idx_base_entities_type;`);
+    await dropColumnIfExists(db, 'base_entities', 'type');
+    await dropColumnIfExists(db, 'base_entities', 'payload');
+    await dropColumnIfExists(db, 'base_entities', 'metadata');
+  }
+
   // Indexes
-  await db.execute(`CREATE INDEX IF NOT EXISTS idx_base_entities_type ON base_entities(type);`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_base_entities_parent ON base_entities(parent_id);`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_base_entities_deleted ON base_entities(deleted_at);`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_entity_aspects_entity ON entity_aspects(entity_id);`);
@@ -315,13 +347,13 @@ async function runWorkspaceMigrations(db: Database): Promise<void> {
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_entity_relations_to ON entity_relations(to_entity_id);`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_entity_relations_kind ON entity_relations(kind);`);
 
-  // FTS5 virtual table
+  // FTS5 virtual table — Phase F: indexes the new core columns.
   await db.execute(`
     CREATE VIRTUAL TABLE IF NOT EXISTS base_entities_fts
     USING fts5(
       id UNINDEXED,
-      type,
-      payload,
+      title,
+      description,
       tags,
       content='base_entities',
       content_rowid='rowid'
@@ -332,26 +364,26 @@ async function runWorkspaceMigrations(db: Database): Promise<void> {
   await db.execute(`
     CREATE TRIGGER IF NOT EXISTS base_entities_ai
     AFTER INSERT ON base_entities BEGIN
-      INSERT INTO base_entities_fts(rowid, id, type, payload, tags)
-      VALUES (new.rowid, new.id, new.type, new.payload, new.tags);
+      INSERT INTO base_entities_fts(rowid, id, title, description, tags)
+      VALUES (new.rowid, new.id, new.title, new.description, new.tags);
     END;
   `);
 
   await db.execute(`
     CREATE TRIGGER IF NOT EXISTS base_entities_ad
     AFTER DELETE ON base_entities BEGIN
-      INSERT INTO base_entities_fts(base_entities_fts, rowid, id, type, payload, tags)
-      VALUES ('delete', old.rowid, old.id, old.type, old.payload, old.tags);
+      INSERT INTO base_entities_fts(base_entities_fts, rowid, id, title, description, tags)
+      VALUES ('delete', old.rowid, old.id, old.title, old.description, old.tags);
     END;
   `);
 
   await db.execute(`
     CREATE TRIGGER IF NOT EXISTS base_entities_au
     AFTER UPDATE ON base_entities BEGIN
-      INSERT INTO base_entities_fts(base_entities_fts, rowid, id, type, payload, tags)
-      VALUES ('delete', old.rowid, old.id, old.type, old.payload, old.tags);
-      INSERT INTO base_entities_fts(rowid, id, type, payload, tags)
-      VALUES (new.rowid, new.id, new.type, new.payload, new.tags);
+      INSERT INTO base_entities_fts(base_entities_fts, rowid, id, title, description, tags)
+      VALUES ('delete', old.rowid, old.id, old.title, old.description, old.tags);
+      INSERT INTO base_entities_fts(rowid, id, title, description, tags)
+      VALUES (new.rowid, new.id, new.title, new.description, new.tags);
     END;
   `);
 

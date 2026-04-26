@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from './dropdown-menu';
 import { AddAspectDialog } from './AddAspectDialog';
+import { LinkedItemsPanel } from './LinkedItemsPanel';
 import {
   getEntity,
   updateCore,
@@ -325,6 +326,18 @@ export function EntityDetailSheet({
                         </Badge>
                       );
                     })}
+                  </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Linked items</label>
+                  <div className="mt-1">
+                    <LinkedItemsPanel entityId={entityId} />
+                  </div>
+                </div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Linked items</label>
+                  <div className="mt-1">
+                    <LinkedItemsPanel entityId={entityId} />
                   </div>
                 </div>
               </div>

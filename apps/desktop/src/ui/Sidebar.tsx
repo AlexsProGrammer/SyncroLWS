@@ -783,9 +783,16 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
       const db = getWorkspaceDB();
       const tool = enabledTools.find((t) => t.id === toolId);
       if (tool?.entityTypes) {
+        // Phase F: legacy `base_entities.type` column is gone — entity ↔ tool
+        // mapping now lives on `entity_aspects.aspect_type`.
         for (const entityType of tool.entityTypes) {
           await db.execute(
-            `DELETE FROM base_entities WHERE type = ?`,
+            `DELETE FROM base_entities
+              WHERE id IN (SELECT entity_id FROM entity_aspects WHERE aspect_type = ?)`,
+            [entityType],
+          );
+          await db.execute(
+            `DELETE FROM entity_aspects WHERE aspect_type = ?`,
             [entityType],
           );
         }

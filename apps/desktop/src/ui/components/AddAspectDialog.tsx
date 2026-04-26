@@ -17,7 +17,28 @@ import {
 import { addAspect, listToolInstances, type ToolInstance } from '@/core/entityStore';
 import type { EntityAspect } from '@syncrohws/shared-types';
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Merge manifest defaultData with any runtime-generated defaults that cannot
+ * be static values (e.g. ISO datetimes).
+ */
+function buildDefaultData(
+  aspectType: string,
+  base: Record<string, unknown>,
+): Record<string, unknown> {
+  if (aspectType === 'calendar_event') {
+    const now = new Date();
+    const start = now.toISOString();
+    const end = new Date(now.getTime() + 60 * 60 * 1000).toISOString(); // +1 h
+    return { start, end, ...base };
+  }
+  if (aspectType === 'time_log') {
+    const start = new Date().toISOString();
+    return { start, end: null, duration_seconds: null, ...base };
+  }
+  return base;
+}
 
 export interface AddAspectDialogProps {
   open: boolean;
@@ -108,7 +129,7 @@ export function AddAspectDialog({
 
       const aspect = await addAspect(entityId, {
         aspect_type: plugin.type as EntityAspect['aspect_type'],
-        data: { ...plugin.defaultData },
+        data: { ...buildDefaultData(plugin.type, plugin.defaultData) },
         tool_instance_id: toolInstanceId,
       });
       onAdded?.(aspect);

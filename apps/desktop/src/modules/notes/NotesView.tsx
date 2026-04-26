@@ -209,9 +209,12 @@ export function NotesView(): React.ReactElement {
               openInitialAspectType="note"
               onDelete={() => void deleteNote(note.id)}
             >
-            <button
+            <div
+              role="button"
+              tabIndex={0}
               onClick={() => openNote(note.id)}
-              className="group flex w-full flex-col gap-0.5 border-b border-border/50 px-3 py-2.5 text-left transition-colors hover:bg-accent/50"
+              onKeyDown={(e) => e.key === 'Enter' && openNote(note.id)}
+              className="group flex w-full flex-col gap-0.5 border-b border-border/50 px-3 py-2.5 text-left transition-colors hover:bg-accent/50 cursor-pointer"
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
@@ -256,7 +259,7 @@ export function NotesView(): React.ReactElement {
                   </span>
                 )}
               </div>
-            </button>
+            </div>
             </EntityRowContextMenu>
           ))}
           {filteredNotes.length === 0 && (

@@ -40,19 +40,13 @@ export const activeTools = sqliteTable('active_tools', {
 /**
  * Central store for ALL domain objects within a workspace.
  *
- * Phase A — Hybrid model:
- *  - Shared "core" fields live as real columns: title, description, color,
- *    icon, tags. Aspect-specific data lives in `entity_aspects`.
- *  - The legacy `type` and `payload` columns are kept for backwards
- *    compatibility while modules migrate. They will be removed in Phase F.
+ * Phase F — Hybrid model only:
+ *  - Shared "core" fields are real columns: title, description, color,
+ *    icon, tags, parent_id. Aspect-specific data lives in `entity_aspects`.
+ *  - The legacy `type` / `payload` / `metadata` columns were dropped in Phase F.
  */
 export const baseEntities = sqliteTable('base_entities', {
   id: text('id').primaryKey(),
-  // Legacy fields (Phase A: still in use; Phase F: drop)
-  type: text('type').notNull(),
-  payload: text('payload').notNull().default('{}'),
-  metadata: text('metadata').notNull().default('{}'),
-  // Shared core fields (Phase A: new)
   title: text('title').notNull().default(''),
   description: text('description').notNull().default(''),
   color: text('color').notNull().default('#6366f1'),

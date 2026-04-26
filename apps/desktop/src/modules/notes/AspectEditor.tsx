@@ -13,11 +13,11 @@ import type { AspectEditorProps } from '@/registry/ToolRegistry';
 import type { NoteAspectData } from '@syncrohws/shared-types';
 import { Button } from '@/ui/components/button';
 import { eventBus } from '@/core/events';
-import { getEntity } from '@/core/entityStore';
+import { getEntity, reconcileWikiLinks } from '@/core/entityStore';
 
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
-export function AspectEditor({ aspect, onChange, onRemove }: AspectEditorProps): React.ReactElement {
+export function AspectEditor({ core, aspect, onChange, onRemove }: AspectEditorProps): React.ReactElement {
   const data = aspect.data as Partial<NoteAspectData>;
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -54,9 +54,14 @@ export function AspectEditor({ aspect, onChange, onRemove }: AspectEditorProps):
     onUpdate({ editor: ed }) {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
+        const content_md = ed.getText({ blockSeparator: '\n\n' });
         onChange({
-          content_md: ed.getText({ blockSeparator: '\n\n' }),
+          content_md,
           content_json: JSON.stringify(ed.getJSON()),
+        });
+        // Phase E — keep wiki_link relations in sync with [[…]] in the markdown.
+        void reconcileWikiLinks(core.id, content_md).catch((err) => {
+          console.error('[notes] wiki-link reconcile failed:', err);
         });
       }, AUTOSAVE_DEBOUNCE_MS);
     },
@@ -67,10 +72,12 @@ export function AspectEditor({ aspect, onChange, onRemove }: AspectEditorProps):
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       if (editor && !editor.isDestroyed) {
+        const content_md = editor.getText({ blockSeparator: '\n\n' });
         onChange({
-          content_md: editor.getText({ blockSeparator: '\n\n' }),
+          content_md,
           content_json: JSON.stringify(editor.getJSON()),
         });
+        void reconcileWikiLinks(core.id, content_md).catch(() => { /* unmount */ });
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
