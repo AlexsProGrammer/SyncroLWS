@@ -239,6 +239,37 @@ export const workspaceMembers = pgTable(
   }),
 );
 
+// ── audit_log (Phase R) ─────────────────────────────────────────────────────
+// Append-only history of meaningful actions. Server-side enterprise feature
+// (audit visibility is gated in `auth.audit.list`):
+//   - admins see all rows.
+//   - workspace owners see rows for workspaces they own + their own actions.
+//   - everyone else sees only their own actions.
+//
+// Action enum is enforced by callers (audit.ts), not the DB, so adding a new
+// action doesn't require a migration.
+export const auditLog = pgTable(
+  'audit_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ts: timestamp('ts', { withTimezone: true }).notNull().defaultNow(),
+    actor_user_id: uuid('actor_user_id'),
+    actor_device_id: uuid('actor_device_id'),
+    workspace_id: text('workspace_id'),
+    target_kind: text('target_kind'),
+    target_id: text('target_id'),
+    action: text('action').notNull(),
+    payload: jsonb('payload').notNull().default(sql`'{}'::jsonb`),
+    ip_addr: text('ip_addr'),
+  },
+  (t) => ({
+    tsIdx: index('audit_log_ts_idx').on(t.ts),
+    actorIdx: index('audit_log_actor_idx').on(t.actor_user_id),
+    wsIdx: index('audit_log_ws_idx').on(t.workspace_id),
+    actionIdx: index('audit_log_action_idx').on(t.action),
+  }),
+);
+
 // suppress unused warning for helper kept for future composite indexes
 void uniqueIndex;
 
@@ -260,3 +291,5 @@ export type WorkspaceRow = typeof workspaces.$inferSelect;
 export type NewWorkspaceRow = typeof workspaces.$inferInsert;
 export type WorkspaceMemberRow = typeof workspaceMembers.$inferSelect;
 export type NewWorkspaceMemberRow = typeof workspaceMembers.$inferInsert;
+export type AuditLogRow = typeof auditLog.$inferSelect;
+export type NewAuditLogRow = typeof auditLog.$inferInsert;

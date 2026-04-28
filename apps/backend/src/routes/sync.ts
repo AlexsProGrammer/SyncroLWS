@@ -13,6 +13,7 @@ import {
   SyncPushInputSchema,
 } from '@syncrohws/shared-types';
 import { t, protectedProcedure } from '../trpc';
+import { record } from '../audit';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -429,6 +430,27 @@ const pushProcedure = protectedProcedure
         })
         .returning({ revision: tombstones.revision });
       accepted.push({ kind: 'delete', id: row.id, revision: tomb!.revision });
+    }
+
+    // Phase R — record one aggregate audit row per enterprise push so the
+    // log doesn't get flooded with per-row entries. Personal-mode (device
+    // token) pushes are not audited (single user, on-device only).
+    if (scope.mode === 'user' && accepted.length > 0) {
+      const counts = accepted.reduce<Record<string, number>>((acc, a) => {
+        acc[a.kind] = (acc[a.kind] ?? 0) + 1;
+        return acc;
+      }, {});
+      void record(ctx, {
+        action: 'entity.update',
+        target_kind: 'workspace',
+        target_id: input.workspace_id,
+        workspace_id: input.workspace_id,
+        payload: {
+          counts,
+          accepted: accepted.length,
+          conflicts: conflicts.length,
+        },
+      });
     }
 
     return { accepted, conflicts };

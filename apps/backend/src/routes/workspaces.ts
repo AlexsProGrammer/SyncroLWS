@@ -22,6 +22,7 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '../db/client';
 import { users, workspaces, workspaceMembers } from '../db/schema';
 import { t, protectedProcedure } from '../trpc';
+import { record } from '../audit';
 
 const ROLE = z.enum(['owner', 'editor', 'viewer']);
 type Role = z.infer<typeof ROLE>;
@@ -193,6 +194,13 @@ const create = protectedProcedure
       invited_by: userId,
       accepted_at: new Date(),
     });
+    void record(ctx, {
+      action: 'workspace.create',
+      target_kind: 'workspace',
+      target_id: input.id,
+      workspace_id: input.id,
+      payload: { name: input.name },
+    });
     return { id: input.id };
   });
 
@@ -216,6 +224,13 @@ const update = protectedProcedure
     if (input.color !== undefined) patch.color = input.color;
     if (Object.keys(patch).length === 0) return { success: true };
     await db.update(workspaces).set(patch).where(eq(workspaces.id, input.id));
+    void record(ctx, {
+      action: 'workspace.update',
+      target_kind: 'workspace',
+      target_id: input.id,
+      workspace_id: input.id,
+      payload: patch,
+    });
     return { success: true };
   });
 
@@ -230,6 +245,12 @@ const softDelete = protectedProcedure
       .update(workspaces)
       .set({ deleted_at: new Date() })
       .where(eq(workspaces.id, input.id));
+    void record(ctx, {
+      action: 'workspace.delete',
+      target_kind: 'workspace',
+      target_id: input.id,
+      workspace_id: input.id,
+    });
     return { success: true };
   });
 
@@ -284,6 +305,13 @@ const invite = protectedProcedure
         accepted_at: new Date(), // auto-accept within org
       });
     }
+    void record(ctx, {
+      action: 'workspace.invite',
+      target_kind: 'user',
+      target_id: target.id,
+      workspace_id: input.workspace_id,
+      payload: { email: input.email, role: input.role, replaced_existing: existing !== null },
+    });
     return { user_id: target.id, role: input.role };
   });
 
@@ -320,6 +348,13 @@ const setMemberRole = protectedProcedure
           eq(workspaceMembers.user_id, input.user_id),
         ),
       );
+    void record(ctx, {
+      action: 'workspace.role_change',
+      target_kind: 'user',
+      target_id: input.user_id,
+      workspace_id: input.workspace_id,
+      payload: { role: input.role, previous: cur },
+    });
     return { success: true };
   });
 
@@ -350,6 +385,12 @@ const removeMember = protectedProcedure
           eq(workspaceMembers.user_id, input.user_id),
         ),
       );
+    void record(ctx, {
+      action: 'workspace.remove_member',
+      target_kind: 'user',
+      target_id: input.user_id,
+      workspace_id: input.workspace_id,
+    });
     return { success: true };
   });
 
@@ -375,6 +416,12 @@ const leave = protectedProcedure
           eq(workspaceMembers.user_id, userId),
         ),
       );
+    void record(ctx, {
+      action: 'workspace.leave',
+      target_kind: 'user',
+      target_id: userId,
+      workspace_id: input.workspace_id,
+    });
     return { success: true };
   });
 

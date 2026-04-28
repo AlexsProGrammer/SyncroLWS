@@ -123,6 +123,7 @@ app.use(
     createContext: async ({ req }): Promise<TRPCContext> => ({
       requestId: randomUUID(),
       auth: await resolveAuth(req.header('authorization')),
+      ipAddr: (req.ip ?? req.socket.remoteAddress ?? '').toString() || undefined,
     }),
   }),
 );

@@ -38,6 +38,8 @@ export type AuthContext =
 export interface TRPCContext {
   requestId: string;
   auth: AuthContext;
+  /** Phase R — best-effort source IP for audit trail. */
+  ipAddr?: string;
 }
 
 // ── Sync wire types (Phase I) ────────────────────────────────────────────────

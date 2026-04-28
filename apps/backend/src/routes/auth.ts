@@ -46,6 +46,8 @@ import {
   pwChangeProcedure,
 } from '../trpc';
 import { workspacesRouter } from './workspaces';
+import { auditRouter } from './audit';
+import { record, recordAnonymous } from '../audit';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -64,7 +66,7 @@ async function loadUser(userId: string) {
 
 const login = publicProcedure
   .input(z.object({ email: z.string().email(), password: z.string().min(1) }))
-  .mutation(async ({ input }) => {
+  .mutation(async ({ ctx, input }) => {
     const rows = await db
       .select()
       .from(users)
@@ -72,13 +74,34 @@ const login = publicProcedure
       .limit(1);
     const row = rows[0];
     if (!row || row.disabled_at) {
+      void recordAnonymous(ctx.ipAddr, {
+        action: 'auth.login',
+        target_kind: 'user',
+        payload: { email: input.email, ok: false, reason: !row ? 'unknown' : 'disabled' },
+      });
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials.' });
     }
     const ok = await verifyPassword(input.password, row.password_hash);
     if (!ok) {
+      void recordAnonymous(ctx.ipAddr, {
+        action: 'auth.login',
+        target_kind: 'user',
+        target_id: row.id,
+        payload: { email: input.email, ok: false, reason: 'bad_password' },
+      });
       throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials.' });
     }
     const orgRole = asOrgRole(row.org_role);
+    void recordAnonymous(ctx.ipAddr, {
+      action: 'auth.login',
+      target_kind: 'user',
+      target_id: row.id,
+      payload: {
+        email: row.email,
+        ok: true,
+        must_change_password: !!row.must_change_password,
+      },
+    });
     if (row.must_change_password) {
       const token = signPasswordChangeToken(row.id, orgRole);
       return {
@@ -158,6 +181,11 @@ const changePassword = pwChangeProcedure
       .update(users)
       .set({ password_hash: hash, must_change_password: false })
       .where(eq(users.id, userId));
+    void record(ctx, {
+      action: 'auth.password_change',
+      target_kind: 'user',
+      target_id: userId,
+    });
     const orgRole = asOrgRole(row.org_role);
     const token = signUserToken(userId, orgRole, 'full');
     return {
@@ -228,6 +256,12 @@ const usersRouter = t.router({
         .returning();
       const row = inserted[0];
       if (!row) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR' });
+      void record(ctx, {
+        action: 'user.create',
+        target_kind: 'user',
+        target_id: row.id,
+        payload: { email: row.email, org_role: row.org_role },
+      });
       return {
         id: row.id,
         email: row.email,
@@ -266,6 +300,12 @@ const usersRouter = t.router({
       }
       if (Object.keys(patch).length === 0) return { success: true };
       await db.update(users).set(patch).where(eq(users.id, input.id));
+      void record(ctx, {
+        action: input.org_role !== undefined ? 'user.role_change' : 'user.update',
+        target_kind: 'user',
+        target_id: input.id,
+        payload: patch,
+      });
       return { success: true };
     }),
 
@@ -296,6 +336,12 @@ const usersRouter = t.router({
         .update(users)
         .set({ disabled_at: input.disabled ? new Date() : null })
         .where(eq(users.id, input.id));
+      void record(ctx, {
+        action: 'user.disable',
+        target_kind: 'user',
+        target_id: input.id,
+        payload: { disabled: input.disabled },
+      });
       return { success: true };
     }),
 
@@ -306,12 +352,17 @@ const usersRouter = t.router({
         new_default_password: z.string().min(8),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const hash = await hashPassword(input.new_default_password);
       await db
         .update(users)
         .set({ password_hash: hash, must_change_password: true })
         .where(eq(users.id, input.id));
+      void record(ctx, {
+        action: 'user.password_reset',
+        target_kind: 'user',
+        target_id: input.id,
+      });
       return { success: true };
     }),
 });
@@ -343,6 +394,12 @@ const devicesRouter = t.router({
       const token = signDeviceToken(row.id, userId, input.profileId);
       const tokenHash = hashToken(token);
       await db.update(devices).set({ token_hash: tokenHash }).where(eq(devices.id, row.id));
+      void record(ctx, {
+        action: 'device.pair',
+        target_kind: 'device',
+        target_id: row.id,
+        payload: { name: row.name, profile_id: row.profile_id },
+      });
       return { token, device: { id: row.id, name: row.name, profile_id: row.profile_id } };
     }),
 
@@ -385,6 +442,11 @@ const devicesRouter = t.router({
         .update(devices)
         .set({ revoked_at: new Date() })
         .where(and(eq(devices.id, input.id), eq(devices.user_id, userId)));
+      void record(ctx, {
+        action: 'device.revoke',
+        target_kind: 'device',
+        target_id: input.id,
+      });
       return { success: true };
     }),
 });
@@ -405,7 +467,7 @@ const shareLinksRouter = t.router({
         expires_in_seconds: z.number().int().positive().optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const inserted = await db
         .insert(shareLinks)
         .values({
@@ -430,6 +492,19 @@ const shareLinksRouter = t.router({
         .update(shareLinks)
         .set({ token_hash: tokenHash })
         .where(eq(shareLinks.id, row.id));
+      void record(ctx, {
+        action: 'share_link.create',
+        target_kind: 'share_link',
+        target_id: row.id,
+        workspace_id: input.workspace_id,
+        payload: {
+          parent_entity_id: input.parent_entity_id ?? null,
+          label: input.label ?? '',
+          can_upload: input.can_upload,
+          can_submit: input.can_submit,
+          expires_in_seconds: input.expires_in_seconds ?? null,
+        },
+      });
       return { token, share: { id: row.id, expires_at: row.expires_at } };
     }),
 
@@ -456,11 +531,16 @@ const shareLinksRouter = t.router({
 
   revoke: adminProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       await db
         .update(shareLinks)
         .set({ revoked_at: new Date() })
         .where(eq(shareLinks.id, input.id));
+      void record(ctx, {
+        action: 'share_link.revoke',
+        target_kind: 'share_link',
+        target_id: input.id,
+      });
       return { success: true };
     }),
 });
@@ -474,6 +554,7 @@ export const authRouter = t.router({
   devices: devicesRouter,
   shareLinks: shareLinksRouter,
   workspaces: workspacesRouter,
+  audit: auditRouter,
 });
 
 export type AuthRouter = typeof authRouter;
