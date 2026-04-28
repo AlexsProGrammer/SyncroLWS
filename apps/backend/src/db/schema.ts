@@ -198,6 +198,47 @@ export const shareLinks = pgTable(
   }),
 );
 
+// ── workspaces / workspace_members (Phase Q — ACL) ──────────────────────────
+// First-class workspace metadata. Existing `base_entities.workspace_id` (text)
+// references `workspaces.id` (also text — match the existing column type).
+// `workspaces.id` is generated client-side or by the desktop on workspace
+// creation, then mirrored to the server via `auth.workspaces.create`.
+export const workspaces = pgTable(
+  'workspaces',
+  {
+    id: text('id').primaryKey(),
+    owner_user_id: uuid('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    icon: text('icon').notNull().default('folder'),
+    color: text('color').notNull().default('#6366f1'),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    deleted_at: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => ({
+    ownerIdx: index('workspaces_owner_idx').on(t.owner_user_id),
+    deletedIdx: index('workspaces_deleted_idx').on(t.deleted_at),
+  }),
+);
+
+export const workspaceMembers = pgTable(
+  'workspace_members',
+  {
+    workspace_id: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    user_id: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role').notNull().default('viewer'),
+    invited_by: uuid('invited_by'),
+    accepted_at: timestamp('accepted_at', { withTimezone: true }),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.workspace_id, t.user_id] }),
+    userIdx: index('workspace_members_user_idx').on(t.user_id),
+    wsIdx: index('workspace_members_ws_idx').on(t.workspace_id),
+  }),
+);
+
 // suppress unused warning for helper kept for future composite indexes
 void uniqueIndex;
 
@@ -215,3 +256,7 @@ export type NewUserRow = typeof users.$inferInsert;
 export type DeviceRow = typeof devices.$inferSelect;
 export type NewDeviceRow = typeof devices.$inferInsert;
 export type ShareLinkRow = typeof shareLinks.$inferSelect;
+export type WorkspaceRow = typeof workspaces.$inferSelect;
+export type NewWorkspaceRow = typeof workspaces.$inferInsert;
+export type WorkspaceMemberRow = typeof workspaceMembers.$inferSelect;
+export type NewWorkspaceMemberRow = typeof workspaceMembers.$inferInsert;

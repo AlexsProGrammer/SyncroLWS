@@ -45,6 +45,7 @@ import {
   publicProcedure,
   pwChangeProcedure,
 } from '../trpc';
+import { workspacesRouter } from './workspaces';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -472,6 +473,7 @@ export const authRouter = t.router({
   users: usersRouter,
   devices: devicesRouter,
   shareLinks: shareLinksRouter,
+  workspaces: workspacesRouter,
 });
 
 export type AuthRouter = typeof authRouter;

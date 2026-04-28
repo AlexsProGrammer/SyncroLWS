@@ -6,6 +6,7 @@ import {
   entityAspects,
   entityRelations,
   tombstones,
+  workspaceMembers,
 } from '../db/schema';
 import {
   SyncPullInputSchema,
@@ -17,33 +18,111 @@ import { t, protectedProcedure } from '../trpc';
 
 const NEXT_REV = sql<number>`nextval('sync_revision')`;
 
-/** Resolve scope (profile_id, deviceId) from device-auth context. */
-function requireDeviceAuth(ctx: { auth: { kind: string } } & Record<string, unknown>) {
-  const auth = ctx.auth as { kind: string; profileId?: string; deviceId?: string };
-  if (auth.kind !== 'device') {
-    throw new TRPCError({
-      code: 'FORBIDDEN',
-      message: 'sync.* requires a device token',
-    });
+/**
+ * Phase Q — Resolve the per-request sync scope.
+ *
+ * Two auth kinds reach sync.*:
+ *  - `device` tokens (Phase H legacy / personal mode) carry a `profileId`
+ *    that scopes ALL reads & writes. The workspace_id filter is unchanged
+ *    from before — there's no server-side `workspaces` mirror in personal
+ *    mode, just the per-profile bucket.
+ *  - `user` tokens (Phase P enterprise mode) authenticate the human; the
+ *    workspace ACL is checked against `workspace_members`. `profile_id`
+ *    is unused on the server in enterprise mode; we synthesize the literal
+ *    `'enterprise'` so the column has a stable value.
+ */
+type SyncScope =
+  | { mode: 'device'; profileId: string; deviceId: string }
+  | { mode: 'user'; userId: string; deviceId: null };
+
+function requireSyncAuth(ctx: { auth: { kind: string } } & Record<string, unknown>): SyncScope {
+  const auth = ctx.auth as {
+    kind: string;
+    profileId?: string;
+    deviceId?: string;
+    userId?: string;
+    scope?: string;
+  };
+  if (auth.kind === 'device') {
+    return { mode: 'device', profileId: auth.profileId!, deviceId: auth.deviceId! };
   }
-  return { profileId: auth.profileId!, deviceId: auth.deviceId! };
+  if (auth.kind === 'user' && auth.scope === 'full') {
+    return { mode: 'user', userId: auth.userId!, deviceId: null };
+  }
+  throw new TRPCError({
+    code: 'FORBIDDEN',
+    message: 'sync.* requires a device token or full-scope user token',
+  });
 }
+
+/** Returns the user's role in the workspace, or null if not a member. */
+async function userWorkspaceRole(
+  workspaceId: string,
+  userId: string,
+): Promise<'owner' | 'editor' | 'viewer' | null> {
+  const rows = await db
+    .select({ role: workspaceMembers.role })
+    .from(workspaceMembers)
+    .where(
+      and(
+        eq(workspaceMembers.workspace_id, workspaceId),
+        eq(workspaceMembers.user_id, userId),
+      ),
+    )
+    .limit(1);
+  const r = rows[0]?.role;
+  if (r === 'owner' || r === 'editor' || r === 'viewer') return r;
+  return null;
+}
+
+/**
+ * For enterprise sync: workspace_id in `base_entities` is whatever the writer
+ * inserted. Personal-mode rows had a per-profile bucket; enterprise-mode rows
+ * use the workspace id stored on the desktop (matches `workspaces.id`).
+ *
+ * Server-side, the only workspace_id-scoped predicate we add is what the
+ * client passed in `input.workspace_id`. The membership check above is what
+ * actually authorizes the read.
+ *
+ * `profile_id` predicate:
+ *  - device mode → exact match on the device's profile.
+ *  - user mode  → no profile filter (workspace membership is the gate).
+ */
+const ENTERPRISE_PROFILE_TAG = 'enterprise';
 
 // ── sync.pull ─────────────────────────────────────────────────────────────────
 
 const pullProcedure = protectedProcedure
   .input(SyncPullInputSchema)
   .query(async ({ input, ctx }) => {
-    const { profileId } = requireDeviceAuth(ctx);
+    const scope = requireSyncAuth(ctx);
     const since = input.since_revision;
     const limit = input.limit;
+
+    // For enterprise (user-token) callers, gate by workspace membership.
+    if (scope.mode === 'user') {
+      const role = await userWorkspaceRole(input.workspace_id, scope.userId);
+      if (!role) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Not a member of this workspace.',
+        });
+      }
+    }
+
+    // Profile filter: device-mode keeps the legacy per-profile bucket;
+    // user-mode reads any row in the (membership-checked) workspace.
+    const corePf = scope.mode === 'device' ? eq(baseEntities.profile_id, scope.profileId) : sql`TRUE`;
+    const aspPf = scope.mode === 'device' ? eq(entityAspects.profile_id, scope.profileId) : sql`TRUE`;
+    const relPf = scope.mode === 'device' ? eq(entityRelations.profile_id, scope.profileId) : sql`TRUE`;
+    const tombPf = scope.mode === 'device' ? eq(tombstones.profile_id, scope.profileId) : sql`TRUE`;
 
     const cores = await db
       .select()
       .from(baseEntities)
       .where(
         and(
-          eq(baseEntities.profile_id, profileId),
+          corePf,
           eq(baseEntities.workspace_id, input.workspace_id),
           gt(baseEntities.revision, since),
         ),
@@ -56,7 +135,7 @@ const pullProcedure = protectedProcedure
       .from(entityAspects)
       .where(
         and(
-          eq(entityAspects.profile_id, profileId),
+          aspPf,
           eq(entityAspects.workspace_id, input.workspace_id),
           gt(entityAspects.revision, since),
         ),
@@ -69,7 +148,7 @@ const pullProcedure = protectedProcedure
       .from(entityRelations)
       .where(
         and(
-          eq(entityRelations.profile_id, profileId),
+          relPf,
           eq(entityRelations.workspace_id, input.workspace_id),
           gt(entityRelations.revision, since),
         ),
@@ -82,7 +161,7 @@ const pullProcedure = protectedProcedure
       .from(tombstones)
       .where(
         and(
-          eq(tombstones.profile_id, profileId),
+          tombPf,
           eq(tombstones.workspace_id, input.workspace_id),
           gt(tombstones.revision, since),
         ),
@@ -154,7 +233,27 @@ const pullProcedure = protectedProcedure
 const pushProcedure = protectedProcedure
   .input(SyncPushInputSchema)
   .mutation(async ({ input, ctx }) => {
-    const { profileId, deviceId } = requireDeviceAuth(ctx);
+    const scope = requireSyncAuth(ctx);
+
+    // Enterprise: must be owner/editor in the target workspace.
+    if (scope.mode === 'user') {
+      const role = await userWorkspaceRole(input.workspace_id, scope.userId);
+      if (!role) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Not a member of this workspace.',
+        });
+      }
+      if (role === 'viewer') {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Viewer role cannot push changes.',
+        });
+      }
+    }
+
+    const profileId = scope.mode === 'device' ? scope.profileId : ENTERPRISE_PROFILE_TAG;
+    const deviceId = scope.deviceId;
     const accepted: { kind: 'core' | 'aspect' | 'relation' | 'delete'; id: string; revision: number }[] = [];
     const conflicts: { kind: 'core' | 'aspect' | 'relation' | 'delete'; id: string; server_revision: number }[] = [];
 
