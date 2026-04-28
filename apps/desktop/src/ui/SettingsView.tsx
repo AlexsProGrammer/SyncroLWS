@@ -32,6 +32,8 @@ import { useWorkspaceStore } from '@/store/workspaceStore';
 import { getAISettings, saveAISettings, ai } from '@/core/ai';
 import { logout as authLogout } from '@/core/auth';
 import { useAppLockStore } from '@/core/lock';
+import { UsersPanel } from '@/ui/admin/UsersPanel';
+import { AuditLogPanel } from '@/ui/admin/AuditLogPanel';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -67,6 +69,9 @@ export function SettingsView(): React.ReactElement {
   const tools = getAllTools();
   const theme = useThemeStore((s) => s.theme);
   const setTheme = useThemeStore((s) => s.setTheme);
+  // Phase V — Admin tab visibility (enterprise admin only).
+  const orgRole = useSyncStore((s) => s.orgRole);
+  const isAdmin = activeProfile?.mode === 'enterprise' && orgRole === 'admin';
 
   // ── Profile edit modal ─────────────────────────────────────────────────────
   const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
@@ -350,6 +355,11 @@ export function SettingsView(): React.ReactElement {
             <TabsTrigger value="ai" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
               AI
             </TabsTrigger>
+            {isAdmin ? (
+              <TabsTrigger value="admin" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+                Admin
+              </TabsTrigger>
+            ) : null}
           </TabsList>
         </div>
 
@@ -736,6 +746,15 @@ export function SettingsView(): React.ReactElement {
           <TabsContent value="ai">
             <AISettingsPanel />
           </TabsContent>
+
+          {isAdmin ? (
+            <TabsContent value="admin">
+              <div className="space-y-8">
+                <UsersPanel />
+                <AuditLogPanel />
+              </div>
+            </TabsContent>
+          ) : null}
         </div>
       </Tabs>
     </div>

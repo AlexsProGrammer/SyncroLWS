@@ -10,6 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/ui/component
 import { Input } from '@/ui/components/input';
 import { Button } from '@/ui/components/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/components/select';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/ui/components/tabs';
+import { AuditLogPanel } from '@/ui/admin/AuditLogPanel';
 import { toast } from '@/ui/hooks/use-toast';
 import {
   inviteMember,
@@ -146,6 +148,16 @@ export function ManageMembersDialog({
           <DialogTitle>Members — {ws?.name ?? 'Workspace'}</DialogTitle>
         </DialogHeader>
 
+        <Tabs defaultValue="members" className="mt-2">
+          {isOwner ? (
+            <TabsList>
+              <TabsTrigger value="members">Members</TabsTrigger>
+              <TabsTrigger value="activity">Activity</TabsTrigger>
+            </TabsList>
+          ) : null}
+
+          <TabsContent value="members">
+
         {isOwner && (
           <div className="mt-4 flex items-end gap-2 border-b border-border pb-4">
             <div className="flex-1">
@@ -242,6 +254,15 @@ export function ManageMembersDialog({
             </table>
           )}
         </div>
+
+          </TabsContent>
+
+          {isOwner ? (
+            <TabsContent value="activity">
+              <AuditLogPanel fixedWorkspaceId={workspaceId} hideUserFilter />
+            </TabsContent>
+          ) : null}
+        </Tabs>
 
         <div className="mt-4 flex justify-end gap-2">
           {!isOwner && (callerRole === 'editor' || callerRole === 'viewer') && (
