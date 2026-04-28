@@ -12,6 +12,7 @@ import {
 } from './dropdown-menu';
 import { AddAspectDialog } from './AddAspectDialog';
 import { LinkedItemsPanel } from './LinkedItemsPanel';
+import { AttachmentsPanel } from './AttachmentsPanel';
 import { RichTextEditor } from './RichTextEditor';
 import {
   getEntity,
@@ -19,6 +20,8 @@ import {
   updateAspect,
   removeAspect,
   softDeleteEntity,
+  getEntitySyncState,
+  type EntitySyncState,
 } from '@/core/entityStore';
 import { getAspectPlugin, getAllAspectPlugins } from '@/registry/ToolRegistry';
 import { eventBus } from '@/core/events';
@@ -73,6 +76,7 @@ export function EntityDetailSheet({
   const [addOpen, setAddOpen] = React.useState(false);
   const [addInitialType, setAddInitialType] = React.useState<string | undefined>();
   const [tagInput, setTagInput] = React.useState('');
+  const [syncState, setSyncState] = React.useState<EntitySyncState>('synced');
 
   // Load entity when opened
   React.useEffect(() => {
@@ -93,18 +97,29 @@ export function EntityDetailSheet({
       void getEntity(entityId).then((h) => {
         if (h) setHybrid(h);
       });
+      void getEntitySyncState(entityId).then(setSyncState);
     };
     eventBus.on('aspect:added', reload);
     eventBus.on('aspect:updated', reload);
     eventBus.on('aspect:removed', reload);
     eventBus.on('core:updated', reload);
+    // Phase J: reflect post-sync state in the badge (clears "dirty" once
+    // the engine has pushed our changes).
+    eventBus.on('sync:complete', reload);
     return () => {
       eventBus.off('aspect:added', reload);
       eventBus.off('aspect:updated', reload);
       eventBus.off('aspect:removed', reload);
       eventBus.off('core:updated', reload);
+      eventBus.off('sync:complete', reload);
     };
   }, [entityId]);
+
+  // Initial sync-state fetch when the sheet opens.
+  React.useEffect(() => {
+    if (!open || !entityId) return;
+    void getEntitySyncState(entityId).then(setSyncState);
+  }, [open, entityId]);
 
   if (!open || !entityId) return null;
 
@@ -190,6 +205,7 @@ export function EntityDetailSheet({
                 />
                 <SheetTitle className="sr-only">{core?.title ?? 'Entity'}</SheetTitle>
               </div>
+              <SyncBadge state={syncState} />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="sm">⋯</Button>
@@ -345,17 +361,17 @@ export function EntityDetailSheet({
                       );
                     })}
                   </div>
+                </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Linked items</label>
                   <div className="mt-1">
                     <LinkedItemsPanel entityId={entityId} />
                   </div>
                 </div>
-                </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">Linked items</label>
+                  <label className="text-xs font-medium text-muted-foreground">Attachments</label>
                   <div className="mt-1">
-                    <LinkedItemsPanel entityId={entityId} />
+                    <AttachmentsPanel entityId={entityId} />
                   </div>
                 </div>
               </div>
@@ -483,5 +499,24 @@ function ColorPicker({
         </div>
       )}
     </>
+  );
+}
+
+// ── Phase J: per-entity sync badge ──────────────────────────────────────────
+
+function SyncBadge({ state }: { state: EntitySyncState }): React.ReactElement {
+  if (state === 'synced') {
+    return (
+      <Badge variant="outline" className="gap-1 text-xs text-muted-foreground">
+        <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+        Synced
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="gap-1 text-xs text-amber-600">
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+      Dirty
+    </Badge>
   );
 }

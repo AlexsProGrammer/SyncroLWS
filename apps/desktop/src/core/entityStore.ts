@@ -736,3 +736,30 @@ export async function reconcileWikiLinks(
 
   return { added, removed, unresolved };
 }
+
+// ── Phase J: per-entity sync state for the detail-sheet badge ───────────────
+
+export type EntitySyncState = 'synced' | 'dirty';
+
+/**
+ * Compute the sync state of an entity across its core row + aspects + outgoing
+ * relations + any pending tombstone. Returns 'dirty' if any of those have a
+ * pending push, otherwise 'synced'.
+ *
+ * Conflicted state is not yet persisted (tracked only via the in-memory
+ * `sync:conflict` event stream); the Phase N merge UI will add a
+ * `local_conflict` column and surface it here.
+ */
+export async function getEntitySyncState(id: string): Promise<EntitySyncState> {
+  const db = getWorkspaceDB();
+  const rows = await db.select<{ n: number }[]>(
+    `SELECT
+       (SELECT COUNT(*) FROM base_entities WHERE id = ? AND dirty = 1) +
+       (SELECT COUNT(*) FROM entity_aspects WHERE entity_id = ? AND dirty = 1) +
+       (SELECT COUNT(*) FROM entity_relations
+          WHERE (from_entity_id = ? OR to_entity_id = ?) AND dirty = 1) +
+       (SELECT COUNT(*) FROM sync_tombstones WHERE id = ? AND dirty = 1) AS n`,
+    [id, id, id, id, id],
+  );
+  return (rows[0]?.n ?? 0) > 0 ? 'dirty' : 'synced';
+}

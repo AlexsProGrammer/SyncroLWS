@@ -331,7 +331,7 @@ export interface HybridEntity {
 }
 
 /** Kinds of soft links between entities (replaces inline linked_entity_id fields). */
-export const RELATION_KINDS = ['wiki_link', 'reference', 'embed'] as const;
+export const RELATION_KINDS = ['wiki_link', 'reference', 'embed', 'attachment'] as const;
 export type RelationKind = (typeof RELATION_KINDS)[number];
 export const RelationKindSchema = z.enum(RELATION_KINDS);
 

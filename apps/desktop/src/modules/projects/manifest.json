@@ -1,0 +1,23 @@
+{
+  "id": "projects",
+  "name": "Projects",
+  "version": "1.0.0",
+  "description": "Workspace-wide projects with status, milestones, and attachments.",
+  "icon": "project",
+  "entityTypes": ["project"],
+  "shortcut": "9",
+  "hasPortalView": true,
+  "portalPermissions": ["read"],
+  "configSchema": {},
+  "aspect": {
+    "type": "project",
+    "label": "Project",
+    "defaultData": {
+      "status": "active",
+      "due_date": null,
+      "owner_label": "",
+      "milestones": []
+    },
+    "requiresToolInstance": false
+  }
+}

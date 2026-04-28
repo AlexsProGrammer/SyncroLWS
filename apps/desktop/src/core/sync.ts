@@ -34,8 +34,13 @@ import {
   type Tombstone,
 } from '@syncrohws/shared-types';
 
-const BG_INTERVAL_MS = 60_000;
+/** Phase J: adaptive cadence. Tighter when the user is actively interacting,
+ *  relaxed when the window is hidden. Paused entirely when offline. */
+const FOREGROUND_INTERVAL_MS = 15_000;
+const BACKGROUND_INTERVAL_MS = 60_000;
 const DIRTY_DEBOUNCE_MS = 1_500;
+/** Hard cap per push round — server-side cycle handles up to ~200/kind. */
+const PUSH_BATCH_LIMIT = 200;
 
 interface DirtyCoreRow {
   id: string;
@@ -370,19 +375,19 @@ async function collectPushBatch(): Promise<Omit<SyncPushInput, 'workspace_id'>> 
   const cores = await db.select<DirtyCoreRow[]>(
     `SELECT id, title, description, description_json, color, icon, tags, parent_id,
             created_at, updated_at, deleted_at, revision
-       FROM base_entities WHERE dirty = 1 LIMIT 200`,
+       FROM base_entities WHERE dirty = 1 LIMIT ${PUSH_BATCH_LIMIT}`,
   );
   const aspects = await db.select<DirtyAspectRow[]>(
     `SELECT id, entity_id, aspect_type, data, tool_instance_id, sort_order,
             created_at, updated_at, deleted_at, revision
-       FROM entity_aspects WHERE dirty = 1 LIMIT 200`,
+       FROM entity_aspects WHERE dirty = 1 LIMIT ${PUSH_BATCH_LIMIT}`,
   );
   const relations = await db.select<DirtyRelationRow[]>(
     `SELECT id, from_entity_id, to_entity_id, kind, metadata, created_at, revision
-       FROM entity_relations WHERE dirty = 1 LIMIT 200`,
+       FROM entity_relations WHERE dirty = 1 LIMIT ${PUSH_BATCH_LIMIT}`,
   );
   const tombs = await db.select<TombRow[]>(
-    `SELECT kind, id, base_revision FROM sync_tombstones WHERE dirty = 1 LIMIT 200`,
+    `SELECT kind, id, base_revision FROM sync_tombstones WHERE dirty = 1 LIMIT ${PUSH_BATCH_LIMIT}`,
   );
 
   return {
@@ -476,6 +481,7 @@ async function runSyncCycle(): Promise<void> {
   const state = useSyncStore.getState();
   if (!state.isSyncActive || !state.deviceToken || !state.syncUrl) return;
   if (state.inFlight) return;
+  if (!state.online) return; // Phase J: skip while offline.
   const workspaceId = getCurrentWorkspaceId();
   if (!workspaceId) return;
 
@@ -501,13 +507,19 @@ async function runSyncCycle(): Promise<void> {
     }
 
     // ── PUSH ───────────────────────────────────────────────────────────────
-    const batch = await collectPushBatch();
-    const totalDirty =
-      batch.cores.length +
-      batch.aspects.length +
-      batch.relations.length +
-      batch.deletes.length;
-    if (totalDirty > 0) {
+    // Loop while there are dirty rows; each batch is capped at
+    // PUSH_BATCH_LIMIT per kind. If a batch fails the cycle aborts and
+    // remaining dirty rows are picked up next time — they keep `dirty = 1`
+    // so nothing is lost.
+    let totalPushed = 0;
+    for (let i = 0; i < 10; i += 1) {
+      const batch = await collectPushBatch();
+      const totalDirty =
+        batch.cores.length +
+        batch.aspects.length +
+        batch.relations.length +
+        batch.deletes.length;
+      if (totalDirty === 0) break;
       const push = await trpcMutation<SyncPushResult>(
         state.syncUrl,
         state.deviceToken,
@@ -515,6 +527,13 @@ async function runSyncCycle(): Promise<void> {
         { workspace_id: workspaceId, ...batch },
       );
       await applyPushResult(push);
+      totalPushed += push.accepted.length;
+      // If everything in this batch was rejected as conflicts, stop —
+      // looping again would resend the same rows. They'll be retried
+      // after the conflict UI resolves them.
+      if (push.accepted.length === 0) break;
+    }
+    if (totalPushed > 0) {
       await writeCursor(state.syncUrl, { last_pushed_at: new Date().toISOString() });
     }
 
@@ -522,7 +541,7 @@ async function runSyncCycle(): Promise<void> {
     state.setStatus({
       inFlight: false,
       lastPulledAt: new Date().toISOString(),
-      lastPushedAt: totalDirty > 0 ? new Date().toISOString() : state.lastPushedAt,
+      lastPushedAt: totalPushed > 0 ? new Date().toISOString() : state.lastPushedAt,
       pendingChanges: pending,
       lastError: null,
     });
@@ -542,16 +561,46 @@ async function runSyncCycle(): Promise<void> {
 let bgTimer: ReturnType<typeof setInterval> | null = null;
 let dirtyTimer: ReturnType<typeof setTimeout> | null = null;
 let dirtyHandler: (() => void) | null = null;
+let onlineHandler: (() => void) | null = null;
+let offlineHandler: (() => void) | null = null;
+let visibilityHandler: (() => void) | null = null;
 let started = false;
+
+/** Pick the right interval for the current visibility/online state. */
+function currentInterval(): number {
+  const s = useSyncStore.getState();
+  return s.windowVisible ? FOREGROUND_INTERVAL_MS : BACKGROUND_INTERVAL_MS;
+}
+
+function rescheduleTimer(): void {
+  if (bgTimer) {
+    clearInterval(bgTimer);
+    bgTimer = null;
+  }
+  if (!started) return;
+  bgTimer = setInterval(() => { void runSyncCycle(); }, currentInterval());
+}
 
 export const syncEngine = {
   start(): void {
     if (started) return;
     started = true;
+
+    // Capture initial environment state into the store.
+    if (typeof navigator !== 'undefined') {
+      useSyncStore.getState().setStatus({ online: navigator.onLine });
+    }
+    if (typeof document !== 'undefined') {
+      useSyncStore.getState().setStatus({
+        windowVisible: document.visibilityState !== 'hidden',
+      });
+    }
+
     // Initial run; ignore errors (logged inside runSyncCycle).
     void runSyncCycle();
-    bgTimer = setInterval(() => { void runSyncCycle(); }, BG_INTERVAL_MS);
+    rescheduleTimer();
 
+    // ── Wake the engine on local mutations ───────────────────────────────
     dirtyHandler = (): void => {
       if (dirtyTimer) clearTimeout(dirtyTimer);
       dirtyTimer = setTimeout(() => { void runSyncCycle(); }, DIRTY_DEBOUNCE_MS);
@@ -564,6 +613,37 @@ export const syncEngine = {
       })();
     };
     eventBus.on('sync:dirty', dirtyHandler);
+
+    // ── React to network connectivity flips ──────────────────────────────
+    if (typeof window !== 'undefined') {
+      onlineHandler = (): void => {
+        useSyncStore.getState().setStatus({ online: true, lastError: null });
+        // Flush immediately on reconnect.
+        void runSyncCycle();
+      };
+      offlineHandler = (): void => {
+        useSyncStore.getState().setStatus({
+          online: false,
+          inFlight: false,
+          lastError: 'offline',
+        });
+      };
+      window.addEventListener('online', onlineHandler);
+      window.addEventListener('offline', offlineHandler);
+    }
+
+    // ── React to window visibility changes ───────────────────────────────
+    if (typeof document !== 'undefined') {
+      visibilityHandler = (): void => {
+        const visible = document.visibilityState !== 'hidden';
+        useSyncStore.getState().setStatus({ windowVisible: visible });
+        // When the window comes back into the foreground, sync immediately
+        // and tighten the schedule.
+        if (visible) void runSyncCycle();
+        rescheduleTimer();
+      };
+      document.addEventListener('visibilitychange', visibilityHandler);
+    }
   },
 
   stop(): void {
@@ -572,6 +652,14 @@ export const syncEngine = {
     if (bgTimer) { clearInterval(bgTimer); bgTimer = null; }
     if (dirtyTimer) { clearTimeout(dirtyTimer); dirtyTimer = null; }
     if (dirtyHandler) { eventBus.off('sync:dirty', dirtyHandler); dirtyHandler = null; }
+    if (typeof window !== 'undefined') {
+      if (onlineHandler) { window.removeEventListener('online', onlineHandler); onlineHandler = null; }
+      if (offlineHandler) { window.removeEventListener('offline', offlineHandler); offlineHandler = null; }
+    }
+    if (typeof document !== 'undefined' && visibilityHandler) {
+      document.removeEventListener('visibilitychange', visibilityHandler);
+      visibilityHandler = null;
+    }
   },
 
   /** Manual trigger from "Sync now" UI button. */

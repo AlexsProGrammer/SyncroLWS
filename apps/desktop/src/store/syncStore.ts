@@ -16,6 +16,12 @@ interface SyncState {
   deviceName: string;
   profileId: string;
   isSyncActive: boolean;
+  /**
+   * Phase J: opt-in toggle for at-rest encryption of sync payloads.
+   * Persisted, but the actual encryption pipeline is a future Phase
+   * J/N follow-up — for now this is purely a UI flag (no-op in engine).
+   */
+  encryptAtRest: boolean;
   // ── Phase I runtime status (NOT persisted) ──────────────────────────────
   /** True while a pull or push is in flight. */
   inFlight: boolean;
@@ -27,18 +33,23 @@ interface SyncState {
   pendingChanges: number;
   /** Last sync error message, cleared on next successful round-trip. */
   lastError: string | null;
+  /** True when the OS / browser reports network connectivity. */
+  online: boolean;
+  /** True when the app window is visible (document.visibilityState === 'visible'). */
+  windowVisible: boolean;
 }
 
 interface SyncActions {
   setSyncUrl: (url: string) => void;
   setIsSyncActive: (active: boolean) => void;
+  setEncryptAtRest: (enabled: boolean) => void;
   setPairing: (p: { token: string; deviceId: string; deviceName: string; profileId: string }) => void;
   /** Drop the device JWT (e.g. revoked by owner). Keeps URL. */
   clearPairing: () => void;
   /** Reset all sync configuration to defaults. */
   resetSync: () => void;
   /** Update transient sync status fields (called by the sync engine). */
-  setStatus: (patch: Partial<Pick<SyncState, 'inFlight' | 'lastPulledAt' | 'lastPushedAt' | 'pendingChanges' | 'lastError'>>) => void;
+  setStatus: (patch: Partial<Pick<SyncState, 'inFlight' | 'lastPulledAt' | 'lastPushedAt' | 'pendingChanges' | 'lastError' | 'online' | 'windowVisible'>>) => void;
 }
 
 const INITIAL_STATE: SyncState = {
@@ -48,11 +59,15 @@ const INITIAL_STATE: SyncState = {
   deviceName: '',
   profileId: '',
   isSyncActive: false,
+  encryptAtRest: false,
   inFlight: false,
   lastPulledAt: null,
   lastPushedAt: null,
   pendingChanges: 0,
   lastError: null,
+  // Defaulted optimistically; the engine refreshes both at boot.
+  online: typeof navigator !== 'undefined' ? navigator.onLine : true,
+  windowVisible: typeof document !== 'undefined' ? document.visibilityState !== 'hidden' : true,
 };
 
 export const useSyncStore = create<SyncState & SyncActions>()(
@@ -61,6 +76,7 @@ export const useSyncStore = create<SyncState & SyncActions>()(
       ...INITIAL_STATE,
       setSyncUrl: (url) => set({ syncUrl: url }),
       setIsSyncActive: (active) => set({ isSyncActive: active }),
+      setEncryptAtRest: (enabled) => set({ encryptAtRest: enabled }),
       setPairing: ({ token, deviceId, deviceName, profileId }) =>
         set({
           deviceToken: token,
@@ -96,6 +112,7 @@ export const useSyncStore = create<SyncState & SyncActions>()(
         deviceName: state.deviceName,
         profileId: state.profileId,
         isSyncActive: state.isSyncActive,
+        encryptAtRest: state.encryptAtRest,
       }),
     },
   ),

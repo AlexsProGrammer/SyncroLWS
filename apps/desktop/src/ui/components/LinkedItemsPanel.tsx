@@ -158,6 +158,7 @@ const KIND_LABELS: Record<RelationKind, string> = {
   wiki_link: 'Wiki links',
   reference: 'References',
   embed: 'Embeds',
+  attachment: 'Attachments',
 };
 
 function labelForKind(kind: RelationKind): string {

@@ -101,6 +101,8 @@ export function SettingsView(): React.ReactElement {
   const isSyncActive = useSyncStore((s) => s.isSyncActive);
   const setSyncUrl = useSyncStore((s) => s.setSyncUrl);
   const setIsSyncActive = useSyncStore((s) => s.setIsSyncActive);
+  const encryptAtRest = useSyncStore((s) => s.encryptAtRest);
+  const setEncryptAtRest = useSyncStore((s) => s.setEncryptAtRest);
   const setPairing = useSyncStore((s) => s.setPairing);
   const clearPairing = useSyncStore((s) => s.clearPairing);
 
@@ -616,6 +618,22 @@ export function SettingsView(): React.ReactElement {
             {/* Phase I: live sync status + manual trigger */}
             <SyncStatusPanel />
 
+            {/* Phase J: at-rest encryption (spec only — engine no-op for now) */}
+            <div className="flex items-center justify-between rounded-lg border border-border p-3">
+              <div>
+                <p className="text-sm font-medium text-foreground">Encrypt sync payloads at rest</p>
+                <p className="text-xs text-muted-foreground">
+                  Reserved. When enabled, future sync rounds will AES-GCM-encrypt
+                  payload bodies with a passphrase-derived key before upload.
+                  No-op until the encryption pipeline ships.
+                </p>
+              </div>
+              <Switch
+                checked={encryptAtRest}
+                onCheckedChange={setEncryptAtRest}
+              />
+            </div>
+
             {/* Pairing dialog */}
             <Dialog open={isPairing} onOpenChange={(v) => { if (!v) setIsPairing(false); }}>
               <DialogContent className="max-w-sm">
@@ -695,6 +713,7 @@ function SyncStatusPanel(): React.ReactElement | null {
   const lastPushedAt = useSyncStore((s) => s.lastPushedAt);
   const pendingChanges = useSyncStore((s) => s.pendingChanges);
   const lastError = useSyncStore((s) => s.lastError);
+  const online = useSyncStore((s) => s.online);
   const [, force] = useState(0);
 
   // Refresh "Xs ago" labels each second.
@@ -714,14 +733,31 @@ function SyncStatusPanel(): React.ReactElement | null {
     <div className="rounded-lg border border-border p-3 space-y-2">
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium text-foreground">Sync status</p>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void syncEngine.syncNow()}
-          disabled={!isSyncActive || inFlight}
-        >
-          {inFlight ? 'Syncing…' : 'Sync now'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+              online
+                ? 'bg-green-500/10 text-green-600'
+                : 'bg-amber-500/10 text-amber-600'
+            }`}
+            title={online ? 'Connected' : 'Offline — sync paused'}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                online ? 'bg-green-500' : 'bg-amber-500'
+              }`}
+            />
+            {online ? 'Online' : 'Offline'}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void syncEngine.syncNow()}
+            disabled={!isSyncActive || inFlight || !online}
+          >
+            {inFlight ? 'Syncing…' : 'Sync now'}
+          </Button>
+        </div>
       </div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <dt>Last pull</dt>

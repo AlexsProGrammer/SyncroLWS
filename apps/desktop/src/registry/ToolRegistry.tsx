@@ -82,6 +82,16 @@ function IconBookmark({ className }: { className?: string }): React.ReactElement
   );
 }
 
+function IconProject({ className }: { className?: string }): React.ReactElement {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <path d="M8 13h8" />
+      <path d="M8 17h5" />
+    </svg>
+  );
+}
+
 // ── Icon registry ─────────────────────────────────────────────────────────────
 
 const iconMap: Record<string, React.FC<{ className?: string }>> = {
@@ -93,6 +103,7 @@ const iconMap: Record<string, React.FC<{ className?: string }>> = {
   pomodoro: IconPomodoro,
   habit: IconHabit,
   bookmark: IconBookmark,
+  project: IconProject,
 };
 
 // ── Manifest type ─────────────────────────────────────────────────────────────
