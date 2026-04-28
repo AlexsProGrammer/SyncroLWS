@@ -12,9 +12,9 @@ import { appRouter } from './routes/trpc';
 import { uploadRouter } from './routes/upload';
 import { portalRouter } from './routes/portal';
 import { shareAdminRouter } from './routes/share-admin';
-import { bootstrapOwner } from './bootstrap';
+import { bootstrapAdmin } from './bootstrap';
 import { db } from './db/client';
-import { devices, shareLinks } from './db/schema';
+import { devices, shareLinks, users } from './db/schema';
 import { hashToken, parseBearer, verifyToken } from './auth';
 import type { AuthContext, TRPCContext } from '@syncrohws/shared-types';
 
@@ -31,8 +31,25 @@ async function resolveAuth(authHeader: string | undefined): Promise<AuthContext>
   const decoded = verifyToken(token);
   if (!decoded) return { kind: 'anonymous' };
 
-  if (decoded.kind === 'owner') {
-    return { kind: 'owner', ownerId: decoded.sub };
+  if (decoded.kind === 'user') {
+    // Re-validate the user row each request (cheap; lets us enforce
+    // disable / role-change without waiting for token expiry).
+    const rows = await db.select().from(users).where(eq(users.id, decoded.sub)).limit(1);
+    const row = rows[0];
+    if (!row || row.disabled_at) return { kind: 'anonymous' };
+    const orgRole = row.org_role === 'admin' ? 'admin' : 'member';
+    const scope = decoded.scope === 'pw_change_only' ? 'pw_change_only' : 'full';
+    // If the server still flags must_change_password but the token claims
+    // full scope (e.g. issued before the flag was re-set), force pw_change.
+    const effectiveScope = row.must_change_password ? 'pw_change_only' : scope;
+    return {
+      kind: 'user',
+      userId: row.id,
+      orgRole,
+      scope: effectiveScope,
+      email: row.email,
+      displayName: row.display_name,
+    };
   }
 
   if (decoded.kind === 'device') {
@@ -49,7 +66,7 @@ async function resolveAuth(authHeader: string | undefined): Promise<AuthContext>
     return {
       kind: 'device',
       deviceId: row.id,
-      ownerId: row.owner_id,
+      userId: row.user_id,
       profileId: row.profile_id,
     };
   }
@@ -90,11 +107,13 @@ async function attachAuth(req: Request, _res: Response, next: NextFunction): Pro
 
 function requireOwnerOrDevice(req: Request, res: Response, next: NextFunction): void {
   const a = req.auth;
-  if (!a || (a.kind !== 'owner' && a.kind !== 'device')) {
+  if (!a) {
     res.status(401).json({ error: 'Authentication required.' });
     return;
   }
-  next();
+  if (a.kind === 'user' && a.scope === 'full') return next();
+  if (a.kind === 'device') return next();
+  res.status(401).json({ error: 'Authentication required.' });
 }
 
 app.use(
@@ -128,7 +147,7 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-bootstrapOwner()
+bootstrapAdmin()
   .then(() => {
     app.listen(PORT, () => {
       console.log(`[backend] Listening on http://localhost:${PORT}`);

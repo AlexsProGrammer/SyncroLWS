@@ -7,13 +7,28 @@ import {
 
 /**
  * tRPC auth context — mirrors apps/backend/src/auth.ts AuthContext shape.
- * Phase H: single-owner JWT + per-device long-lived tokens; share tokens
- * reserved for the Phase M client portal.
+ *
+ * Phase P (multi-user):
+ *   - `user` tokens carry an `orgRole` (admin/member) and a `scope` (`full` for
+ *     normal use, `pw_change_only` for the forced password change flow).
+ *   - `device` tokens are minted by an admin and authenticate sync traffic
+ *     for a (user, profile) pair.
+ *   - `share` tokens gate the Phase M client portal.
  */
+export type OrgRole = 'admin' | 'member';
+export type UserTokenScope = 'full' | 'pw_change_only';
+
 export type AuthContext =
   | { kind: 'anonymous' }
-  | { kind: 'owner'; ownerId: string }
-  | { kind: 'device'; deviceId: string; ownerId: string; profileId: string }
+  | {
+      kind: 'user';
+      userId: string;
+      orgRole: OrgRole;
+      scope: UserTokenScope;
+      email: string;
+      displayName: string;
+    }
+  | { kind: 'device'; deviceId: string; userId: string; profileId: string }
   | { kind: 'share'; shareId: string };
 
 /**

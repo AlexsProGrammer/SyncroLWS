@@ -38,7 +38,9 @@ const envSchema = z.object({
   OWNER_BOOTSTRAP_PASSWORD: z.string().min(8).optional(),
 
   // ── Token lifetimes (seconds) ──────────────────────────────────────────────
-  OWNER_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60),         // 1h
+  OWNER_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60),         // 1h (legacy/backcompat)
+  USER_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 8),      // 8h (Phase P)
+  PW_CHANGE_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 5),      // 5min scoped pw-change token
   DEVICE_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 365), // 1y
 });
 

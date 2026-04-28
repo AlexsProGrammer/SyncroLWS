@@ -6,6 +6,7 @@ import {
   integer,
   bigint,
   timestamp,
+  boolean,
   index,
   uniqueIndex,
   primaryKey,
@@ -128,19 +129,35 @@ export const files = pgTable('files', {
   created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-// ── owner / devices / share_links (Phase H) ──────────────────────────────────
-export const owner = pgTable('owner', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  email: text('email').notNull().unique(),
-  password_hash: text('password_hash').notNull(),
-  created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+// ── users / devices / share_links (Phase P — multi-user) ────────────────────
+// Phase P replaces the single-row `owner` table with a real `users` table.
+// `org_role` gates admin-only ops (user management, audit, share-link admin).
+// `must_change_password` is set on admin-created users; the login response
+// returns a scoped pw-change-only token until the user resets their password.
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    email: text('email').notNull().unique(),
+    password_hash: text('password_hash').notNull(),
+    display_name: text('display_name').notNull().default(''),
+    org_role: text('org_role').notNull().default('member'),
+    must_change_password: boolean('must_change_password').notNull().default(false),
+    disabled_at: timestamp('disabled_at', { withTimezone: true }),
+    created_by: uuid('created_by'),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    roleIdx: index('users_role_idx').on(t.org_role),
+    disabledIdx: index('users_disabled_idx').on(t.disabled_at),
+  }),
+);
 
 export const devices = pgTable(
   'devices',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    owner_id: uuid('owner_id').notNull().references(() => owner.id, { onDelete: 'cascade' }),
+    user_id: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     profile_id: text('profile_id').notNull(),
     token_hash: text('token_hash').notNull(),
@@ -149,7 +166,7 @@ export const devices = pgTable(
     revoked_at: timestamp('revoked_at', { withTimezone: true }),
   },
   (t) => ({
-    ownerIdx: index('devices_owner_idx').on(t.owner_id),
+    userIdx: index('devices_user_idx').on(t.user_id),
     profileIdx: index('devices_profile_idx').on(t.profile_id),
     revokedIdx: index('devices_revoked_idx').on(t.revoked_at),
   }),
@@ -193,7 +210,8 @@ export type NewEntityRelationRow = typeof entityRelations.$inferInsert;
 export type TombstoneRow = typeof tombstones.$inferSelect;
 export type FileRow = typeof files.$inferSelect;
 export type NewFileRow = typeof files.$inferInsert;
-export type OwnerRow = typeof owner.$inferSelect;
+export type UserRow = typeof users.$inferSelect;
+export type NewUserRow = typeof users.$inferInsert;
 export type DeviceRow = typeof devices.$inferSelect;
 export type NewDeviceRow = typeof devices.$inferInsert;
 export type ShareLinkRow = typeof shareLinks.$inferSelect;

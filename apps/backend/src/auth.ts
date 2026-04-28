@@ -1,12 +1,14 @@
 /**
- * Phase H — Auth helpers.
+ * Phase P — Auth helpers.
  *
- * Single-owner JWT model:
- *   - Owner JWTs (kind=`owner`) are short-lived (default 1h) and minted via
- *     password login. They allow management ops: list/pair/revoke devices,
- *     create share links.
- *   - Device JWTs (kind=`device`) are long-lived (default 1y) and minted by
- *     the owner via `auth.devices.pair`. They authenticate sync traffic.
+ * Multi-user JWT model:
+ *   - User JWTs (kind=`user`) are short-lived (default 8h) and minted via
+ *     password login. They carry the user's `org_role` (`admin`|`member`)
+ *     and a `scope` (`full` for normal use, `pw_change_only` when the user
+ *     must change their password before continuing).
+ *   - Device JWTs (kind=`device`) are long-lived (default 1y) and minted
+ *     by an admin via `auth.devices.pair`. They authenticate sync traffic
+ *     for a specific (user, profile) pair.
  *   - Share JWTs (kind=`share`) — Phase M. Reserved here.
  *
  * The raw token is never stored. For device tokens we keep a SHA-256 hash so
@@ -19,13 +21,20 @@ import { env } from './config/env';
 
 // ── JWT payloads ──────────────────────────────────────────────────────────────
 
-export type AuthKind = 'owner' | 'device' | 'share';
+export type AuthKind = 'user' | 'device' | 'share';
+export type OrgRole = 'admin' | 'member';
+export type UserTokenScope = 'full' | 'pw_change_only';
 
-export interface OwnerJwtPayload {
-  kind: 'owner';
-  /** owner.id (UUID) */
+export interface UserJwtPayload {
+  kind: 'user';
+  /** users.id (UUID) */
   sub: string;
-  /** UUID generated per-token to allow future revocation lists. */
+  /** Cached org role for fast middleware checks; server still re-validates the
+   *  user row on each request (revocation/disable). */
+  org_role: OrgRole;
+  /** `pw_change_only` tokens may invoke ONLY auth.changePassword. */
+  scope: UserTokenScope;
+  /** Random per-token id for future revocation lists. */
   jti: string;
 }
 
@@ -33,8 +42,8 @@ export interface DeviceJwtPayload {
   kind: 'device';
   /** devices.id (UUID) */
   sub: string;
-  /** owner.id (UUID) */
-  owner_id: string;
+  /** users.id (UUID) of the user the device belongs to */
+  user_id: string;
   profile_id: string;
 }
 
@@ -44,14 +53,21 @@ export interface ShareJwtPayload {
   sub: string;
 }
 
-export type DecodedJwt = OwnerJwtPayload | DeviceJwtPayload | ShareJwtPayload;
+export type DecodedJwt = UserJwtPayload | DeviceJwtPayload | ShareJwtPayload;
 
 // ── Auth context ──────────────────────────────────────────────────────────────
 
 export type AuthContext =
   | { kind: 'anonymous' }
-  | { kind: 'owner'; ownerId: string }
-  | { kind: 'device'; deviceId: string; ownerId: string; profileId: string }
+  | {
+      kind: 'user';
+      userId: string;
+      orgRole: OrgRole;
+      scope: UserTokenScope;
+      email: string;
+      displayName: string;
+    }
+  | { kind: 'device'; deviceId: string; userId: string; profileId: string }
   | { kind: 'share'; shareId: string };
 
 // ── Password hashing ──────────────────────────────────────────────────────────
@@ -68,20 +84,34 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
 
 // ── JWT signing / verification ────────────────────────────────────────────────
 
-export function signOwnerToken(ownerId: string): string {
-  const payload: OwnerJwtPayload = {
-    kind: 'owner',
-    sub: ownerId,
+export function signUserToken(
+  userId: string,
+  orgRole: OrgRole,
+  scope: UserTokenScope = 'full',
+): string {
+  const payload: UserJwtPayload = {
+    kind: 'user',
+    sub: userId,
+    org_role: orgRole,
+    scope,
     jti: randomBytes(16).toString('hex'),
   };
-  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: env.OWNER_TOKEN_TTL_SECONDS });
+  const ttl =
+    scope === 'pw_change_only'
+      ? env.PW_CHANGE_TOKEN_TTL_SECONDS
+      : env.USER_TOKEN_TTL_SECONDS;
+  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: ttl });
 }
 
-export function signDeviceToken(deviceId: string, ownerId: string, profileId: string): string {
+export function signPasswordChangeToken(userId: string, orgRole: OrgRole): string {
+  return signUserToken(userId, orgRole, 'pw_change_only');
+}
+
+export function signDeviceToken(deviceId: string, userId: string, profileId: string): string {
   const payload: DeviceJwtPayload = {
     kind: 'device',
     sub: deviceId,
-    owner_id: ownerId,
+    user_id: userId,
     profile_id: profileId,
   };
   return jwt.sign(payload, env.JWT_SECRET, { expiresIn: env.DEVICE_TOKEN_TTL_SECONDS });
@@ -99,7 +129,7 @@ export function signShareToken(shareId: string, expiresInSeconds?: number): stri
 export function verifyToken(token: string): DecodedJwt | null {
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET) as jwt.JwtPayload & { kind?: string };
-    if (decoded.kind === 'owner' || decoded.kind === 'device' || decoded.kind === 'share') {
+    if (decoded.kind === 'user' || decoded.kind === 'device' || decoded.kind === 'share') {
       return decoded as unknown as DecodedJwt;
     }
     return null;
