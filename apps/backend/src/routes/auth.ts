@@ -135,6 +135,9 @@ const shareLinksRouter = t.router({
     .input(
       z.object({
         parent_entity_id: z.string().uuid().nullable().optional(),
+        profile_id: z.string().min(1),
+        workspace_id: z.string().min(1),
+        label: z.string().max(120).optional(),
         scope: z.record(z.unknown()).default({}),
         can_upload: z.boolean().default(false),
         can_submit: z.boolean().default(false),
@@ -146,6 +149,9 @@ const shareLinksRouter = t.router({
         .insert(shareLinks)
         .values({
           parent_entity_id: input.parent_entity_id ?? null,
+          profile_id: input.profile_id,
+          workspace_id: input.workspace_id,
+          label: input.label ?? '',
           token_hash: 'pending',
           scope: input.scope,
           can_upload: input.can_upload ? 1 : 0,
@@ -171,6 +177,9 @@ const shareLinksRouter = t.router({
       .select({
         id: shareLinks.id,
         parent_entity_id: shareLinks.parent_entity_id,
+        profile_id: shareLinks.profile_id,
+        workspace_id: shareLinks.workspace_id,
+        label: shareLinks.label,
         scope: shareLinks.scope,
         can_upload: shareLinks.can_upload,
         can_submit: shareLinks.can_submit,

@@ -28,6 +28,8 @@ import {
   restoreFromBackup,
 } from '@/core/backup';
 import { exportWorkspace, importWorkspace, downloadJsonBundle, pickJsonBundle, type ImportPolicy } from '@/core/workspaceIO';
+import { useWorkspaceStore } from '@/store/workspaceStore';
+import { getAISettings, saveAISettings, ai } from '@/core/ai';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -333,6 +335,12 @@ export function SettingsView(): React.ReactElement {
             </TabsTrigger>
             <TabsTrigger value="sync" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
               Sync
+            </TabsTrigger>
+            <TabsTrigger value="sharing" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+              Sharing
+            </TabsTrigger>
+            <TabsTrigger value="ai" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+              AI
             </TabsTrigger>
           </TabsList>
         </div>
@@ -704,6 +712,14 @@ export function SettingsView(): React.ReactElement {
             </Dialog>
           </section>
           </TabsContent>
+
+          <TabsContent value="sharing">
+            <ShareLinksPanel />
+          </TabsContent>
+
+          <TabsContent value="ai">
+            <AISettingsPanel />
+          </TabsContent>
         </div>
       </Tabs>
     </div>
@@ -1029,3 +1045,319 @@ function BackupSettingsPanel(): React.ReactElement {
     </section>
   );
 }
+
+// ── Phase M: share-link manager ──────────────────────────────────────────────
+
+interface ShareLinkRow {
+  id: string;
+  parent_entity_id: string | null;
+  profile_id: string;
+  workspace_id: string;
+  label: string;
+  can_upload: number;
+  can_submit: number;
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+function ShareLinksPanel(): React.ReactElement {
+  const syncUrl = useSyncStore((s) => s.syncUrl);
+  const deviceToken = useSyncStore((s) => s.deviceToken);
+  const activeProfileId = useProfileStore((s) => s.activeProfileId);
+  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+
+  const [links, setLinks] = useState<ShareLinkRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  const [newWorkspaceId, setNewWorkspaceId] = useState<string>(activeWorkspaceId ?? '');
+  const [newCanUpload, setNewCanUpload] = useState(false);
+  const [newCanSubmit, setNewCanSubmit] = useState(false);
+  const [newExpiryDays, setNewExpiryDays] = useState<string>('30');
+  const [lastMintedToken, setLastMintedToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!newWorkspaceId && activeWorkspaceId) setNewWorkspaceId(activeWorkspaceId);
+  }, [activeWorkspaceId, newWorkspaceId]);
+
+  const reload = useCallback(async (): Promise<void> => {
+    if (!syncUrl || !deviceToken) return;
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch(`${syncUrl.replace(/\/$/, '')}/share-links`, {
+        headers: { Authorization: `Bearer ${deviceToken}` },
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      const j = (await res.json()) as { links: ShareLinkRow[] };
+      setLinks(j.links);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [syncUrl, deviceToken]);
+
+  useEffect(() => { void reload(); }, [reload]);
+
+  const onCreate = async (): Promise<void> => {
+    if (!syncUrl || !deviceToken || !activeProfileId || !newWorkspaceId) return;
+    setCreating(true); setError(null); setLastMintedToken(null);
+    try {
+      const expiresInSec = newExpiryDays.trim()
+        ? Math.max(60, Math.round(Number(newExpiryDays) * 86_400))
+        : undefined;
+      const res = await fetch(`${syncUrl.replace(/\/$/, '')}/share-links`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${deviceToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profile_id: activeProfileId,
+          workspace_id: newWorkspaceId,
+          label: newLabel.trim() || 'Untitled share',
+          can_upload: newCanUpload,
+          can_submit: newCanSubmit,
+          expires_in_seconds: expiresInSec,
+        }),
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      const j = (await res.json()) as { token: string };
+      setLastMintedToken(j.token);
+      setNewLabel('');
+      void reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const onRevoke = async (id: string): Promise<void> => {
+    if (!syncUrl || !deviceToken) return;
+    try {
+      await fetch(`${syncUrl.replace(/\/$/, '')}/share-links/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${deviceToken}` },
+      });
+      void reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const portalUrl = (token: string): string =>
+    `${syncUrl.replace(/\/$/, '')}/portal/?token=${encodeURIComponent(token)}`;
+
+  if (!deviceToken) {
+    return (
+      <section className="max-w-lg space-y-3">
+        <h2 className="text-lg font-semibold text-foreground">Share Links</h2>
+        <p className="text-sm text-muted-foreground">
+          Pair this device with the backend (Sync tab) to mint client-portal share links.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="max-w-2xl space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">Share Links</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Mint a token-gated portal URL scoped to a single workspace. Recipients
+          see read-only data unless you grant uploads or submissions. Zero CDN —
+          all assets are served by your backend.
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-border p-4 space-y-3">
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-foreground">Label</label>
+          <Input
+            value={newLabel}
+            onChange={(e) => setNewLabel(e.target.value)}
+            placeholder="Client preview — Acme Co."
+            maxLength={120}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-foreground">Workspace</label>
+          <Select value={newWorkspaceId} onValueChange={setNewWorkspaceId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Pick a workspace…" />
+            </SelectTrigger>
+            <SelectContent>
+              {workspaces.map((w) => (
+                <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-foreground">Allow uploads</p>
+            <p className="text-xs text-muted-foreground">Recipient can attach files.</p>
+          </div>
+          <Switch checked={newCanUpload} onCheckedChange={setNewCanUpload} />
+        </div>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-foreground">Allow submissions</p>
+            <p className="text-xs text-muted-foreground">Recipient can post a note back to you.</p>
+          </div>
+          <Switch checked={newCanSubmit} onCheckedChange={setNewCanSubmit} />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-foreground">Expires in (days)</label>
+          <Input
+            type="number"
+            min={1}
+            value={newExpiryDays}
+            onChange={(e) => setNewExpiryDays(e.target.value)}
+            placeholder="30"
+          />
+          <p className="text-xs text-muted-foreground">Leave blank for no expiry.</p>
+        </div>
+        <Button onClick={() => void onCreate()} disabled={creating || !newWorkspaceId}>
+          {creating ? 'Creating…' : 'Mint share link'}
+        </Button>
+        {lastMintedToken && (
+          <div className="rounded-md border border-green-500/30 bg-green-500/5 p-3 text-xs">
+            <p className="font-medium text-green-600 mb-1">Link minted — copy it now (it will not be shown again):</p>
+            <code className="break-all text-foreground select-all">{portalUrl(lastMintedToken)}</code>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => { void navigator.clipboard.writeText(portalUrl(lastMintedToken)); }}
+            >
+              Copy URL
+            </Button>
+          </div>
+        )}
+        {error && <p className="text-sm font-medium text-red-500">{error}</p>}
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-foreground">Active share links</h3>
+          <Button size="sm" variant="outline" onClick={() => void reload()} disabled={loading}>
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </Button>
+        </div>
+        {links.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No active share links.</p>
+        ) : (
+          <ul className="space-y-2">
+            {links.map((l) => {
+              const ws = workspaces.find((w) => w.id === l.workspace_id);
+              return (
+                <li key={l.id} className="rounded-lg border border-border p-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{l.label || 'Untitled share'}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {ws?.name ?? l.workspace_id.slice(0, 8)}
+                      {l.can_upload ? ' · uploads' : ''}
+                      {l.can_submit ? ' · submit' : ''}
+                      {l.expires_at ? ` · expires ${new Date(l.expires_at).toLocaleDateString()}` : ' · no expiry'}
+                    </p>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => void onRevoke(l.id)}>Revoke</Button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ── Phase N.1: AI settings panel ─────────────────────────────────────────────
+
+function AISettingsPanel(): React.ReactElement {
+  const [enabled, setEnabled] = useState(false);
+  const [endpoint, setEndpoint] = useState('');
+  const [model, setModel] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'err'>('idle');
+  const [testMsg, setTestMsg] = useState<string>('');
+
+  useEffect(() => {
+    void (async (): Promise<void> => {
+      const s = await getAISettings();
+      setEnabled(s.enabled);
+      setEndpoint(s.endpoint);
+      setModel(s.model);
+      setLoaded(true);
+    })();
+  }, []);
+
+  const onSave = async (): Promise<void> => {
+    await saveAISettings({ enabled, endpoint: endpoint.trim(), model: model.trim() });
+    setSavedAt(Date.now());
+  };
+
+  const onTest = async (): Promise<void> => {
+    setTestStatus('testing'); setTestMsg('');
+    try {
+      await saveAISettings({ enabled: true, endpoint: endpoint.trim(), model: model.trim() });
+      const reply = await ai.chat([
+        { role: 'system', content: 'Reply with exactly: ok' },
+        { role: 'user', content: 'ping' },
+      ]);
+      setTestStatus('ok');
+      setTestMsg(`Model replied: "${reply.slice(0, 60)}"`);
+    } catch (err) {
+      setTestStatus('err');
+      setTestMsg(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  if (!loaded) return <p className="text-sm text-muted-foreground">Loading…</p>;
+
+  return (
+    <section className="max-w-lg space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">Local AI</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Optional integration with an OpenAI/Ollama-compatible chat endpoint.
+          Off by default — your notes never leave the machine until you explicitly
+          enable this and point it at an endpoint.
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between rounded-lg border border-border p-3">
+        <div>
+          <p className="text-sm font-medium text-foreground">Enable AI features</p>
+          <p className="text-xs text-muted-foreground">Adds &ldquo;Summarize&rdquo; and similar actions.</p>
+        </div>
+        <Switch checked={enabled} onCheckedChange={setEnabled} />
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-sm font-medium text-foreground">Endpoint URL</label>
+        <Input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="http://localhost:11434/v1/chat/completions" />
+        <p className="text-xs text-muted-foreground">Default: local Ollama. Any OpenAI-compatible URL works.</p>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-sm font-medium text-foreground">Model</label>
+        <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="llama3.2" />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Button onClick={() => void onSave()}>Save</Button>
+        <Button variant="outline" onClick={() => void onTest()} disabled={testStatus === 'testing'}>
+          {testStatus === 'testing' ? 'Testing…' : 'Test connection'}
+        </Button>
+        {savedAt && <span className="text-xs text-muted-foreground">Saved.</span>}
+      </div>
+      {testStatus === 'ok' && <p className="text-sm font-medium text-green-500">{testMsg}</p>}
+      {testStatus === 'err' && <p className="text-sm font-medium text-red-500">{testMsg}</p>}
+    </section>
+  );
+}
+

@@ -33,14 +33,15 @@ import {
   type SyncRelation,
   type Tombstone,
 } from '@syncrohws/shared-types';
+import { SYNC } from './config';
 
 /** Phase J: adaptive cadence. Tighter when the user is actively interacting,
  *  relaxed when the window is hidden. Paused entirely when offline. */
 const FOREGROUND_INTERVAL_MS = 15_000;
 const BACKGROUND_INTERVAL_MS = 60_000;
-const DIRTY_DEBOUNCE_MS = 1_500;
+const DIRTY_DEBOUNCE_MS = SYNC.dirtyDebounceMs;
 /** Hard cap per push round — server-side cycle handles up to ~200/kind. */
-const PUSH_BATCH_LIMIT = 200;
+const PUSH_BATCH_LIMIT = SYNC.pushBatchLimit;
 
 interface DirtyCoreRow {
   id: string;

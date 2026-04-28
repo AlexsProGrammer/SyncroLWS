@@ -4,6 +4,7 @@ import type { TaskAspectData } from '@syncrohws/shared-types';
 import { Input } from '@/ui/components/input';
 import { Textarea } from '@/ui/components/textarea';
 import { Button } from '@/ui/components/button';
+import { toLocalInput } from '@/lib/utils';
 import {
   Select,
   SelectContent,
@@ -107,12 +108,4 @@ export function AspectEditor({ aspect, onChange, onRemove }: AspectEditorProps):
       </div>
     </div>
   );
-}
-
-function toLocalInput(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const off = d.getTimezoneOffset();
-  const local = new Date(d.getTime() - off * 60_000);
-  return local.toISOString().slice(0, 16);
 }

@@ -10,6 +10,8 @@ import path from 'path';
 import { eq } from 'drizzle-orm';
 import { appRouter } from './routes/trpc';
 import { uploadRouter } from './routes/upload';
+import { portalRouter } from './routes/portal';
+import { shareAdminRouter } from './routes/share-admin';
 import { bootstrapOwner } from './bootstrap';
 import { db } from './db/client';
 import { devices, shareLinks } from './db/schema';
@@ -107,6 +109,14 @@ app.use(
 );
 
 app.use('/upload', attachAuth, requireOwnerOrDevice, uploadRouter);
+
+// Phase M — owner-managed share-link admin (REST mirror of the
+// `auth.shareLinks` tRPC router for the desktop UI's plain-fetch path).
+app.use('/share-links', attachAuth, requireOwnerOrDevice, shareAdminRouter);
+
+// Phase M — public client portal API (token-gated via share JWT, validated
+// inside the router itself).
+app.use('/portal-api', portalRouter);
 
 const webDistPath = path.join(__dirname, 'web', 'dist');
 app.use('/portal', express.static(webDistPath));

@@ -4,6 +4,7 @@ import type { CalendarEventAspectData } from '@syncrohws/shared-types';
 import { Input } from '@/ui/components/input';
 import { Switch } from '@/ui/components/switch';
 import { Button } from '@/ui/components/button';
+import { toLocalInput } from '@/lib/utils';
 
 export function AspectEditor({ aspect, onChange, onRemove }: AspectEditorProps): React.ReactElement {
   const data = aspect.data as Partial<CalendarEventAspectData>;
@@ -68,12 +69,4 @@ export function AspectEditor({ aspect, onChange, onRemove }: AspectEditorProps):
       </div>
     </div>
   );
-}
-
-function toLocalInput(iso: string, dateOnly: boolean): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const off = d.getTimezoneOffset();
-  const local = new Date(d.getTime() - off * 60_000);
-  return dateOnly ? local.toISOString().slice(0, 10) : local.toISOString().slice(0, 16);
 }

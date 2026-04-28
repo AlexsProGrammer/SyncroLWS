@@ -5,6 +5,7 @@ import type { NoteAspectData } from '@syncrohws/shared-types';
 import { Button } from '@/ui/components/button';
 import { eventBus } from '@/core/events';
 import { getEntity, reconcileWikiLinks } from '@/core/entityStore';
+import { ai, getAISettings } from '@/core/ai';
 
 /**
  * Notes aspect editor — thin wrapper around the shared `RichTextEditor` that
@@ -13,6 +14,31 @@ import { getEntity, reconcileWikiLinks } from '@/core/entityStore';
  */
 export function AspectEditor({ core, aspect, onChange, onRemove }: AspectEditorProps): React.ReactElement {
   const data = aspect.data as Partial<NoteAspectData>;
+  const [aiBusy, setAiBusy] = React.useState(false);
+  const [aiError, setAiError] = React.useState<string | null>(null);
+
+  const onSummarize = async (): Promise<void> => {
+    setAiBusy(true); setAiError(null);
+    try {
+      const settings = await getAISettings();
+      if (!settings.enabled) {
+        setAiError('Enable AI in Settings → AI first.');
+        return;
+      }
+      const md = (data.content_md ?? '').trim();
+      if (md.length < 30) {
+        setAiError('Note is too short to summarize.');
+        return;
+      }
+      const summary = await ai.summarize(md, { sentences: 3 });
+      const next = `> **AI summary:** ${summary}\n\n${md}`;
+      onChange({ content_md: next });
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAiBusy(false);
+    }
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -45,7 +71,12 @@ export function AspectEditor({ core, aspect, onChange, onRemove }: AspectEditorP
         className="note-editor-content flex-1 overflow-y-auto"
       />
 
-      <div className="border-t border-border px-2 py-2">
+      <div className="border-t border-border px-2 py-2 flex items-center gap-2">
+        <Button variant="outline" size="sm" onClick={() => void onSummarize()} disabled={aiBusy}>
+          {aiBusy ? 'Summarizing…' : 'AI summarize'}
+        </Button>
+        {aiError && <span className="text-xs text-red-500">{aiError}</span>}
+        <div className="flex-1" />
         <Button variant="destructive" size="sm" onClick={onRemove}>
           Remove note aspect
         </Button>

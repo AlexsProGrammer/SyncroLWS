@@ -160,6 +160,12 @@ export const shareLinks = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     parent_entity_id: uuid('parent_entity_id'),
+    /** Profile (Phase H multi-profile) the share is scoped to. */
+    profile_id: text('profile_id').notNull().default(''),
+    /** Workspace within profile the share is scoped to. */
+    workspace_id: text('workspace_id').notNull().default(''),
+    /** Optional human label shown in the share-link manager. */
+    label: text('label').notNull().default(''),
     token_hash: text('token_hash').notNull().unique(),
     scope: jsonb('scope').notNull().default(sql`'{}'::jsonb`),
     can_upload: integer('can_upload').notNull().default(0),
@@ -171,6 +177,7 @@ export const shareLinks = pgTable(
   (t) => ({
     parentIdx: index('share_links_parent_idx').on(t.parent_entity_id),
     revokedIdx: index('share_links_revoked_idx').on(t.revoked_at),
+    scopeIdx: index('share_links_scope_idx').on(t.profile_id, t.workspace_id),
   }),
 );
 
