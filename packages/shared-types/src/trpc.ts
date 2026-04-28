@@ -3,11 +3,23 @@ import { z } from 'zod';
 import { BaseEntitySchema } from './base-entity';
 
 /**
+ * tRPC auth context — mirrors apps/backend/src/auth.ts AuthContext shape.
+ * Phase H: single-owner JWT + per-device long-lived tokens; share tokens
+ * reserved for the Phase M client portal.
+ */
+export type AuthContext =
+  | { kind: 'anonymous' }
+  | { kind: 'owner'; ownerId: string }
+  | { kind: 'device'; deviceId: string; ownerId: string; profileId: string }
+  | { kind: 'share'; shareId: string };
+
+/**
  * tRPC context shape — populated per-request in apps/backend.
  * Exported so the desktop client can mirror the same type.
  */
 export interface TRPCContext {
   requestId: string;
+  auth: AuthContext;
 }
 
 const t = initTRPC.context<TRPCContext>().create();

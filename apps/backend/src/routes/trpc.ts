@@ -1,18 +1,15 @@
-import { initTRPC, TRPCError } from '@trpc/server';
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { eq, isNull, and } from 'drizzle-orm';
 import { db } from '../db/client';
 import { baseEntities } from '../db/schema';
 import { BaseEntitySchema } from '@syncrohws/shared-types';
-import type { TRPCContext } from '@syncrohws/shared-types';
 import { randomUUID } from 'crypto';
-
-const t = initTRPC.context<TRPCContext>().create();
-
-const publicProcedure = t.procedure;
+import { t, publicProcedure, protectedProcedure } from '../trpc';
+import { authRouter } from './auth';
 
 const baseEntityRouter = t.router({
-  list: publicProcedure
+  list: protectedProcedure
     .input(
       z.object({
         type: BaseEntitySchema.shape.type.optional(),
@@ -39,7 +36,7 @@ const baseEntityRouter = t.router({
         .offset(input.offset);
     }),
 
-  getById: publicProcedure
+  getById: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .query(async ({ input }) => {
       const rows = await db
@@ -51,7 +48,7 @@ const baseEntityRouter = t.router({
       return rows[0];
     }),
 
-  upsert: publicProcedure
+  upsert: protectedProcedure
     .input(BaseEntitySchema)
     .mutation(async ({ input }) => {
       const now = new Date().toISOString();
@@ -66,7 +63,6 @@ const baseEntityRouter = t.router({
         updated_at: new Date(now),
         deleted_at: input.deleted_at ? new Date(input.deleted_at) : null,
       };
-      // Exclude created_at from the ON CONFLICT update — preserve original creation time
       const { created_at: _omit, ...updateRow } = insertRow;
       await db
         .insert(baseEntities)
@@ -75,7 +71,7 @@ const baseEntityRouter = t.router({
       return insertRow;
     }),
 
-  delete: publicProcedure
+  delete: protectedProcedure
     .input(z.object({ id: z.string().uuid(), hard: z.boolean().default(false) }))
     .mutation(async ({ input }) => {
       if (input.hard) {
@@ -91,6 +87,7 @@ const baseEntityRouter = t.router({
 });
 
 export const appRouter = t.router({
+  auth: authRouter,
   entities: baseEntityRouter,
   health: publicProcedure.query(() => ({
     status: 'ok' as const,

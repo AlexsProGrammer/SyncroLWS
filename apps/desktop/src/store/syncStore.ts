@@ -1,41 +1,64 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
+/**
+ * Sync configuration. Phase H pairing model:
+ *   - syncUrl: backend base URL.
+ *   - deviceToken: long-lived device JWT minted by the owner during pairing.
+ *     Owner password is never persisted.
+ *   - deviceId / deviceName: returned at pair time, shown in Settings.
+ *   - profileId: the profile bound to this device row on the server.
+ */
 interface SyncState {
-  /** Backend URL (e.g. http://localhost:3000) */
   syncUrl: string;
-  /** API key / JWT for authenticating with the backend */
-  apiKey: string;
-  /** Whether sync is currently enabled */
+  deviceToken: string;
+  deviceId: string;
+  deviceName: string;
+  profileId: string;
   isSyncActive: boolean;
 }
 
 interface SyncActions {
   setSyncUrl: (url: string) => void;
-  setApiKey: (key: string) => void;
   setIsSyncActive: (active: boolean) => void;
-  /** Reset all sync configuration to defaults */
+  setPairing: (p: { token: string; deviceId: string; deviceName: string; profileId: string }) => void;
+  /** Drop the device JWT (e.g. revoked by owner). Keeps URL. */
+  clearPairing: () => void;
+  /** Reset all sync configuration to defaults. */
   resetSync: () => void;
 }
 
 const INITIAL_STATE: SyncState = {
   syncUrl: '',
-  apiKey: '',
+  deviceToken: '',
+  deviceId: '',
+  deviceName: '',
+  profileId: '',
   isSyncActive: false,
 };
-
-// ── Store ─────────────────────────────────────────────────────────────────────
 
 export const useSyncStore = create<SyncState & SyncActions>()(
   persist(
     (set) => ({
       ...INITIAL_STATE,
-
-      setSyncUrl: (url: string) => set({ syncUrl: url }),
-      setApiKey: (key: string) => set({ apiKey: key }),
-      setIsSyncActive: (active: boolean) => set({ isSyncActive: active }),
+      setSyncUrl: (url) => set({ syncUrl: url }),
+      setIsSyncActive: (active) => set({ isSyncActive: active }),
+      setPairing: ({ token, deviceId, deviceName, profileId }) =>
+        set({
+          deviceToken: token,
+          deviceId,
+          deviceName,
+          profileId,
+          isSyncActive: true,
+        }),
+      clearPairing: () =>
+        set({
+          deviceToken: '',
+          deviceId: '',
+          deviceName: '',
+          profileId: '',
+          isSyncActive: false,
+        }),
       resetSync: () => set(INITIAL_STATE),
     }),
     {

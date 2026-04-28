@@ -93,14 +93,26 @@ export function SettingsView(): React.ReactElement {
 
   // ── Sync store ─────────────────────────────────────────────────────────────
   const syncUrl = useSyncStore((s) => s.syncUrl);
-  const apiKey = useSyncStore((s) => s.apiKey);
+  const deviceToken = useSyncStore((s) => s.deviceToken);
+  const deviceName = useSyncStore((s) => s.deviceName);
+  const deviceId = useSyncStore((s) => s.deviceId);
+  const pairedProfileId = useSyncStore((s) => s.profileId);
   const isSyncActive = useSyncStore((s) => s.isSyncActive);
   const setSyncUrl = useSyncStore((s) => s.setSyncUrl);
-  const setApiKey = useSyncStore((s) => s.setApiKey);
   const setIsSyncActive = useSyncStore((s) => s.setIsSyncActive);
+  const setPairing = useSyncStore((s) => s.setPairing);
+  const clearPairing = useSyncStore((s) => s.clearPairing);
 
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [connectionMessage, setConnectionMessage] = useState('');
+
+  // ── Pairing dialog state ───────────────────────────────────────────────────
+  const [isPairing, setIsPairing] = useState(false);
+  const [pairEmail, setPairEmail] = useState('');
+  const [pairPassword, setPairPassword] = useState('');
+  const [pairDeviceName, setPairDeviceName] = useState('');
+  const [pairStatus, setPairStatus] = useState<'idle' | 'working' | 'error'>('idle');
+  const [pairError, setPairError] = useState('');
 
   // ── Load tool toggle states from DB ────────────────────────────────────────
   const loadToolStates = useCallback(async () => {
@@ -183,7 +195,7 @@ export function SettingsView(): React.ReactElement {
       const base = syncUrl.replace(/\/+$/, '');
       const res = await fetch(`${base}/trpc/health`, {
         method: 'GET',
-        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+        headers: deviceToken ? { Authorization: `Bearer ${deviceToken}` } : {},
         signal: AbortSignal.timeout(8000),
       });
 
@@ -204,7 +216,76 @@ export function SettingsView(): React.ReactElement {
         err instanceof Error ? err.message : 'Connection failed',
       );
     }
-  }, [syncUrl, apiKey]);
+  }, [syncUrl, deviceToken]);
+
+  // ── Pairing flow ─────────────────────────────────────────────────────────
+  const startPairing = useCallback(() => {
+    setPairEmail('');
+    setPairPassword('');
+    setPairDeviceName(deviceName || `Device ${navigator.platform || ''}`.trim());
+    setPairStatus('idle');
+    setPairError('');
+    setIsPairing(true);
+  }, [deviceName]);
+
+  const submitPairing = useCallback(async () => {
+    if (!syncUrl || !pairEmail || !pairPassword || !pairDeviceName.trim() || !activeProfileId) {
+      setPairStatus('error');
+      setPairError('All fields are required.');
+      return;
+    }
+    setPairStatus('working');
+    setPairError('');
+    try {
+      const base = syncUrl.replace(/\/+$/, '');
+      // 1) ownerLogin → owner JWT (kept in memory only)
+      const loginRes = await fetch(`${base}/trpc/auth.ownerLogin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: pairEmail, password: pairPassword }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!loginRes.ok) throw new Error(`Login failed (${loginRes.status})`);
+      const loginJson = await loginRes.json();
+      const ownerToken: string | undefined = loginJson?.result?.data?.token;
+      if (!ownerToken) throw new Error('No token returned from login.');
+
+      // 2) auth.devices.pair → device JWT
+      const pairRes = await fetch(`${base}/trpc/auth.devices.pair`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${ownerToken}`,
+        },
+        body: JSON.stringify({ deviceName: pairDeviceName.trim(), profileId: activeProfileId }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!pairRes.ok) throw new Error(`Pairing failed (${pairRes.status})`);
+      const pairJson = await pairRes.json();
+      const data = pairJson?.result?.data;
+      const token: string | undefined = data?.token;
+      const device = data?.device;
+      if (!token || !device?.id) throw new Error('Malformed pairing response.');
+
+      setPairing({
+        token,
+        deviceId: device.id,
+        deviceName: device.name,
+        profileId: device.profile_id,
+      });
+      setPairStatus('idle');
+      setIsPairing(false);
+      // owner password: never persisted
+      setPairPassword('');
+    } catch (err) {
+      setPairStatus('error');
+      setPairError(err instanceof Error ? err.message : 'Pairing failed.');
+    }
+  }, [syncUrl, pairEmail, pairPassword, pairDeviceName, activeProfileId, setPairing]);
+
+  const unpair = useCallback(() => {
+    clearPairing();
+  }, [clearPairing]);
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto">
@@ -455,6 +536,7 @@ export function SettingsView(): React.ReactElement {
               <Switch
                 checked={isSyncActive}
                 onCheckedChange={setIsSyncActive}
+                disabled={!deviceToken}
               />
             </div>
 
@@ -475,18 +557,37 @@ export function SettingsView(): React.ReactElement {
               </p>
             </div>
 
-            {/* API Key */}
+            {/* Pairing */}
             <div className="space-y-1.5">
-              <label htmlFor="sync-api-key" className="text-sm font-medium text-foreground">
-                API Key
-              </label>
-              <Input
-                id="sync-api-key"
-                type="password"
-                placeholder="Enter your API key"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-              />
+              <label className="text-sm font-medium text-foreground">Device Pairing</label>
+              {deviceToken ? (
+                <div className="rounded-lg border border-border p-3 space-y-2">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Paired</p>
+                    <p className="text-xs text-muted-foreground">
+                      <span className="font-mono">{deviceName || deviceId.slice(0, 8)}</span>
+                      {pairedProfileId && pairedProfileId !== activeProfileId && (
+                        <span className="ml-2 text-amber-500">
+                          (bound to a different profile)
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={unpair}>
+                    Unpair this device
+                  </Button>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-border p-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Pair this device by signing in with the owner credentials. The
+                    owner password is never stored — only a long-lived device token.
+                  </p>
+                  <Button size="sm" onClick={startPairing} disabled={!syncUrl || !activeProfileId}>
+                    Pair this device
+                  </Button>
+                </div>
+              )}
             </div>
 
             {/* Test Connection */}
@@ -510,6 +611,57 @@ export function SettingsView(): React.ReactElement {
                 </span>
               )}
             </div>
+
+            {/* Pairing dialog */}
+            <Dialog open={isPairing} onOpenChange={(v) => { if (!v) setIsPairing(false); }}>
+              <DialogContent className="max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Pair this device</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3 mt-2">
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-foreground">Owner email</label>
+                    <Input
+                      type="email"
+                      autoComplete="email"
+                      value={pairEmail}
+                      onChange={(e) => setPairEmail(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-foreground">Owner password</label>
+                    <Input
+                      type="password"
+                      autoComplete="current-password"
+                      value={pairPassword}
+                      onChange={(e) => setPairPassword(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Used once to mint a device token. Not stored.
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium text-foreground">Device name</label>
+                    <Input
+                      value={pairDeviceName}
+                      onChange={(e) => setPairDeviceName(e.target.value)}
+                      placeholder="My Laptop"
+                    />
+                  </div>
+                  {pairStatus === 'error' && (
+                    <p className="text-sm font-medium text-red-500">{pairError}</p>
+                  )}
+                  <Button
+                    onClick={() => void submitPairing()}
+                    disabled={pairStatus === 'working'}
+                    className="w-full"
+                  >
+                    {pairStatus === 'working' ? 'Pairing…' : 'Pair'}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
           </section>
           </TabsContent>
         </div>

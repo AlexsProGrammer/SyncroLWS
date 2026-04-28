@@ -30,6 +30,14 @@ const envSchema = z.object({
   MINIO_BUCKET: z.string().default('syncrohws-files'),
   MINIO_ACCESS_KEY: z.string().default('syncrohws'),
   MINIO_SECRET_KEY: z.string().default('syncrohws_secret'),
+
+  // ── Owner bootstrap (used only if `owner` table empty on startup) ───────────
+  OWNER_BOOTSTRAP_EMAIL: z.string().email().optional(),
+  OWNER_BOOTSTRAP_PASSWORD: z.string().min(8).optional(),
+
+  // ── Token lifetimes (seconds) ──────────────────────────────────────────────
+  OWNER_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60),         // 1h
+  DEVICE_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(60 * 60 * 24 * 365), // 1y
 });
 
 export type Env = z.infer<typeof envSchema>;
