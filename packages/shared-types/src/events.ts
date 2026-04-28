@@ -10,11 +10,24 @@ export type AppEvents = {
   'sync:start': void;
   'sync:complete': { synced_at: string };
   'sync:error': { message: string };
+  /**
+   * Emitted by the entityStore on every local mutation that needs to be
+   * pushed. The sync engine listens for this to wake up and schedule a push.
+   */
+  'sync:dirty': void;
+  /** Sync engine status update (last pull/push, pending count, error). */
+  'sync:status': {
+    connected: boolean;
+    last_pulled_at: string | null;
+    last_pushed_at: string | null;
+    pending_changes: number;
+    last_error: string | null;
+  };
   /** Fired when the same entity was modified offline AND on the server */
   'sync:conflict': {
-    local: BaseEntity;
-    server: BaseEntity;
-    resolve: (resolved: BaseEntity) => void;
+    kind: 'core' | 'aspect' | 'relation' | 'delete';
+    id: string;
+    server_revision: number;
   };
 
   // ── Hybrid entity model ───────────────────────────────────────────────────

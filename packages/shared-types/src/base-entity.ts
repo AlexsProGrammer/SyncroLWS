@@ -461,16 +461,7 @@ export const ProjectAspectDataSchema = z.object({
 });
 export type ProjectAspectData = z.infer<typeof ProjectAspectDataSchema>;
 
-// ── tRPC context (shared between backend routes; safe to import everywhere) ──
-
-/**
- * tRPC context shape — populated per-request in apps/backend.
- * Exported here so desktop client can mirror the type without pulling in
- * @trpc/server (which is Node-only).
- */
-export interface TRPCContext {
-  requestId: string;
-}
+// (TRPCContext used to live here — moved to ./trpc.ts in Phase I.)
 
 /** Map aspect_type → data schema. Used by entityStore + aspect plugin registry. */
 export const ASPECT_DATA_SCHEMAS = {

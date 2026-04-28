@@ -7,61 +7,128 @@ import {
   bigint,
   timestamp,
   index,
+  uniqueIndex,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
-// ── base_entities ─────────────────────────────────────────────────────────────
-/**
- * Central store for all domain objects.
- * The payload column holds module-specific JSON validated by Zod on the
- * application layer — keeping the DB schema stable across feature additions.
- */
+// ── global revision sequence ─────────────────────────────────────────────────
+// All sync-tracked tables share a single monotonically increasing sequence so
+// that `sync.pull(since_revision)` is a deterministic cursor across tables.
+// The sequence itself is created in the migration SQL; this declaration is
+// only consumed via `sql\`nextval('sync_revision')\`` in INSERT/UPDATE.
+
+const SCOPE_INDEX = (name: string) =>
+  index(name);
+
+// ── base_entities (Phase I — hybrid, replaces legacy type/payload model) ────
 export const baseEntities = pgTable(
   'base_entities',
   {
-    id: uuid('id').primaryKey().defaultRandom(),
-    type: text('type').notNull(),
-    // sql`` expressions produce valid DB-level DEFAULT clauses for drizzle-kit 0.31+
-    payload: jsonb('payload').notNull().default(sql`'{}'::jsonb`),
-    metadata: jsonb('metadata').notNull().default(sql`'{}'::jsonb`),
-    tags: text('tags').array().notNull().default(sql`ARRAY[]::text[]`),
+    id: uuid('id').primaryKey(),
+    profile_id: text('profile_id').notNull(),
+    workspace_id: text('workspace_id').notNull(),
+    title: text('title').notNull().default(''),
+    description: text('description').notNull().default(''),
+    description_json: text('description_json'),
+    color: text('color').notNull().default('#6366f1'),
+    icon: text('icon').notNull().default('box'),
+    tags: jsonb('tags').notNull().default(sql`'[]'::jsonb`),
     parent_id: uuid('parent_id'),
-    created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull(),
+    updated_at: timestamp('updated_at', { withTimezone: true }).notNull(),
     deleted_at: timestamp('deleted_at', { withTimezone: true }),
+    revision: bigint('revision', { mode: 'number' }).notNull(),
+    last_modified_by_device: uuid('last_modified_by_device'),
   },
   (t) => ({
-    typeIdx: index('base_entities_type_idx').on(t.type),
+    scopeIdx: SCOPE_INDEX('base_entities_scope_idx').on(t.profile_id, t.workspace_id),
+    revisionIdx: index('base_entities_revision_idx').on(t.revision),
     parentIdx: index('base_entities_parent_idx').on(t.parent_id),
-    deletedAtIdx: index('base_entities_deleted_at_idx').on(t.deleted_at),
   }),
 );
 
-// ── files ─────────────────────────────────────────────────────────────────────
-/**
- * Content-addressed file store.
- * SHA-256 hash is the primary key — guarantees deduplication at the DB level.
- * reference_count drives lifecycle: file is deleted from MinIO when it hits 0.
- */
+// ── entity_aspects ───────────────────────────────────────────────────────────
+export const entityAspects = pgTable(
+  'entity_aspects',
+  {
+    id: uuid('id').primaryKey(),
+    entity_id: uuid('entity_id').notNull(),
+    profile_id: text('profile_id').notNull(),
+    workspace_id: text('workspace_id').notNull(),
+    aspect_type: text('aspect_type').notNull(),
+    data: jsonb('data').notNull().default(sql`'{}'::jsonb`),
+    tool_instance_id: text('tool_instance_id'),
+    sort_order: integer('sort_order').notNull().default(0),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull(),
+    updated_at: timestamp('updated_at', { withTimezone: true }).notNull(),
+    deleted_at: timestamp('deleted_at', { withTimezone: true }),
+    revision: bigint('revision', { mode: 'number' }).notNull(),
+    last_modified_by_device: uuid('last_modified_by_device'),
+  },
+  (t) => ({
+    scopeIdx: index('entity_aspects_scope_idx').on(t.profile_id, t.workspace_id),
+    entityIdx: index('entity_aspects_entity_idx').on(t.entity_id),
+    revisionIdx: index('entity_aspects_revision_idx').on(t.revision),
+  }),
+);
+
+// ── entity_relations ─────────────────────────────────────────────────────────
+export const entityRelations = pgTable(
+  'entity_relations',
+  {
+    id: uuid('id').primaryKey(),
+    profile_id: text('profile_id').notNull(),
+    workspace_id: text('workspace_id').notNull(),
+    from_entity_id: uuid('from_entity_id').notNull(),
+    to_entity_id: uuid('to_entity_id').notNull(),
+    kind: text('kind').notNull(),
+    metadata: jsonb('metadata').notNull().default(sql`'{}'::jsonb`),
+    created_at: timestamp('created_at', { withTimezone: true }).notNull(),
+    revision: bigint('revision', { mode: 'number' }).notNull(),
+    last_modified_by_device: uuid('last_modified_by_device'),
+  },
+  (t) => ({
+    scopeIdx: index('entity_relations_scope_idx').on(t.profile_id, t.workspace_id),
+    fromIdx: index('entity_relations_from_idx').on(t.from_entity_id),
+    revisionIdx: index('entity_relations_revision_idx').on(t.revision),
+  }),
+);
+
+// ── tombstones (hard-delete propagation) ─────────────────────────────────────
+// `kind` is one of 'core' | 'aspect' | 'relation'. The id matches the deleted
+// row's primary key. Soft-deletes flow through the regular tables via
+// `deleted_at`; hard-deletes (e.g. relations) need a tombstone so other
+// devices know to forget the row.
+export const tombstones = pgTable(
+  'tombstones',
+  {
+    kind: text('kind').notNull(),
+    id: uuid('id').notNull(),
+    profile_id: text('profile_id').notNull(),
+    workspace_id: text('workspace_id').notNull(),
+    revision: bigint('revision', { mode: 'number' }).notNull(),
+    deleted_at: timestamp('deleted_at', { withTimezone: true }).notNull(),
+    last_modified_by_device: uuid('last_modified_by_device'),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.kind, t.id] }),
+    scopeIdx: index('tombstones_scope_idx').on(t.profile_id, t.workspace_id),
+    revisionIdx: index('tombstones_revision_idx').on(t.revision),
+  }),
+);
+
+// ── files (content-addressed, server-side) ──────────────────────────────────
 export const files = pgTable('files', {
-  hash: text('hash').primaryKey(),           // SHA-256 hex string
-  minio_path: text('minio_path').notNull(),  // bucket/object-key
+  hash: text('hash').primaryKey(),
+  minio_path: text('minio_path').notNull(),
   mime_type: text('mime_type').notNull().default('application/octet-stream'),
   size_bytes: bigint('size_bytes', { mode: 'number' }).notNull(),
   reference_count: integer('reference_count').notNull().default(1),
   created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-export type BaseEntityRow = typeof baseEntities.$inferSelect;
-export type NewBaseEntityRow = typeof baseEntities.$inferInsert;
-export type FileRow = typeof files.$inferSelect;
-export type NewFileRow = typeof files.$inferInsert;
-
-// ── owner ─────────────────────────────────────────────────────────────────────
-/**
- * Single-user owner record. Phase H: at most one row, seeded from
- * OWNER_BOOTSTRAP_EMAIL/PASSWORD on first startup if the table is empty.
- */
+// ── owner / devices / share_links (Phase H) ──────────────────────────────────
 export const owner = pgTable('owner', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: text('email').notNull().unique(),
@@ -69,12 +136,6 @@ export const owner = pgTable('owner', {
   created_at: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-// ── devices ───────────────────────────────────────────────────────────────────
-/**
- * One row per paired desktop client (per profile). Long-lived device JWTs are
- * minted by the owner and revoked here. `token_hash` stores SHA-256 of the
- * issued JWT so we can validate without keeping the raw token.
- */
 export const devices = pgTable(
   'devices',
   {
@@ -94,12 +155,6 @@ export const devices = pgTable(
   }),
 );
 
-// ── share_links ───────────────────────────────────────────────────────────────
-/**
- * Tokenized public links for the read-only / limited-write client portal.
- * Phase M will populate this fully; the table is created here so Phase H/I
- * auth context can reference it without another migration.
- */
 export const shareLinks = pgTable(
   'share_links',
   {
@@ -119,6 +174,18 @@ export const shareLinks = pgTable(
   }),
 );
 
+// suppress unused warning for helper kept for future composite indexes
+void uniqueIndex;
+
+export type BaseEntityRow = typeof baseEntities.$inferSelect;
+export type NewBaseEntityRow = typeof baseEntities.$inferInsert;
+export type EntityAspectRow = typeof entityAspects.$inferSelect;
+export type NewEntityAspectRow = typeof entityAspects.$inferInsert;
+export type EntityRelationRow = typeof entityRelations.$inferSelect;
+export type NewEntityRelationRow = typeof entityRelations.$inferInsert;
+export type TombstoneRow = typeof tombstones.$inferSelect;
+export type FileRow = typeof files.$inferSelect;
+export type NewFileRow = typeof files.$inferInsert;
 export type OwnerRow = typeof owner.$inferSelect;
 export type DeviceRow = typeof devices.$inferSelect;
 export type NewDeviceRow = typeof devices.$inferInsert;

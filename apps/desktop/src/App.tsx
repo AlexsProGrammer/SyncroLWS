@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { CommandPalette } from './ui/CommandPalette';
-import { DiffEditor } from './ui/DiffEditor';
 import { Sidebar, useEnabledTools, type ActiveView } from './ui/Sidebar';
 import { SettingsView } from './ui/SettingsView';
 import { Toaster } from './ui/Toaster';
@@ -16,16 +15,9 @@ import { toast } from './ui/hooks/use-toast';
 
 import type { BaseEntity } from '@syncrohws/shared-types';
 
-interface ConflictState {
-  local: BaseEntity;
-  server: BaseEntity;
-  resolve: (resolved: BaseEntity) => void;
-}
-
 export default function App(): React.ReactElement {
   // activeView is now a workspace tool INSTANCE UUID (or 'settings')
   const [activeView, setActiveView] = useState<ActiveView>('settings');
-  const [conflict, setConflict] = useState<ConflictState | null>(null);
   const { enabledTools } = useEnabledTools();
 
   // Subscribe to workspace tools from the store (instance list)
@@ -138,9 +130,11 @@ export default function App(): React.ReactElement {
     };
     eventBus.on('profile:switched', onProfileSwitched);
 
-    // Sync conflict overlay
-    const onConflict = (event: { local: BaseEntity; server: BaseEntity; resolve: (r: BaseEntity) => void }): void => {
-      setConflict({ local: event.local, server: event.server, resolve: event.resolve });
+    // Phase I: sync conflict — handler will be wired to the DiffEditor in
+    // Phase N once the conflict UI is rebuilt around the hybrid model. For
+    // now we just log so engine output is visible during testing.
+    const onConflict = (event: { kind: string; id: string; server_revision: number }): void => {
+      console.warn('[sync] conflict (deferred to Phase N):', event);
     };
     eventBus.on('sync:conflict', onConflict);
 
@@ -270,18 +264,6 @@ export default function App(): React.ReactElement {
       <Toaster />
       <EntityDetailSheetHost />
       <AddAspectDialogHost />
-
-      {conflict && (
-        <DiffEditor
-          local={conflict.local}
-          server={conflict.server}
-          onResolve={(resolved) => {
-            conflict.resolve(resolved);
-            setConflict(null);
-          }}
-          onCancel={() => setConflict(null)}
-        />
-      )}
     </div>
   );
 }

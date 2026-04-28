@@ -11,6 +11,7 @@
     }
   },
   "include": ["src"],
+  "exclude": ["src/web"],
   "references": [
     { "path": "../../packages/shared-types" }
   ]

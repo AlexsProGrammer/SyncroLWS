@@ -389,6 +389,67 @@ async function runWorkspaceMigrations(db: Database): Promise<void> {
     END;
   `);
 
+  // ── Phase I: sync tracking columns + sync_state KV + tombstones ───────────
+  // Each sync-tracked row carries:
+  //   revision         INTEGER NOT NULL DEFAULT 0   — server-assigned, 0 = local-only
+  //   dirty            INTEGER NOT NULL DEFAULT 1   — 1 = needs push
+  //   last_modified_by_device TEXT                  — device that wrote the row
+  await ensureColumn(db, 'base_entities', 'revision',
+    `\`revision\` integer NOT NULL DEFAULT 0`);
+  await ensureColumn(db, 'base_entities', 'dirty',
+    `\`dirty\` integer NOT NULL DEFAULT 1`);
+  await ensureColumn(db, 'base_entities', 'last_modified_by_device',
+    `\`last_modified_by_device\` text`);
+
+  await ensureColumn(db, 'entity_aspects', 'revision',
+    `\`revision\` integer NOT NULL DEFAULT 0`);
+  await ensureColumn(db, 'entity_aspects', 'dirty',
+    `\`dirty\` integer NOT NULL DEFAULT 1`);
+  await ensureColumn(db, 'entity_aspects', 'last_modified_by_device',
+    `\`last_modified_by_device\` text`);
+
+  await ensureColumn(db, 'entity_relations', 'revision',
+    `\`revision\` integer NOT NULL DEFAULT 0`);
+  await ensureColumn(db, 'entity_relations', 'dirty',
+    `\`dirty\` integer NOT NULL DEFAULT 1`);
+  await ensureColumn(db, 'entity_relations', 'last_modified_by_device',
+    `\`last_modified_by_device\` text`);
+
+  // sync_state — per-server sync cursor and timestamps. There is at most
+  // one row in normal operation (a single owner-server pairing), keyed by
+  // server_url so the schema stays correct should a workspace ever be
+  // re-targeted at a different backend.
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS sync_state (
+      server_url           TEXT PRIMARY KEY NOT NULL,
+      last_pull_revision   INTEGER NOT NULL DEFAULT 0,
+      last_pulled_at       TEXT,
+      last_pushed_at       TEXT,
+      last_error           TEXT,
+      updated_at           TEXT NOT NULL
+    );
+  `);
+
+  // tombstones — local record of hard-deleted rows that need to be propagated
+  // to the server on next push. (Soft deletes flow through deleted_at on the
+  // owning table.) The (kind, id) primary key matches the server schema.
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS sync_tombstones (
+      kind                 TEXT NOT NULL,
+      id                   TEXT NOT NULL,
+      revision             INTEGER NOT NULL DEFAULT 0,
+      dirty                INTEGER NOT NULL DEFAULT 1,
+      base_revision        INTEGER NOT NULL DEFAULT 0,
+      deleted_at           TEXT NOT NULL,
+      PRIMARY KEY (kind, id)
+    );
+  `);
+
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_base_entities_dirty ON base_entities(dirty) WHERE dirty = 1;`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_entity_aspects_dirty ON entity_aspects(dirty) WHERE dirty = 1;`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_entity_relations_dirty ON entity_relations(dirty) WHERE dirty = 1;`);
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_sync_tombstones_dirty ON sync_tombstones(dirty) WHERE dirty = 1;`);
+
   console.log('[db] Workspace migrations complete');
 }
 

@@ -122,6 +122,31 @@ function validateAspectData(
   return schema.parse(data) as Record<string, unknown>;
 }
 
+/**
+ * Phase I: nudge the sync engine. INSERTs already start with `dirty = 1`
+ * (column default), UPDATEs explicitly set `dirty = 1` in the SET clause, and
+ * hard-deletes write into `sync_tombstones`. This helper just wakes the
+ * engine via the event bus.
+ */
+function notifyDirty(): void {
+  eventBus.emit('sync:dirty', undefined);
+}
+
+/** Record a hard-delete in `sync_tombstones` so the next push tells the server. */
+async function recordTombstone(
+  kind: 'core' | 'aspect' | 'relation',
+  id: string,
+  base_revision: number,
+): Promise<void> {
+  const db = getWorkspaceDB();
+  await db.execute(
+    `INSERT INTO sync_tombstones (kind, id, revision, dirty, base_revision, deleted_at)
+     VALUES (?, ?, 0, 1, ?, ?)
+     ON CONFLICT(kind, id) DO UPDATE SET dirty = 1, base_revision = excluded.base_revision, deleted_at = excluded.deleted_at`,
+    [kind, id, base_revision, nowIso()],
+  );
+}
+
 // ── Core CRUD ────────────────────────────────────────────────────────────────
 
 export interface CreateEntityInput {
@@ -180,6 +205,7 @@ export async function createEntity(input: CreateEntityInput): Promise<HybridEnti
   }
 
   eventBus.emit('core:created', { core, aspects });
+  notifyDirty();
   return { core, aspects };
 }
 
@@ -230,6 +256,7 @@ export async function updateCore(id: string, patch: CoreUpdate): Promise<EntityC
 
   const updated_at = nowIso();
   sets.push('updated_at = ?'); params.push(updated_at);
+  sets.push('dirty = 1');
   params.push(id);
 
   await db.execute(`UPDATE base_entities SET ${sets.join(', ')} WHERE id = ?`, params);
@@ -237,6 +264,7 @@ export async function updateCore(id: string, patch: CoreUpdate): Promise<EntityC
   const fresh = await getEntity(id);
   if (!fresh) throw new Error(`[entityStore] entity ${id} disappeared during update`);
   eventBus.emit('core:updated', { core: fresh.core });
+  notifyDirty();
   return fresh.core;
 }
 
@@ -245,14 +273,15 @@ export async function softDeleteEntity(id: string): Promise<void> {
   const db = getWorkspaceDB();
   const now = nowIso();
   await db.execute(
-    `UPDATE base_entities SET deleted_at = ?, updated_at = ? WHERE id = ?`,
+    `UPDATE base_entities SET deleted_at = ?, updated_at = ?, dirty = 1 WHERE id = ?`,
     [now, now, id],
   );
   await db.execute(
-    `UPDATE entity_aspects SET deleted_at = ?, updated_at = ? WHERE entity_id = ? AND deleted_at IS NULL`,
+    `UPDATE entity_aspects SET deleted_at = ?, updated_at = ?, dirty = 1 WHERE entity_id = ? AND deleted_at IS NULL`,
     [now, now, id],
   );
   eventBus.emit('core:deleted', { id });
+  notifyDirty();
 }
 
 // ── Aspect CRUD ──────────────────────────────────────────────────────────────
@@ -312,6 +341,7 @@ export async function addAspect(
 ): Promise<EntityAspect> {
   const aspect = await insertAspect(entity_id, input);
   eventBus.emit('aspect:added', { aspect });
+  notifyDirty();
   return aspect;
 }
 
@@ -345,7 +375,7 @@ export async function updateAspect(
 
   await db.execute(
     `UPDATE entity_aspects
-       SET data = ?, tool_instance_id = ?, sort_order = ?, updated_at = ?
+       SET data = ?, tool_instance_id = ?, sort_order = ?, updated_at = ?, dirty = 1
      WHERE id = ?`,
     [JSON.stringify(merged), tool_instance_id, sort_order, updated_at, aspect_id],
   );
@@ -358,6 +388,7 @@ export async function updateAspect(
     updated_at,
   };
   eventBus.emit('aspect:updated', { aspect: next });
+  notifyDirty();
   return next;
 }
 
@@ -371,7 +402,7 @@ export async function removeAspect(aspect_id: string): Promise<void> {
   if (!rows[0]) return;
   const now = nowIso();
   await db.execute(
-    `UPDATE entity_aspects SET deleted_at = ?, updated_at = ? WHERE id = ?`,
+    `UPDATE entity_aspects SET deleted_at = ?, updated_at = ?, dirty = 1 WHERE id = ?`,
     [now, now, aspect_id],
   );
   eventBus.emit('aspect:removed', {
@@ -379,6 +410,7 @@ export async function removeAspect(aspect_id: string): Promise<void> {
     entity_id: rows[0].entity_id,
     aspect_type: rows[0].aspect_type as AspectType,
   });
+  notifyDirty();
 }
 
 // ── Querying ─────────────────────────────────────────────────────────────────
@@ -514,23 +546,26 @@ export async function addRelation(
     ],
   );
   eventBus.emit('relation:added', { relation });
+  notifyDirty();
   return relation;
 }
 
 /** Remove a relation by id. Emits `relation:removed`. */
 export async function removeRelation(id: string): Promise<void> {
   const db = getWorkspaceDB();
-  const rows = await db.select<RelationRow[]>(
-    `SELECT id, from_entity_id, to_entity_id FROM entity_relations WHERE id = ? LIMIT 1`,
+  const rows = await db.select<(RelationRow & { revision: number })[]>(
+    `SELECT id, from_entity_id, to_entity_id, revision FROM entity_relations WHERE id = ? LIMIT 1`,
     [id],
   );
   if (!rows[0]) return;
   await db.execute(`DELETE FROM entity_relations WHERE id = ?`, [id]);
+  await recordTombstone('relation', id, rows[0].revision ?? 0);
   eventBus.emit('relation:removed', {
     id: rows[0].id,
     from_entity_id: rows[0].from_entity_id,
     to_entity_id: rows[0].to_entity_id,
   });
+  notifyDirty();
 }
 
 export type RelationDirection = 'outgoing' | 'incoming' | 'both';

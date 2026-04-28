@@ -17,6 +17,7 @@ import { eventBus } from '@/core/events';
 import { useProfileStore, type Profile } from '@/store/profileStore';
 import { useSyncStore } from '@/store/syncStore';
 import { useThemeStore } from '@/store/themeStore';
+import { syncEngine } from '@/core/sync';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -612,6 +613,9 @@ export function SettingsView(): React.ReactElement {
               )}
             </div>
 
+            {/* Phase I: live sync status + manual trigger */}
+            <SyncStatusPanel />
+
             {/* Pairing dialog */}
             <Dialog open={isPairing} onOpenChange={(v) => { if (!v) setIsPairing(false); }}>
               <DialogContent className="max-w-sm">
@@ -666,6 +670,72 @@ export function SettingsView(): React.ReactElement {
           </TabsContent>
         </div>
       </Tabs>
+    </div>
+  );
+}
+
+// ── Phase I: sync status panel ────────────────────────────────────────────────
+
+function formatRelative(iso: string | null): string {
+  if (!iso) return 'never';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return 'never';
+  const sec = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
+  if (sec < 86_400) return `${Math.round(sec / 3600)}h ago`;
+  return new Date(iso).toLocaleString();
+}
+
+function SyncStatusPanel(): React.ReactElement | null {
+  const isSyncActive = useSyncStore((s) => s.isSyncActive);
+  const deviceToken = useSyncStore((s) => s.deviceToken);
+  const inFlight = useSyncStore((s) => s.inFlight);
+  const lastPulledAt = useSyncStore((s) => s.lastPulledAt);
+  const lastPushedAt = useSyncStore((s) => s.lastPushedAt);
+  const pendingChanges = useSyncStore((s) => s.pendingChanges);
+  const lastError = useSyncStore((s) => s.lastError);
+  const [, force] = useState(0);
+
+  // Refresh "Xs ago" labels each second.
+  useEffect(() => {
+    const id = setInterval(() => force((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Initial pending count refresh on mount.
+  useEffect(() => {
+    void syncEngine.refreshPending();
+  }, []);
+
+  if (!deviceToken) return null;
+
+  return (
+    <div className="rounded-lg border border-border p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-foreground">Sync status</p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => void syncEngine.syncNow()}
+          disabled={!isSyncActive || inFlight}
+        >
+          {inFlight ? 'Syncing…' : 'Sync now'}
+        </Button>
+      </div>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <dt>Last pull</dt>
+        <dd className="font-mono text-foreground">{formatRelative(lastPulledAt)}</dd>
+        <dt>Last push</dt>
+        <dd className="font-mono text-foreground">{formatRelative(lastPushedAt)}</dd>
+        <dt>Pending changes</dt>
+        <dd className="font-mono text-foreground">{pendingChanges}</dd>
+      </dl>
+      {lastError && (
+        <p className="text-xs font-medium text-red-500 break-all">
+          Error: {lastError}
+        </p>
+      )}
     </div>
   );
 }

@@ -81,27 +81,14 @@ async function bootstrap(): Promise<void> {
       },
     };
 
-    /** Trigger a mock sync conflict to test the DiffEditor UI */
-    (window as unknown as Record<string, unknown>)['__triggerConflict'] = async () => {
-      const now = new Date().toISOString();
-      const base = {
-        id: crypto.randomUUID(),
-        type: 'note' as const,
-        metadata: {},
-        tags: [],
-        parent_id: null,
-        created_at: now,
-        updated_at: now,
-        deleted_at: null,
-      };
+    /** Trigger a mock sync conflict to test the engine's `sync:conflict` event flow. */
+    (window as unknown as Record<string, unknown>)['__triggerConflict'] = () => {
       eventBus.emit('sync:conflict', {
-        local: { ...base, payload: { title: 'My Note', content_md: 'Local version of the content.' } },
-        server: { ...base, payload: { title: 'My Note', content_md: 'Server version — edit made remotely.' } },
-        resolve: (resolved) => {
-          console.log('[dev] conflict resolved with:', resolved);
-        },
+        kind: 'core',
+        id: crypto.randomUUID(),
+        server_revision: 42,
       });
-      console.info('[dev] sync:conflict emitted — DiffEditor should now appear');
+      console.info('[dev] sync:conflict emitted (Phase I shape — UI lands in Phase N)');
     };
 
     /** Simulate a deep-link open for verification: __deepLink('/test/123') */
@@ -117,6 +104,11 @@ async function bootstrap(): Promise<void> {
   for (const tool of getAllTools()) {
     if (tool.init) tool.init();
   }
+
+  // ── 3b. Phase I: start the sync engine. It no-ops until a workspace is
+  // loaded AND the device is paired (deviceToken + syncUrl + isSyncActive).
+  const { syncEngine } = await import('./core/sync');
+  syncEngine.start();
 
   // ── 4. Register OS deep-link listener (bridges Tauri event → eventBus) ──────
   await initDeepLink();

@@ -16,6 +16,17 @@ interface SyncState {
   deviceName: string;
   profileId: string;
   isSyncActive: boolean;
+  // ── Phase I runtime status (NOT persisted) ──────────────────────────────
+  /** True while a pull or push is in flight. */
+  inFlight: boolean;
+  /** ISO timestamp of last successful pull. */
+  lastPulledAt: string | null;
+  /** ISO timestamp of last successful push. */
+  lastPushedAt: string | null;
+  /** Number of dirty rows + tombstones waiting to push. */
+  pendingChanges: number;
+  /** Last sync error message, cleared on next successful round-trip. */
+  lastError: string | null;
 }
 
 interface SyncActions {
@@ -26,6 +37,8 @@ interface SyncActions {
   clearPairing: () => void;
   /** Reset all sync configuration to defaults. */
   resetSync: () => void;
+  /** Update transient sync status fields (called by the sync engine). */
+  setStatus: (patch: Partial<Pick<SyncState, 'inFlight' | 'lastPulledAt' | 'lastPushedAt' | 'pendingChanges' | 'lastError'>>) => void;
 }
 
 const INITIAL_STATE: SyncState = {
@@ -35,6 +48,11 @@ const INITIAL_STATE: SyncState = {
   deviceName: '',
   profileId: '',
   isSyncActive: false,
+  inFlight: false,
+  lastPulledAt: null,
+  lastPushedAt: null,
+  pendingChanges: 0,
+  lastError: null,
 };
 
 export const useSyncStore = create<SyncState & SyncActions>()(
@@ -58,12 +76,27 @@ export const useSyncStore = create<SyncState & SyncActions>()(
           deviceName: '',
           profileId: '',
           isSyncActive: false,
+          inFlight: false,
+          lastPulledAt: null,
+          lastPushedAt: null,
+          pendingChanges: 0,
+          lastError: null,
         }),
       resetSync: () => set(INITIAL_STATE),
+      setStatus: (patch) => set(patch),
     }),
     {
       name: 'syncrolws-sync',
       storage: createJSONStorage(() => localStorage),
+      // Transient status fields are recomputed at boot — don't persist them.
+      partialize: (state) => ({
+        syncUrl: state.syncUrl,
+        deviceToken: state.deviceToken,
+        deviceId: state.deviceId,
+        deviceName: state.deviceName,
+        profileId: state.profileId,
+        isSyncActive: state.isSyncActive,
+      }),
     },
   ),
 );
