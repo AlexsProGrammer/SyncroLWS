@@ -161,3 +161,107 @@ pub fn get_workspace_path(
         .ok_or_else(|| "Workspace path contains non-UTF8 characters".to_string())
         .map(|s: &str| s.to_string())
 }
+
+// ── Workspace transfer helpers ────────────────────────────────────────────────
+
+/// Recursively copies all files from `src_dir` into `dst_dir`, creating
+/// intermediate directories as needed. Only copies leaf files (no subdirectory
+/// recursion beyond one level, matching the `files/` flat layout).
+fn copy_dir_all(src_dir: &std::path::Path, dst_dir: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst_dir)
+        .map_err(|e| format!("Failed to create dir {}: {e}", dst_dir.display()))?;
+
+    for entry in std::fs::read_dir(src_dir)
+        .map_err(|e| format!("Failed to read dir {}: {e}", src_dir.display()))?
+    {
+        let entry = entry.map_err(|e| format!("Dir entry error: {e}"))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("Failed to get file type: {e}"))?;
+        let src_path = entry.path();
+        let dst_path = dst_dir.join(entry.file_name());
+
+        if file_type.is_dir() {
+            copy_dir_all(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path).map_err(|e| {
+                format!(
+                    "Failed to copy {} → {}: {e}",
+                    src_path.display(),
+                    dst_path.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// Copies a workspace's SQLite database and all associated files from one
+/// profile to another (or within the same profile for a duplicate).
+///
+/// Steps:
+///   1. Create `<dst_profile>/workspaces/<dst_workspace>/files/`
+///   2. Copy `data.sqlite` from src to dst
+///   3. Copy every file inside `src/files/` to `dst/files/`
+///
+/// Frontend: `invoke('copy_workspace_data', { srcProfileUuid, srcWorkspaceUuid, dstProfileUuid, dstWorkspaceUuid })`
+#[tauri::command]
+pub fn copy_workspace_data(
+    app: tauri::AppHandle,
+    src_profile_uuid: String,
+    src_workspace_uuid: String,
+    dst_profile_uuid: String,
+    dst_workspace_uuid: String,
+) -> Result<(), String> {
+    validate_uuid(&src_profile_uuid)?;
+    validate_uuid(&src_workspace_uuid)?;
+    validate_uuid(&dst_profile_uuid)?;
+    validate_uuid(&dst_workspace_uuid)?;
+
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
+
+    let src_dir = app_data
+        .join("profiles")
+        .join(&src_profile_uuid)
+        .join("workspaces")
+        .join(&src_workspace_uuid);
+
+    let dst_dir = app_data
+        .join("profiles")
+        .join(&dst_profile_uuid)
+        .join("workspaces")
+        .join(&dst_workspace_uuid);
+
+    // 1. Ensure destination workspace folder (+ files/) exists
+    std::fs::create_dir_all(dst_dir.join("files"))
+        .map_err(|e| format!("Failed to create destination workspace folder: {e}"))?;
+
+    // 2. Copy the SQLite database
+    let src_db = src_dir.join("data.sqlite");
+    let dst_db = dst_dir.join("data.sqlite");
+    if src_db.exists() {
+        std::fs::copy(&src_db, &dst_db).map_err(|e| {
+            format!(
+                "Failed to copy data.sqlite ({} → {}): {e}",
+                src_db.display(),
+                dst_db.display()
+            )
+        })?;
+    }
+
+    // 3. Copy uploaded/local files
+    let src_files = src_dir.join("files");
+    let dst_files = dst_dir.join("files");
+    if src_files.exists() {
+        copy_dir_all(&src_files, &dst_files)?;
+    }
+
+    println!(
+        "[workspace] copied {}/{} → {}/{}",
+        src_profile_uuid, src_workspace_uuid, dst_profile_uuid, dst_workspace_uuid
+    );
+    Ok(())
+}

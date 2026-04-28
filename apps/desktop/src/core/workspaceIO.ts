@@ -13,8 +13,11 @@
  * `tombstones`, `sync_state`) — those are workspace-private and re-derive on
  * the next sync cycle.
  */
+import Database from '@tauri-apps/plugin-sql';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentProfileId, getCurrentWorkspaceId, getWorkspaceDB } from './db';
 import { eventBus } from './events';
+import type { Workspace } from '@/store/workspaceStore';
 
 export const EXPORT_BUNDLE_VERSION = 1 as const;
 
@@ -196,5 +199,82 @@ export function pickJsonBundle(): Promise<WorkspaceExportBundle | null> {
       }
     };
     input.click();
+  });
+}
+
+// ── Cross-profile workspace transfer ───────────────────────────────────────
+
+export type TransferMode = 'copy' | 'move';
+
+export interface TransferParams {
+  sourceWorkspaceId: string;
+  workspaceMeta: Pick<Workspace, 'name' | 'description' | 'icon' | 'color'>;
+  sourceProfileId: string;
+  targetProfileId: string;
+  targetProfilePath: string;
+  mode: TransferMode;
+}
+
+/**
+ * Copies (or moves) a workspace to another profile.
+ *
+ * - "copy": clones the workspace DB + files under a new UUID; source is untouched.
+ * - "move": same clone, then soft-deletes the source workspace via the store.
+ *
+ * The workspace is placed at root level (`parent_id = null`) in the target
+ * profile because the source's folder tree may not exist there.
+ */
+export async function transferWorkspaceToProfile(params: TransferParams): Promise<void> {
+  const { sourceWorkspaceId, workspaceMeta, sourceProfileId, targetProfileId, targetProfilePath, mode } = params;
+
+  const destWorkspaceId = mode === 'copy' ? crypto.randomUUID() : sourceWorkspaceId;
+
+  // 1. Rust copies the raw SQLite + files on disk
+  await invoke('copy_workspace_data', {
+    srcProfileUuid: sourceProfileId,
+    srcWorkspaceUuid: sourceWorkspaceId,
+    dstProfileUuid: targetProfileId,
+    dstWorkspaceUuid: destWorkspaceId,
+  });
+
+  // 2. Open the target profile DB and insert the workspace row
+  const targetDb = await Database.load(`sqlite:${targetProfilePath}/data.sqlite`);
+  try {
+    const sortRows = await targetDb.select<{ next: number }[]>(
+      `SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM workspaces WHERE deleted_at IS NULL`,
+    );
+    const sortOrder = sortRows[0]?.next ?? 0;
+    const now = new Date().toISOString();
+
+    await targetDb.execute(
+      `INSERT INTO workspaces (id, name, description, icon, color, parent_id, sort_order, created_at, updated_at, deleted_at)
+       VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL)`,
+      [
+        destWorkspaceId,
+        workspaceMeta.name,
+        workspaceMeta.description,
+        workspaceMeta.icon,
+        workspaceMeta.color,
+        sortOrder,
+        now,
+        now,
+      ],
+    );
+  } finally {
+    // Don't hold on to the foreign DB connection
+    await targetDb.close().catch(() => {});
+  }
+
+  // 3. For a move, soft-delete the source using the store (handles active-workspace switch)
+  if (mode === 'move') {
+    // Lazy import to avoid circular deps — store imports nothing from workspaceIO
+    const { useWorkspaceStore } = await import('@/store/workspaceStore');
+    await useWorkspaceStore.getState().deleteWorkspace(sourceWorkspaceId);
+  }
+
+  eventBus.emit('notification:show', {
+    title: mode === 'copy' ? 'Workspace copied' : 'Workspace moved',
+    body: `"${workspaceMeta.name}" was ${mode === 'copy' ? 'copied to' : 'moved to'} the selected profile.`,
+    type: 'info',
   });
 }

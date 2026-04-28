@@ -4,6 +4,8 @@ import { eventBus } from '@/core/events';
 import { getAllTools, getTool, type Tool } from '@/registry/ToolRegistry';
 import { getDB, getWorkspaceDB } from '@/core/db';
 import { useProfileStore, type Profile } from '@/store/profileStore';
+import { invoke } from '@tauri-apps/api/core';
+import { transferWorkspaceToProfile } from '@/core/workspaceIO';
 import { useWorkspaceStore, buildWorkspaceTree, type Workspace } from '@/store/workspaceStore';
 import { useThemeStore } from '@/store/themeStore';
 import { Input } from '@/ui/components/input';
@@ -102,6 +104,24 @@ function IconEdit({ className }: { className?: string }): React.ReactElement {
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
       <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
       <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+    </svg>
+  );
+}
+
+function IconCopy({ className }: { className?: string }): React.ReactElement {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function IconArrowRight({ className }: { className?: string }): React.ReactElement {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <line x1="5" y1="12" x2="19" y2="12" />
+      <polyline points="12 5 19 12 12 19" />
     </svg>
   );
 }
@@ -223,6 +243,8 @@ function WorkspaceTreeItem({
   onDrop,
   onRename,
   onDelete,
+  onTransfer,
+  hasOtherProfiles,
 }: {
   node: WorkspaceTreeNode;
   depth: number;
@@ -232,6 +254,8 @@ function WorkspaceTreeItem({
   onDrop?: (dragId: string, targetId: string) => void;
   onRename?: (id: string, currentName: string) => void;
   onDelete?: (id: string, name: string, isFolder: boolean, hasChildren: boolean) => void;
+  onTransfer?: (id: string, name: string, mode: 'copy' | 'move') => void;
+  hasOtherProfiles?: boolean;
 }): React.ReactElement {
   const [expanded, setExpanded] = useState(true);
   const [dragOver, setDragOver] = useState(false);
@@ -309,11 +333,24 @@ function WorkspaceTreeItem({
               <IconMoreVertical className="h-3 w-3" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuItem onClick={() => onRename?.(node.id, node.name)}>
               <IconEdit className="mr-2 h-3.5 w-3.5" />
               Rename
             </DropdownMenuItem>
+            {!isFolder && hasOtherProfiles && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => onTransfer?.(node.id, node.name, 'copy')}>
+                  <IconCopy className="mr-2 h-3.5 w-3.5" />
+                  Copy to profile…
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onTransfer?.(node.id, node.name, 'move')}>
+                  <IconArrowRight className="mr-2 h-3.5 w-3.5" />
+                  Move to profile…
+                </DropdownMenuItem>
+              </>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="text-destructive focus:text-destructive"
@@ -338,6 +375,8 @@ function WorkspaceTreeItem({
               onDrop={onDrop}
               onRename={onRename}
               onDelete={onDelete}
+              onTransfer={onTransfer}
+              hasOtherProfiles={hasOtherProfiles}
             />
           ))}
         </div>
@@ -620,6 +659,9 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
   const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
   const deleteWorkspace = useWorkspaceStore((s) => s.deleteWorkspace);
 
+  const profiles = useProfileStore((s) => s.profiles);
+  const activeProfileId = useProfileStore((s) => s.activeProfileId);
+
   const tree = buildWorkspaceTree(workspaces);
 
   /** Handle drag-and-drop: reparent item to target folder */
@@ -749,6 +791,38 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
     }
     await deleteWorkspace(confirmDeleteWs.id);
     setConfirmDeleteWs(null);
+  };
+
+  // ── Workspace transfer (copy/move to another profile) ───────────────────
+
+  const [transferWs, setTransferWs] = useState<{
+    id: string; name: string; mode: 'copy' | 'move';
+  } | null>(null);
+  const [transferTargetProfileId, setTransferTargetProfileId] = useState<string | null>(null);
+  const [transferring, setTransferring] = useState(false);
+
+  const handleTransferWorkspace = async (): Promise<void> => {
+    if (!transferWs || !transferTargetProfileId || !activeProfileId) return;
+    const workspace = workspaces.find((w) => w.id === transferWs.id);
+    if (!workspace) return;
+    setTransferring(true);
+    try {
+      const targetPath = await invoke<string>('get_profile_path', { uuid: transferTargetProfileId });
+      await transferWorkspaceToProfile({
+        sourceWorkspaceId: transferWs.id,
+        workspaceMeta: workspace,
+        sourceProfileId: activeProfileId,
+        targetProfileId: transferTargetProfileId,
+        targetProfilePath: targetPath,
+        mode: transferWs.mode,
+      });
+      setTransferWs(null);
+      setTransferTargetProfileId(null);
+    } catch (err) {
+      console.error('[sidebar] workspace transfer failed:', err);
+    } finally {
+      setTransferring(false);
+    }
   };
 
   // Navigate via workspace tools (map tool_id → registered tool, then navigate)
@@ -948,6 +1022,12 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
               onDelete={(id, name, isFolder, hasChildren) =>
                 setConfirmDeleteWs({ id, name, isFolder, hasChildren })
               }
+              onTransfer={(id, name, mode) => {
+                const firstOther = profiles.find((p) => p.id !== activeProfileId);
+                setTransferTargetProfileId(firstOther?.id ?? null);
+                setTransferWs({ id, name, mode });
+              }}
+              hasOtherProfiles={profiles.length > 1}
             />
           ))}
         </div>
@@ -1321,6 +1401,62 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
                 Delete
               </Button>
               <Button variant="outline" onClick={() => setConfirmDeleteWs(null)} className="flex-1">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Workspace Transfer Dialog ────────────────────────────────────────── */}
+      <Dialog open={transferWs !== null} onOpenChange={(v) => !v && setTransferWs(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {transferWs?.mode === 'copy' ? 'Copy' : 'Move'} workspace to profile
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-2">
+            <p className="text-sm text-muted-foreground">
+              Select the destination profile for <strong>{transferWs?.name}</strong>.
+              {transferWs?.mode === 'move' && ' The workspace will be removed from the current profile.'}
+            </p>
+            <div className="space-y-1 max-h-48 overflow-y-auto">
+              {profiles
+                .filter((p) => p.id !== activeProfileId)
+                .map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setTransferTargetProfileId(p.id)}
+                    className={cn(
+                      'flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
+                      transferTargetProfileId === p.id
+                        ? 'bg-accent text-accent-foreground ring-1 ring-primary/40'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                    )}
+                  >
+                    <span
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                      style={{ backgroundColor: p.color ?? '#6366f1' }}
+                    >
+                      {p.name[0]?.toUpperCase()}
+                    </span>
+                    <span className="truncate">{p.name}</span>
+                    {transferTargetProfileId === p.id && (
+                      <span className="ml-auto text-primary">✓</span>
+                    )}
+                  </button>
+                ))}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => void handleTransferWorkspace()}
+                disabled={!transferTargetProfileId || transferring}
+                className="flex-1"
+              >
+                {transferring ? 'Working…' : transferWs?.mode === 'copy' ? 'Copy' : 'Move'}
+              </Button>
+              <Button variant="outline" onClick={() => setTransferWs(null)} className="flex-1">
                 Cancel
               </Button>
             </div>
