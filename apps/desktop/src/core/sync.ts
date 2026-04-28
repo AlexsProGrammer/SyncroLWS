@@ -24,6 +24,7 @@ import {
 } from './db';
 import { eventBus } from './events';
 import { useSyncStore } from '../store/syncStore';
+import { useProfileStore } from '../store/profileStore';
 import {
   type SyncPullResult,
   type SyncPushInput,
@@ -91,6 +92,27 @@ interface TRPCEnvelope<T> {
   error?: { message?: string; code?: number };
 }
 
+/** Phase S — raised by trpcQuery/trpcMutation on HTTP 401 so the orchestrator
+ *  can flip the store into read-only mode and emit `auth:expired`. */
+class AuthRejectedError extends Error {
+  constructor() {
+    super('Authentication rejected by server.');
+    this.name = 'AuthRejectedError';
+  }
+}
+
+/** Phase S — select the bearer token for the active profile.
+ *  Enterprise profiles use the user JWT; personal profiles use the device JWT. */
+function activeBearerToken(): string {
+  const profileStore = useProfileStore.getState();
+  const profile = profileStore.profiles.find(
+    (p) => p.id === profileStore.activeProfileId,
+  );
+  const sync = useSyncStore.getState();
+  if (profile?.mode === 'enterprise') return sync.userToken;
+  return sync.deviceToken;
+}
+
 async function trpcQuery<T>(
   baseUrl: string,
   token: string,
@@ -104,6 +126,7 @@ async function trpcQuery<T>(
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
   });
+  if (res.status === 401) throw new AuthRejectedError();
   const json = (await res.json()) as TRPCEnvelope<T>;
   if (!res.ok || json.error) {
     throw new Error(json.error?.message ?? `HTTP ${res.status}`);
@@ -127,6 +150,7 @@ async function trpcMutation<T>(
     },
     body: JSON.stringify(input),
   });
+  if (res.status === 401) throw new AuthRejectedError();
   const json = (await res.json()) as TRPCEnvelope<T>;
   if (!res.ok || json.error) {
     throw new Error(json.error?.message ?? `HTTP ${res.status}`);
@@ -480,7 +504,9 @@ async function applyPushResult(result: SyncPushResult): Promise<void> {
 
 async function runSyncCycle(): Promise<void> {
   const state = useSyncStore.getState();
-  if (!state.isSyncActive || !state.deviceToken || !state.syncUrl) return;
+  const token = activeBearerToken();
+  if (!state.isSyncActive || !token || !state.syncUrl) return;
+  if (state.mustChangePassword || state.readonly) return;
   if (state.inFlight) return;
   if (!state.online) return; // Phase J: skip while offline.
   const workspaceId = getCurrentWorkspaceId();
@@ -489,12 +515,12 @@ async function runSyncCycle(): Promise<void> {
   state.setStatus({ inFlight: true });
   eventBus.emit('sync:start', undefined);
   try {
-    // ── PULL ───────────────────────────────────────────────────────────────
+    // ── PULL ────────────────────────────────────────────────────────────
     let cursor = await readCursor(state.syncUrl);
     for (let safety = 0; safety < 20; safety += 1) {
       const pull = await trpcQuery<SyncPullResult>(
         state.syncUrl,
-        state.deviceToken,
+        token,
         'sync.pull',
         { workspace_id: workspaceId, since_revision: cursor, limit: 500 },
       );
@@ -523,7 +549,7 @@ async function runSyncCycle(): Promise<void> {
       if (totalDirty === 0) break;
       const push = await trpcMutation<SyncPushResult>(
         state.syncUrl,
-        state.deviceToken,
+        token,
         'sync.push',
         { workspace_id: workspaceId, ...batch },
       );
@@ -550,6 +576,14 @@ async function runSyncCycle(): Promise<void> {
     eventBus.emit('sync:complete', { synced_at: new Date().toISOString() });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if (err instanceof AuthRejectedError) {
+      // Phase S: token rejected. Flip into read-only mode + notify UI.
+      console.warn('[sync] auth rejected; entering read-only mode');
+      state.setStatus({ inFlight: false, lastError: 'Authentication expired — sign in again to resume sync.' });
+      useSyncStore.getState().setReadonly(true);
+      eventBus.emit('auth:expired', { reason: 'rejected' });
+      return;
+    }
     console.error('[sync] cycle failed:', message);
     state.setStatus({ inFlight: false, lastError: message });
     await writeCursor(state.syncUrl, { last_error: message });

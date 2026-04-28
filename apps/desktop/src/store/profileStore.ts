@@ -6,11 +6,16 @@ import { eventBus } from '@/core/events';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export type ProfileMode = 'personal' | 'enterprise';
+
 export interface Profile {
   id: string;   // UUID
   name: string;
   avatar_url?: string;
   color?: string;
+  /** Phase S — controls the auth + sync model used by this profile.
+   *  Defaults to 'personal' for back-compat with pre-Phase-S profiles. */
+  mode?: ProfileMode;
 }
 
 interface ProfileState {
@@ -20,15 +25,15 @@ interface ProfileState {
 
 interface ProfileActions {
   /** Create a new profile, persist it, and set it as active. */
-  createProfile: (name: string, color?: string) => Promise<Profile>;
+  createProfile: (name: string, color?: string, mode?: ProfileMode) => Promise<Profile>;
   /** Switch to an existing profile — reloads DBs and workspaces. */
   setActiveProfile: (id: string) => Promise<void>;
   /** Whether a profile switch is in progress. */
   switching: boolean;
   /** Rename an existing profile. */
   renameProfile: (id: string, name: string) => void;
-  /** Update profile fields (name, color, avatar_url). */
-  updateProfile: (id: string, data: Partial<Pick<Profile, 'name' | 'color' | 'avatar_url'>>) => void;
+  /** Update profile fields (name, color, avatar_url, mode). */
+  updateProfile: (id: string, data: Partial<Pick<Profile, 'name' | 'color' | 'avatar_url' | 'mode'>>) => void;
   /** Delete a profile (does NOT delete files on disk). */
   deleteProfile: (id: string) => void;
 }
@@ -42,13 +47,13 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
       activeProfileId: null,
       switching: false,
 
-      createProfile: async (name: string, color?: string): Promise<Profile> => {
+      createProfile: async (name: string, color?: string, mode: ProfileMode = 'personal'): Promise<Profile> => {
         const id = crypto.randomUUID();
 
         // Create the physical folder via Tauri command
         await invoke<string>('create_profile_folder', { uuid: id });
 
-        const profile: Profile = { id, name, color: color ?? '#6366f1' };
+        const profile: Profile = { id, name, color: color ?? '#6366f1', mode };
         set((state) => ({
           profiles: [...state.profiles, profile],
           activeProfileId: id,
@@ -114,7 +119,7 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
         }));
       },
 
-      updateProfile: (id: string, data: Partial<Pick<Profile, 'name' | 'color' | 'avatar_url'>>) => {
+      updateProfile: (id: string, data: Partial<Pick<Profile, 'name' | 'color' | 'avatar_url' | 'mode'>>) => {
         set((state) => ({
           profiles: state.profiles.map((p) =>
             p.id === id ? { ...p, ...data } : p,

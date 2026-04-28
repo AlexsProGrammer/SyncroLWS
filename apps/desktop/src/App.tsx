@@ -12,6 +12,14 @@ import { eventBus } from './core/events';
 import { startBackupScheduler } from './core/backup';
 import { useWorkspaceStore, type WorkspaceTool } from './store/workspaceStore';
 import { useProfileStore } from './store/profileStore';
+import { useSyncStore } from './store/syncStore';
+import { useAppLockStore } from './core/lock';
+import { LockScreen } from './ui/LockScreen';
+import {
+  EnterpriseLoginDialog,
+  ChangePasswordDialog,
+  FirstRunSetupDialog,
+} from './ui/AuthDialogs';
 import { toast } from './ui/hooks/use-toast';
 
 import type { BaseEntity } from '@syncrohws/shared-types';
@@ -235,6 +243,57 @@ export default function App(): React.ReactElement {
     return () => { eventBus.off('notification:show', onNotification); };
   }, []);
 
+  // ── Phase T: app lock gate ───────────────────────────────────────────────────
+  const lockEnabled = useAppLockStore((s) => s.enabled);
+  const locked = useAppLockStore((s) => s.locked);
+
+  // ── Phase S: enterprise auth gate ─────────────────────────────────────────────
+  const profiles = useProfileStore((s) => s.profiles);
+  const activeProfileMode = activeProfile?.mode;
+  const userToken = useSyncStore((s) => s.userToken);
+  const mustChangePassword = useSyncStore((s) => s.mustChangePassword);
+  const readonly = useSyncStore((s) => s.readonly);
+
+  const showFirstRun = profiles.length === 0;
+  const showLoginDialog =
+    !showFirstRun && activeProfileMode === 'enterprise' && !userToken;
+  const showForcedChange = !!userToken && mustChangePassword;
+  const [showVoluntaryChange, setShowVoluntaryChange] = useState(false);
+
+  // Listen for auth:expired events → clear token so login dialog reappears.
+  useEffect(() => {
+    const onExpired = (): void => {
+      // Don't clear during pw change — user is mid-flow.
+      if (useSyncStore.getState().mustChangePassword) return;
+      useSyncStore.getState().clearUserSession();
+      toast({
+        title: 'Signed out',
+        description: 'Your session expired. Please sign in again.',
+        variant: 'warning',
+      });
+    };
+    const onOpenChangePw = (): void => setShowVoluntaryChange(true);
+    eventBus.on('auth:expired', onExpired);
+    eventBus.on('settings:open-tab', (tab: string) => {
+      if (tab === 'change-password') setShowVoluntaryChange(true);
+    });
+    return () => {
+      eventBus.off('auth:expired', onExpired);
+      eventBus.off('settings:open-tab', onOpenChangePw);
+    };
+  }, []);
+
+  // While the app is locked, render only the lock screen — no main UI, no
+  // auth dialogs, no command palette, no anything.
+  if (locked) {
+    return (
+      <>
+        <LockScreen />
+        <Toaster />
+      </>
+    );
+  }
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
@@ -273,6 +332,12 @@ export default function App(): React.ReactElement {
           <h1 className="text-sm font-medium text-foreground capitalize">
             {headerTitle}
           </h1>
+          {readonly && (
+            <span className="ml-3 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+              Read-only — sign in to resume sync
+            </span>
+          )}
           {workspaceLoading && (
             <span className="ml-auto text-xs text-muted-foreground animate-pulse">
               Loading…
@@ -301,7 +366,12 @@ export default function App(): React.ReactElement {
       <CommandPalette />
       <Toaster />
       <EntityDetailSheetHost />
-      <AddAspectDialogHost />
-    </div>
+      <AddAspectDialogHost />      <FirstRunSetupDialog open={showFirstRun} onComplete={() => { /* main.tsx will react to profile creation */ }} />
+      <EnterpriseLoginDialog open={showLoginDialog} onClose={() => { /* dialog closes itself on success */ }} />
+      <ChangePasswordDialog
+        open={showForcedChange || showVoluntaryChange}
+        forced={showForcedChange}
+        onClose={() => setShowVoluntaryChange(false)}
+      />    </div>
   );
 }

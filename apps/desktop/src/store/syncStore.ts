@@ -22,6 +22,22 @@ interface SyncState {
    * J/N follow-up — for now this is purely a UI flag (no-op in engine).
    */
   encryptAtRest: boolean;
+
+  // ── Phase S: enterprise user session (persisted) ─────────────────────────
+  /** Long-lived (full-scope) user JWT minted by /auth.login. Empty when
+   *  the active profile is in personal mode or no user is signed in. */
+  userToken: string;
+  /** ISO expiry of the userToken (best-effort — the server is the source
+   *  of truth). */
+  tokenExpiresAt: string | null;
+  userId: string;
+  userEmail: string;
+  userDisplayName: string;
+  orgRole: 'admin' | 'member' | '';
+  /** Set by /auth.login when the server reports must_change_password.
+   *  UI must show a forced-change dialog before any other action. */
+  mustChangePassword: boolean;
+
   // ── Phase I runtime status (NOT persisted) ──────────────────────────────
   /** True while a pull or push is in flight. */
   inFlight: boolean;
@@ -37,6 +53,10 @@ interface SyncState {
   online: boolean;
   /** True when the app window is visible (document.visibilityState === 'visible'). */
   windowVisible: boolean;
+  /** Phase S — read-only mode flag. Set when the user token is rejected
+   *  (401) and we cannot reach the server to refresh. UI shows a banner;
+   *  entityStore mutations are blocked until cleared. */
+  readonly: boolean;
 }
 
 interface SyncActions {
@@ -46,6 +66,23 @@ interface SyncActions {
   setPairing: (p: { token: string; deviceId: string; deviceName: string; profileId: string }) => void;
   /** Drop the device JWT (e.g. revoked by owner). Keeps URL. */
   clearPairing: () => void;
+  /** Phase S — install an enterprise user session after /auth.login. */
+  setUserSession: (s: {
+    serverUrl?: string;
+    token: string;
+    expiresAt: string | null;
+    userId: string;
+    email: string;
+    displayName: string;
+    orgRole: 'admin' | 'member';
+    mustChangePassword?: boolean;
+  }) => void;
+  /** Phase S — clear the enterprise user session (sign out / token expired). */
+  clearUserSession: () => void;
+  /** Phase S — mark mustChangePassword (cleared after successful change). */
+  setMustChangePassword: (v: boolean) => void;
+  /** Phase S — toggle read-only mode. */
+  setReadonly: (v: boolean) => void;
   /** Reset all sync configuration to defaults. */
   resetSync: () => void;
   /** Update transient sync status fields (called by the sync engine). */
@@ -60,6 +97,13 @@ const INITIAL_STATE: SyncState = {
   profileId: '',
   isSyncActive: false,
   encryptAtRest: false,
+  userToken: '',
+  tokenExpiresAt: null,
+  userId: '',
+  userEmail: '',
+  userDisplayName: '',
+  orgRole: '',
+  mustChangePassword: false,
   inFlight: false,
   lastPulledAt: null,
   lastPushedAt: null,
@@ -68,6 +112,7 @@ const INITIAL_STATE: SyncState = {
   // Defaulted optimistically; the engine refreshes both at boot.
   online: typeof navigator !== 'undefined' ? navigator.onLine : true,
   windowVisible: typeof document !== 'undefined' ? document.visibilityState !== 'hidden' : true,
+  readonly: false,
 };
 
 export const useSyncStore = create<SyncState & SyncActions>()(
@@ -98,6 +143,36 @@ export const useSyncStore = create<SyncState & SyncActions>()(
           pendingChanges: 0,
           lastError: null,
         }),
+      setUserSession: ({ serverUrl, token, expiresAt, userId, email, displayName, orgRole, mustChangePassword }) =>
+        set((s) => ({
+          syncUrl: serverUrl ?? s.syncUrl,
+          userToken: token,
+          tokenExpiresAt: expiresAt,
+          userId,
+          userEmail: email,
+          userDisplayName: displayName,
+          orgRole,
+          mustChangePassword: !!mustChangePassword,
+          isSyncActive: !mustChangePassword,
+          readonly: false,
+          lastError: null,
+        })),
+      clearUserSession: () =>
+        set({
+          userToken: '',
+          tokenExpiresAt: null,
+          userId: '',
+          userEmail: '',
+          userDisplayName: '',
+          orgRole: '',
+          mustChangePassword: false,
+          isSyncActive: false,
+          readonly: false,
+          inFlight: false,
+          pendingChanges: 0,
+        }),
+      setMustChangePassword: (v) => set({ mustChangePassword: v }),
+      setReadonly: (v) => set({ readonly: v }),
       resetSync: () => set(INITIAL_STATE),
       setStatus: (patch) => set(patch),
     }),
@@ -113,6 +188,13 @@ export const useSyncStore = create<SyncState & SyncActions>()(
         profileId: state.profileId,
         isSyncActive: state.isSyncActive,
         encryptAtRest: state.encryptAtRest,
+        userToken: state.userToken,
+        tokenExpiresAt: state.tokenExpiresAt,
+        userId: state.userId,
+        userEmail: state.userEmail,
+        userDisplayName: state.userDisplayName,
+        orgRole: state.orgRole,
+        mustChangePassword: state.mustChangePassword,
       }),
     },
   ),

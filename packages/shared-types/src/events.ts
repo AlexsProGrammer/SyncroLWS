@@ -86,4 +86,20 @@ export type AppEvents = {
 
   // ── Profile ───────────────────────────────────────────────────────────────
   'profile:switched': { id: string };
+
+  // ── Auth (Phase S — enterprise mode) ──────────────────────────────────────
+  /** User token expired or rejected by server (HTTP 401). UI should prompt
+   *  re-login; sync engine pauses pushes. */
+  'auth:expired': { reason: 'expired' | 'revoked' | 'rejected' };
+  /** Server returned must_change_password during login or a request was
+   *  rejected with FORBIDDEN/Password change required. */
+  'auth:must-change-password': { userId: string };
+  /** Successful sign-in (full-scope token established). */
+  'auth:signed-in': { userId: string; orgRole: 'admin' | 'member' };
+  /** Sign-out / clearUserSession invoked. */
+  'auth:signed-out': void;
+
+  // ── App lock (Phase T) ────────────────────────────────────────────────────
+  'lock:locked': void;
+  'lock:unlocked': void;
 };

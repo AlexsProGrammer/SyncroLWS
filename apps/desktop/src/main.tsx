@@ -21,35 +21,49 @@ import { getAllTools, discoverAndRegisterTools } from './registry/ToolRegistry';
 import { eventBus } from './core/events';
 
 async function bootstrap(): Promise<void> {
+  // ── Phase T: idle/lock watcher ────────────────────────────────────────────
+  const { startIdleWatcher } = await import('./core/lock');
+  startIdleWatcher();
+
+  // ── Phase S: expiry watcher (no-op until a user token exists) ────────────
+  const { startTokenExpiryWatcher } = await import('./core/auth');
+  startTokenExpiryWatcher();
+
   // ── 1. Load or create the active profile's SQLite database ─────────────────
-  const { activeProfileId, profiles, createProfile } = useProfileStore.getState();
+  // Phase S: do NOT auto-create a default profile here. App.tsx renders the
+  // FirstRunSetupDialog when `profiles.length === 0` so the user can pick
+  // personal vs enterprise. We still load the active profile's DB if one
+  // already exists.
+  const { activeProfileId, profiles } = useProfileStore.getState();
+  const profileId =
+    activeProfileId && profiles.some((p) => p.id === activeProfileId)
+      ? activeProfileId
+      : profiles[0]?.id ?? null;
 
-  let profileId = activeProfileId;
-  if (!profileId || !profiles.some((p) => p.id === profileId)) {
-    // First launch — create a default profile
-    const defaultProfile = await createProfile('Default');
-    profileId = defaultProfile.id;
-  }
+  if (profileId) {
+    await loadProfileDB(profileId);
 
-  await loadProfileDB(profileId);
+    // ── 1b. Discover tools from manifests ──────────────────────────────────────
+    discoverAndRegisterTools();
 
-  // ── 1b. Discover tools from manifests ──────────────────────────────────────
-  discoverAndRegisterTools();
+    // ── 1c. Load or create the default workspace ──────────────────────────────
+    const wsStore = useWorkspaceStore.getState();
+    await wsStore.loadWorkspaces();
 
-  // ── 1c. Load or create the default workspace ──────────────────────────────
-  const wsStore = useWorkspaceStore.getState();
-  await wsStore.loadWorkspaces();
-
-  const workspaces = useWorkspaceStore.getState().workspaces;
-  if (workspaces.length === 0) {
-    await wsStore.createWorkspace({ name: 'Personal', icon: 'folder', color: '#6366f1' });
+    const workspaces = useWorkspaceStore.getState().workspaces;
+    if (workspaces.length === 0) {
+      await wsStore.createWorkspace({ name: 'Personal', icon: 'folder', color: '#6366f1' });
+    } else {
+      // Restore last active workspace, or fall back to the first one
+      const lastId = await wsStore.getLastWorkspaceId();
+      const target = (lastId && workspaces.some((w) => w.id === lastId))
+        ? lastId
+        : workspaces[0]!.id;
+      await wsStore.switchWorkspace(target);
+    }
   } else {
-    // Restore last active workspace, or fall back to the first one
-    const lastId = await wsStore.getLastWorkspaceId();
-    const target = (lastId && workspaces.some((w) => w.id === lastId))
-      ? lastId
-      : workspaces[0]!.id;
-    await wsStore.switchWorkspace(target);
+    // No profile yet — still discover tools so the registry is populated.
+    discoverAndRegisterTools();
   }
 
   // ── 2. Expose helpers on window in dev mode for console verification ───────
