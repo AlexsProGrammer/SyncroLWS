@@ -43,7 +43,7 @@ function rowFrom(item: AspectWithCore): NoteListItem {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function NotesView(): React.ReactElement {
+export function NotesView({ toolInstanceId }: { toolInstanceId?: string }): React.ReactElement {
   const [notes, setNotes] = useState<NoteListItem[]>([]);
   const [activeTag, setActiveTag] = useState<string | null>(null);
 
@@ -58,13 +58,13 @@ export function NotesView(): React.ReactElement {
 
   const loadNotes = useCallback(async () => {
     try {
-      const items = await listByAspect('note');
+      const items = await listByAspect('note', { tool_instance_id: toolInstanceId ?? null });
       items.sort((a, b) => b.aspect.updated_at.localeCompare(a.aspect.updated_at));
       setNotes(items.map(rowFrom));
     } catch (err) {
       console.error('[notes] load failed:', err);
     }
-  }, []);
+  }, [toolInstanceId]);
 
   useEffect(() => {
     void loadNotes();
@@ -123,6 +123,7 @@ export function NotesView(): React.ReactElement {
             {
               aspect_type: 'note',
               data: { content_md: '', content_json },
+              tool_instance_id: toolInstanceId ?? null,
             },
           ],
         });
@@ -131,7 +132,7 @@ export function NotesView(): React.ReactElement {
         console.error('[notes] create failed:', err);
       }
     },
-    [openNote],
+    [openNote, toolInstanceId],
   );
 
   const deleteNote = useCallback(async (id: string, skipConfirm = false) => {

@@ -32,7 +32,7 @@ type ViewMode = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek';
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function CalendarView(): React.ReactElement {
+export function CalendarView({ toolInstanceId }: { toolInstanceId?: string }): React.ReactElement {
   const calRef = useRef<FullCalendar>(null);
   const [events, setEvents] = useState<AspectWithCore[]>([]);
   const [taskEvents, setTaskEvents] = useState<EventInput[]>([]);
@@ -43,12 +43,12 @@ export function CalendarView(): React.ReactElement {
 
   const loadEvents = useCallback(async () => {
     try {
-      const items = await listByAspect('calendar_event');
+      const items = await listByAspect('calendar_event', { tool_instance_id: toolInstanceId ?? null });
       setEvents(items);
     } catch (err) {
       console.error('[calendar] load failed:', err);
     }
-  }, []);
+  }, [toolInstanceId]);
 
   // ── Load cross-module ghost events ────────────────────────────────────────
 
@@ -175,6 +175,7 @@ export function CalendarView(): React.ReactElement {
             {
               aspect_type: 'calendar_event',
               data: { start, end, all_day: allDay },
+              tool_instance_id: toolInstanceId ?? null,
             },
           ],
         });
@@ -186,7 +187,7 @@ export function CalendarView(): React.ReactElement {
         console.error('[calendar] create failed:', err);
       }
     },
-    [],
+    [toolInstanceId],
   );
 
   // ── FullCalendar callbacks ────────────────────────────────────────────────

@@ -93,7 +93,7 @@ function CircularTimer({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function PomodoroView(): React.ReactElement {
+export function PomodoroView({ toolInstanceId }: { toolInstanceId?: string }): React.ReactElement {
   const [config, setConfig] = useState<PomodoroConfig>(DEFAULT_CONFIG);
   const [phase, setPhase] = useState<Phase>('idle');
   const [remaining, setRemaining] = useState(DEFAULT_CONFIG.focusMinutes * 60);
@@ -112,7 +112,7 @@ export function PomodoroView(): React.ReactElement {
 
   const loadTodayCount = useCallback(async () => {
     try {
-      const items = await listByAspect('pomodoro_session');
+      const items = await listByAspect('pomodoro_session', { tool_instance_id: toolInstanceId ?? null });
       const today = new Date().toISOString().slice(0, 10);
       const count = items.filter((i) => {
         const d = i.aspect.data as Partial<PomodoroAspectData>;
@@ -122,7 +122,7 @@ export function PomodoroView(): React.ReactElement {
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [toolInstanceId]);
 
   useEffect(() => {
     void loadTodayCount();
@@ -298,7 +298,7 @@ export function PomodoroView(): React.ReactElement {
             title: label || `${phaseLabel(phase)} session`,
             tags: ['pomodoro'],
           },
-          aspects: [{ aspect_type: 'pomodoro_session', data: sessionData }],
+          aspects: [{ aspect_type: 'pomodoro_session', data: sessionData, tool_instance_id: toolInstanceId ?? null }],
         });
 
         eventBus.emit('pomodoro:completed', { phase: phase as 'focus' | 'short_break' | 'long_break', label });
@@ -325,7 +325,7 @@ export function PomodoroView(): React.ReactElement {
               title: label || 'Focus session',
               tags: ['pomodoro'],
             },
-            aspects: [{ aspect_type: 'time_log', data: timeLogData }],
+            aspects: [{ aspect_type: 'time_log', data: timeLogData, tool_instance_id: toolInstanceId ?? null }],
           });
 
           // Link via relation

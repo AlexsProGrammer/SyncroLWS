@@ -122,7 +122,7 @@ function ContributionGraph({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function HabitsView(): React.ReactElement {
+export function HabitsView({ toolInstanceId }: { toolInstanceId?: string }): React.ReactElement {
   const [habits, setHabits] = useState<AspectWithCore[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -139,14 +139,14 @@ export function HabitsView(): React.ReactElement {
 
   const load = useCallback(async () => {
     try {
-      const items = await listByAspect('habit');
+      const items = await listByAspect('habit', { tool_instance_id: toolInstanceId ?? null });
       // Stable sort by created_at ascending
       items.sort((a, b) => a.core.created_at.localeCompare(b.core.created_at));
       setHabits(items);
     } catch (err) {
       console.error('[habits] load failed:', err);
     }
-  }, []);
+  }, [toolInstanceId]);
 
   useEffect(() => {
     void load();
@@ -203,6 +203,7 @@ export function HabitsView(): React.ReactElement {
               completions: {},
               archived: false,
             },
+            tool_instance_id: toolInstanceId ?? null,
           },
         ],
       });
@@ -215,7 +216,7 @@ export function HabitsView(): React.ReactElement {
     } catch (err) {
       console.error('[habits] create failed:', err);
     }
-  }, [newName, newIcon, newColor, newFrequency, newTarget]);
+  }, [newName, newIcon, newColor, newFrequency, newTarget, toolInstanceId]);
 
   // ── Toggle completion ─────────────────────────────────────────────────────
 

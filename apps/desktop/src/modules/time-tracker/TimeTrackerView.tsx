@@ -89,7 +89,7 @@ function formatDate(iso: string): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function TimeTrackerView(): React.ReactElement {
+export function TimeTrackerView({ toolInstanceId }: { toolInstanceId?: string }): React.ReactElement {
   const [currentWindow, setCurrentWindow] = useState<string>('—');
   const [isTracking, setIsTracking] = useState(false);
   const [activeCoreId, setActiveCoreId] = useState<string | null>(null);
@@ -105,7 +105,7 @@ export function TimeTrackerView(): React.ReactElement {
 
   const loadLogs = useCallback(async (): Promise<void> => {
     try {
-      const rows = await listByAspect('time_log', { limit: 100 });
+      const rows = await listByAspect('time_log', { limit: 100, tool_instance_id: toolInstanceId ?? null });
       const items = rows.map(toItem);
       // Sort newest first
       items.sort((a, b) => b.payload.start.localeCompare(a.payload.start));
@@ -113,7 +113,7 @@ export function TimeTrackerView(): React.ReactElement {
     } catch (err) {
       console.error('[time-tracker] load failed:', err);
     }
-  }, []);
+  }, [toolInstanceId]);
 
   useEffect(() => {
     void loadLogs();
@@ -178,7 +178,7 @@ export function TimeTrackerView(): React.ReactElement {
       const { createEntity } = await import('@/core/entityStore');
       const created = await createEntity({
         core: { title: desc, tags: [] },
-        aspects: [{ aspect_type: 'time_log', data }],
+        aspects: [{ aspect_type: 'time_log', data, tool_instance_id: toolInstanceId ?? null }],
       });
       const aspect = created.aspects.find((a) => a.aspect_type === 'time_log');
       if (!aspect) throw new Error('time_log aspect missing after create');
@@ -190,7 +190,7 @@ export function TimeTrackerView(): React.ReactElement {
     } catch (err) {
       console.error('[time-tracker] start failed:', err);
     }
-  }, [currentWindow, activeDesc]);
+  }, [currentWindow, activeDesc, toolInstanceId]);
 
   // ── Stop tracking ─────────────────────────────────────────────────────────
 

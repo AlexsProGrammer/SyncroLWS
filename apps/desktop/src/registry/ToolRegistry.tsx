@@ -131,11 +131,15 @@ export interface SearchResultEntity {
   payload: Record<string, unknown>;
 }
 
+export interface ToolViewProps {
+  toolInstanceId?: string;
+}
+
 export interface Tool {
   id: string;
   name: string;
   icon: React.FC<{ className?: string }>;
-  component: React.FC;
+  component: React.FC<ToolViewProps>;
   /** Keyboard shortcut number (Ctrl+N). Omit for no shortcut. */
   shortcut?: string;
   /** Entity types this tool manages (for nav:open-entity mapping). */

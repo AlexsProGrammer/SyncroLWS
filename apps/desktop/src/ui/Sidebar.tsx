@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { eventBus } from '@/core/events';
-import { getAllTools, type Tool } from '@/registry/ToolRegistry';
+import { getAllTools, getTool, type Tool } from '@/registry/ToolRegistry';
 import { getDB, getWorkspaceDB } from '@/core/db';
 import { useProfileStore, type Profile } from '@/store/profileStore';
 import { useWorkspaceStore, buildWorkspaceTree, type Workspace } from '@/store/workspaceStore';
@@ -961,18 +961,18 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
         {activeWorkspaceId && workspaceTools.length > 0 ? (
           <>
             {workspaceTools.map((wt) => {
-              const tool = enabledTools.find((t) => t.id === wt.tool_id);
+              const tool = getTool(wt.tool_id);
               if (!tool) return null;
               const Icon = tool.icon;
               const shortcut = getToolShortcut(wt);
               return (
                 <div key={wt.id} className="group relative flex items-center">
                   <button
-                    onClick={() => handleToolNav(tool.id)}
+                    onClick={() => handleToolNav(wt.id)}
                     title={collapsed ? `${wt.name}${shortcut ? ` (Ctrl+${shortcut})` : ''}` : undefined}
                     className={cn(
                       'flex flex-1 items-center gap-2.5 rounded-md px-2 py-2 text-sm transition-colors',
-                      active === tool.id
+                      active === wt.id
                         ? 'bg-accent text-accent-foreground font-medium'
                         : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
                     )}

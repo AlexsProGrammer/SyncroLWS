@@ -5,6 +5,14 @@ import { getAllTools } from '@/registry/ToolRegistry';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export interface WorkspaceTool {
+  id: string;          // instance UUID (PK)
+  tool_id: string;     // e.g. "notes", "calendar"
+  name: string;
+  config: string;
+  sort_order: number;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -22,6 +30,7 @@ interface WorkspaceState {
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
   loading: boolean;
+  workspaceTools: WorkspaceTool[];
 }
 
 interface WorkspaceActions {
@@ -48,6 +57,8 @@ interface WorkspaceActions {
   reorderWorkspaces: (orderedIds: string[]) => Promise<void>;
   /** Get the last active workspace ID from profile DB. */
   getLastWorkspaceId: () => Promise<string | null>;
+  /** (Re-)load workspace tools for the active workspace DB. */
+  loadWorkspaceTools: () => Promise<void>;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -57,6 +68,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
     workspaces: [],
     activeWorkspaceId: null,
     loading: false,
+    workspaceTools: [],
 
     loadWorkspaces: async () => {
       const db = getDB();
@@ -112,19 +124,23 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         try {
           const wsDb = getWorkspaceDB();
           const tools = getAllTools();
+          let firstInstanceId = '';
           for (let i = 0; i < tools.length; i++) {
             const tool = tools[i]!;
             const toolInstanceId = crypto.randomUUID();
+            if (i === 0) firstInstanceId = toolInstanceId;
             await wsDb.execute(
               `INSERT INTO workspace_tools (id, tool_id, name, description, config, sort_order, created_at)
                VALUES (?, ?, ?, ?, '{}', ?, ?)`,
               [toolInstanceId, tool.id, tool.name, tool.manifest?.description ?? '', i, now],
             );
           }
+          // Reload into store so App.tsx's instance map is fresh
+          await get().loadWorkspaceTools();
           eventBus.emit('workspace:tool-added', { workspaceId: id, toolInstanceId: '', toolId: '' });
-          // Notify App to auto-navigate to the first tool
-          if (tools.length > 0) {
-            eventBus.emit('workspace:tools-seeded', { firstToolId: tools[0]!.id });
+          // Notify App to auto-navigate to the first tool (by instance UUID)
+          if (firstInstanceId) {
+            eventBus.emit('workspace:tools-seeded', { firstInstanceId });
           }
         } catch (err) {
           console.warn('[workspace] auto-seed tools failed:', err);
@@ -154,6 +170,8 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         set({ activeWorkspaceId: id, loading: false });
         // Persist last active workspace for this profile
         void setProfileSetting('last_workspace_id', id);
+        // Load workspace tools into store so App.tsx can resolve instance UUIDs
+        void get().loadWorkspaceTools();
         eventBus.emit('workspace:switched', { id, name: ws.name });
       } catch (err) {
         console.error('[workspace] failed to switch:', err);
@@ -239,6 +257,18 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
 
     getLastWorkspaceId: async () => {
       return getProfileSetting('last_workspace_id');
+    },
+
+    loadWorkspaceTools: async () => {
+      try {
+        const db = getWorkspaceDB();
+        const rows = await db.select<WorkspaceTool[]>(
+          `SELECT id, tool_id, name, config, sort_order FROM workspace_tools ORDER BY sort_order ASC`,
+        );
+        set({ workspaceTools: rows });
+      } catch {
+        set({ workspaceTools: [] });
+      }
     },
   }),
 );

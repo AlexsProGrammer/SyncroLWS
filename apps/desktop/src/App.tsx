@@ -10,10 +10,10 @@ import { AddAspectDialogHost } from './ui/components/AddAspectDialogHost';
 import { getTool, getToolByEntityType } from './registry/ToolRegistry';
 import { eventBus } from './core/events';
 import { startBackupScheduler } from './core/backup';
-import { useWorkspaceStore } from './store/workspaceStore';
+import { useWorkspaceStore, type WorkspaceTool } from './store/workspaceStore';
 import { useProfileStore } from './store/profileStore';
 import { toast } from './ui/hooks/use-toast';
-import { getWorkspaceDB } from './core/db';
+
 import type { BaseEntity } from '@syncrohws/shared-types';
 
 interface ConflictState {
@@ -23,9 +23,36 @@ interface ConflictState {
 }
 
 export default function App(): React.ReactElement {
-  const [activeView, setActiveView] = useState<ActiveView>('notes');
+  // activeView is now a workspace tool INSTANCE UUID (or 'settings')
+  const [activeView, setActiveView] = useState<ActiveView>('settings');
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   const { enabledTools } = useEnabledTools();
+
+  // Subscribe to workspace tools from the store (instance list)
+  const workspaceTools = useWorkspaceStore((s) => s.workspaceTools);
+  const loadWorkspaceTools = useWorkspaceStore((s) => s.loadWorkspaceTools);
+
+  // Reload workspace tools when tool-added/removed events fire
+  useEffect(() => {
+    const handler = (): void => { void loadWorkspaceTools(); };
+    eventBus.on('workspace:tool-added', handler);
+    eventBus.on('workspace:tool-removed', handler);
+    return () => {
+      eventBus.off('workspace:tool-added', handler);
+      eventBus.off('workspace:tool-removed', handler);
+    };
+  }, [loadWorkspaceTools]);
+
+  // Map: instanceId -> toolId (for renderedView resolution)
+  const instanceMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const wt of workspaceTools) m.set(wt.id, wt.tool_id);
+    return m;
+  }, [workspaceTools]);
+
+  // Keep a ref to workspaceTools for use inside stable event handlers
+  const workspaceToolsRef = useRef<WorkspaceTool[]>(workspaceTools);
+  workspaceToolsRef.current = workspaceTools;
 
   const navigateTo = useCallback((id: ActiveView) => {
     setActiveView(id);
@@ -35,14 +62,18 @@ export default function App(): React.ReactElement {
   const enabledToolsRef = useRef(enabledTools);
   enabledToolsRef.current = enabledTools;
 
-  // If the active tool gets disabled, fall back to the first enabled tool or settings
+  // If activeView is a legacy tool.id (not an instance UUID), resolve to first matching instance
   useEffect(() => {
     if (activeView === 'settings') return;
-    const isActive = enabledTools.some((t) => t.id === activeView);
-    if (!isActive) {
-      setActiveView(enabledTools[0]?.id ?? 'settings');
+    if (instanceMap.has(activeView)) return; // already an instance UUID
+    // It's a legacy tool.id string — find first matching instance
+    const wt = workspaceTools.find((w) => w.tool_id === activeView);
+    if (wt) {
+      setActiveView(wt.id);
+    } else if (workspaceTools.length > 0) {
+      setActiveView(workspaceTools[0]!.id);
     }
-  }, [enabledTools, activeView]);
+  }, [activeView, instanceMap, workspaceTools]);
 
   // ── Stable one-time effect: keyboard, events, backup ──────────────────────
   useEffect(() => {
@@ -55,36 +86,30 @@ export default function App(): React.ReactElement {
       }
       // Ctrl+1…9 → switch to tool by workspace shortcut config
       if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
-        // Try workspace tool shortcuts first
-        try {
-          const db = getWorkspaceDB();
-          db.select<{ tool_id: string; config: string }[]>(
-            `SELECT tool_id, config FROM workspace_tools`,
-          ).then((rows) => {
-            for (const row of rows) {
-              try {
-                const cfg = JSON.parse(row.config || '{}');
-                if (cfg.shortcut === e.key) {
-                  setActiveView(row.tool_id);
-                  return;
-                }
-              } catch { /* skip */ }
+        const wts = workspaceToolsRef.current;
+        for (const wt of wts) {
+          try {
+            const cfg = JSON.parse(wt.config || '{}');
+            if (cfg.shortcut === e.key) {
+              setActiveView(wt.id); // use instance UUID
+              e.preventDefault();
+              return;
             }
-          }).catch(() => { /* no workspace DB loaded */ });
-        } catch {
-          // No workspace DB loaded — ignore
+          } catch { /* skip */ }
         }
         e.preventDefault();
       }
     };
     window.addEventListener('keydown', onKey);
 
-    // nav:open-entity → switch to the matching tool
+    // nav:open-entity → switch to first workspace tool instance of the matching type
     const onOpenEntity = ({ type }: { id: string; type: BaseEntity['type'] }): void => {
       try {
-        const tools = enabledToolsRef.current;
-        const tool = getToolByEntityType(type) ?? tools.find((t) => t.entityTypes?.includes(type));
-        if (tool) setActiveView(tool.id);
+        const tool = getToolByEntityType(type) ?? enabledToolsRef.current.find((t) => t.entityTypes?.includes(type));
+        if (!tool) return;
+        const wts = workspaceToolsRef.current;
+        const wt = wts.find((w) => w.tool_id === tool.id);
+        if (wt) setActiveView(wt.id);
       } catch (err) {
         console.error('[app] nav:open-entity failed:', err);
       }
@@ -106,12 +131,10 @@ export default function App(): React.ReactElement {
     // Backup scheduler
     const stopBackup = startBackupScheduler();
 
-    // Profile switch → reset active view to first enabled tool
+    // Profile switch → reset active view to first workspace tool instance
     const onProfileSwitched = (): void => {
-      const firstTool = useWorkspaceStore.getState().activeWorkspaceId
-        ? enabledToolsRef.current[0]?.id
-        : undefined;
-      setActiveView(firstTool ?? 'settings');
+      const wts = workspaceToolsRef.current;
+      setActiveView(wts[0]?.id ?? 'settings');
     };
     eventBus.on('profile:switched', onProfileSwitched);
 
@@ -121,9 +144,9 @@ export default function App(): React.ReactElement {
     };
     eventBus.on('sync:conflict', onConflict);
 
-    // New workspace with seeded tools → auto-navigate to first tool
-    const onToolsSeeded = ({ firstToolId }: { firstToolId: string }): void => {
-      setActiveView(firstToolId);
+    // New workspace with seeded tools → auto-navigate to first instance UUID
+    const onToolsSeeded = ({ firstInstanceId }: { firstInstanceId: string }): void => {
+      setActiveView(firstInstanceId);
     };
     eventBus.on('workspace:tools-seeded', onToolsSeeded);
 
@@ -141,19 +164,23 @@ export default function App(): React.ReactElement {
   // Resolve the active view's component (memoized to avoid unnecessary remounts)
   const renderedView = useMemo(() => {
     if (activeView === 'settings') return <SettingsView />;
-    const tool = getTool(activeView);
+    // Resolve instance UUID → tool_id → component
+    const toolId = instanceMap.get(activeView);
+    const tool = toolId ? getTool(toolId) : getTool(activeView); // fallback for legacy strings
     if (tool) {
       const Component = tool.component;
-      return <Component />;
+      return <Component toolInstanceId={activeView} />;
     }
     return <SettingsView />;
-  }, [activeView]);
+  }, [activeView, instanceMap]);
 
   // Display name for the header
+  const activeWt = workspaceTools.find((wt) => wt.id === activeView);
+  const activeToolId = activeWt ? activeWt.tool_id : activeView;
   const headerTitle =
     activeView === 'settings'
       ? 'Settings'
-      : (getTool(activeView)?.name ?? activeView).replace('-', ' ');
+      : (activeWt?.name ?? getTool(activeToolId)?.name ?? activeView).replace('-', ' ');
 
   const activeWorkspace = useWorkspaceStore((s) =>
     s.workspaces.find((w) => w.id === s.activeWorkspaceId),

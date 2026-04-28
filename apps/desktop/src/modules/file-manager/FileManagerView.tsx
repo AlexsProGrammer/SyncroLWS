@@ -80,7 +80,7 @@ async function hashFile(buffer: ArrayBuffer): Promise<string> {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function FileManagerView(): React.ReactElement {
+export function FileManagerView({ toolInstanceId: _toolInstanceId }: { toolInstanceId?: string }): React.ReactElement {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');

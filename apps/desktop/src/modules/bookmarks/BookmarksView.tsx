@@ -45,7 +45,7 @@ const PRESET_COLORS = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function BookmarksView(): React.ReactElement {
+export function BookmarksView({ toolInstanceId }: { toolInstanceId?: string }): React.ReactElement {
   const [bookmarks, setBookmarks] = useState<AspectWithCore[]>([]);
   const [search, setSearch] = useState('');
   const [filterTag, setFilterTag] = useState<string | null>(null);
@@ -64,12 +64,12 @@ export function BookmarksView(): React.ReactElement {
 
   const load = useCallback(async () => {
     try {
-      const items = await listByAspect('bookmark');
+      const items = await listByAspect('bookmark', { tool_instance_id: toolInstanceId ?? null });
       setBookmarks(items);
     } catch (err) {
       console.error('[bookmarks] load failed:', err);
     }
-  }, []);
+  }, [toolInstanceId]);
 
   useEffect(() => {
     void load();
@@ -101,7 +101,7 @@ export function BookmarksView(): React.ReactElement {
           tags,
         },
         aspects: [
-          { aspect_type: 'bookmark', data: { url, pinned: newPinned, favicon_hash: null } },
+          { aspect_type: 'bookmark', data: { url, pinned: newPinned, favicon_hash: null }, tool_instance_id: toolInstanceId ?? null },
         ],
       });
       setNewUrl('');
@@ -114,7 +114,7 @@ export function BookmarksView(): React.ReactElement {
     } catch (err) {
       console.error('[bookmarks] create failed:', err);
     }
-  }, [newUrl, newTitle, newDescription, newColor, newTags, newPinned]);
+  }, [newUrl, newTitle, newDescription, newColor, newTags, newPinned, toolInstanceId]);
 
   // ── Toggle pin ────────────────────────────────────────────────────────────
 

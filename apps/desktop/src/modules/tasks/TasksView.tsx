@@ -54,7 +54,7 @@ function dataOf(item: KanbanTaskItem): Partial<TaskAspectData> {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function TasksView(): React.ReactElement {
+export function TasksView({ toolInstanceId }: { toolInstanceId?: string }): React.ReactElement {
   const [tasks, setTasks] = useState<KanbanTaskItem[]>([]);
   const [columns, setColumns] = useState<KanbanColumn[]>(DEFAULT_COLUMNS);
   const [activeTask, setActiveTask] = useState<KanbanTaskItem | null>(null);
@@ -116,12 +116,12 @@ export function TasksView(): React.ReactElement {
 
   const loadTasks = useCallback(async () => {
     try {
-      const items = await listByAspect('task');
+      const items = await listByAspect('task', { tool_instance_id: toolInstanceId ?? null });
       setTasks(items);
     } catch (err) {
       console.error('[tasks] load failed:', err);
     }
-  }, []);
+  }, [toolInstanceId]);
 
   useEffect(() => {
     void loadTasks();
@@ -185,6 +185,7 @@ export function TasksView(): React.ReactElement {
                 priority: 'medium',
                 column_id: colId,
               },
+              tool_instance_id: toolInstanceId ?? null,
             },
           ],
         });
@@ -193,7 +194,7 @@ export function TasksView(): React.ReactElement {
         console.error('[tasks] create failed:', err);
       }
     },
-    [newTaskTitle, columns],
+    [newTaskTitle, columns, toolInstanceId],
   );
 
   // ── Delete ────────────────────────────────────────────────────────────────
