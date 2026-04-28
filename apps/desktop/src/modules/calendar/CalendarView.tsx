@@ -13,6 +13,7 @@ import type {
 } from '@fullcalendar/core';
 import type { EventResizeDoneArg } from '@fullcalendar/interaction';
 import { eventBus } from '@/core/events';
+import { useEntityEvents } from '@/ui/hooks/useEntityEvents';
 import {
   createEntity,
   listByAspect,
@@ -104,32 +105,10 @@ export function CalendarView({ toolInstanceId }: { toolInstanceId?: string }): R
     void loadCrossModuleEvents();
   }, [loadEvents, loadCrossModuleEvents]);
 
-  useEffect(() => {
-    const handler = (): void => {
-      void loadEvents();
-      void loadCrossModuleEvents();
-    };
-    eventBus.on('core:created', handler);
-    eventBus.on('core:updated', handler);
-    eventBus.on('core:deleted', handler);
-    eventBus.on('aspect:added', handler);
-    eventBus.on('aspect:updated', handler);
-    eventBus.on('aspect:removed', handler);
-    eventBus.on('entity:created', handler);
-    eventBus.on('entity:updated', handler);
-    eventBus.on('entity:deleted', handler);
-    return () => {
-      eventBus.off('core:created', handler);
-      eventBus.off('core:updated', handler);
-      eventBus.off('core:deleted', handler);
-      eventBus.off('aspect:added', handler);
-      eventBus.off('aspect:updated', handler);
-      eventBus.off('aspect:removed', handler);
-      eventBus.off('entity:created', handler);
-      eventBus.off('entity:updated', handler);
-      eventBus.off('entity:deleted', handler);
-    };
-  }, [loadEvents, loadCrossModuleEvents]);
+  useEntityEvents(() => {
+    void loadEvents();
+    void loadCrossModuleEvents();
+  });
 
   // ── FullCalendar input ────────────────────────────────────────────────────
 

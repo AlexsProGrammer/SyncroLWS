@@ -2,8 +2,9 @@
  * HabitsView — Hybrid-entity edition.
  * core.title=name, core.icon, core.color; habit aspect holds frequency/target/completions/archived.
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { eventBus } from '@/core/events';
+import { useEntityEvents } from '@/ui/hooks/useEntityEvents';
 import {
   createEntity,
   listByAspect,
@@ -152,16 +153,7 @@ export function HabitsView({ toolInstanceId }: { toolInstanceId?: string }): Rea
     void load();
   }, [load]);
 
-  useEffect(() => {
-    const onChange = (): void => void load();
-    const events = [
-      'core:created', 'core:updated', 'core:deleted',
-      'aspect:added', 'aspect:updated', 'aspect:removed',
-      'entity:created', 'entity:updated', 'entity:deleted',
-    ] as const;
-    events.forEach((e) => eventBus.on(e, onChange));
-    return () => events.forEach((e) => eventBus.off(e, onChange));
-  }, [load]);
+  useEntityEvents(load, { aspectType: 'habit' });
 
   // Keep selectedHabit in sync with reloaded list
   useEffect(() => {
@@ -258,8 +250,39 @@ export function HabitsView({ toolInstanceId }: { toolInstanceId?: string }): Rea
 
   // ── Filtered habits ───────────────────────────────────────────────────────
 
-  const activeHabits = habits.filter((h) => !dataOf(h).archived);
-  const archivedHabits = habits.filter((h) => dataOf(h).archived);
+  const { activeHabits, archivedHabits } = useMemo(() => {
+    const active: AspectWithCore[] = [];
+    const archived: AspectWithCore[] = [];
+    for (const h of habits) {
+      if (dataOf(h).archived) archived.push(h);
+      else active.push(h);
+    }
+    return { activeHabits: active, archivedHabits: archived };
+  }, [habits]);
+
+  /**
+   * Derived per-habit stats — streak computation walks up to ~1000 dates,
+   * so memoize so unrelated re-renders (dialog toggles, etc.) don't repay
+   * the cost.
+   */
+  const activeHabitsDerived = useMemo(() => {
+    return activeHabits.map((item) => {
+      const data = dataOf(item);
+      const frequency = data.frequency ?? 'daily';
+      const target = data.target_count ?? 1;
+      const completions = data.completions ?? {};
+      const key = periodKey(frequency);
+      const current = completions[key] ?? 0;
+      const completed = current >= target;
+      const streak = getStreak(completions, target, frequency);
+      return { item, data, frequency, target, completions, key, current, completed, streak };
+    });
+  }, [activeHabits]);
+
+  const completedCount = useMemo(
+    () => activeHabitsDerived.filter((h) => h.completed).length,
+    [activeHabitsDerived],
+  );
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden p-4">
@@ -268,11 +291,7 @@ export function HabitsView({ toolInstanceId }: { toolInstanceId?: string }): Rea
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-foreground">Today&apos;s Habits</h2>
           <Badge variant="outline" className="text-[10px]">
-            {activeHabits.filter((h) => {
-              const d = dataOf(h);
-              return (d.completions?.[periodKey(d.frequency ?? 'daily')] ?? 0) >= (d.target_count ?? 1);
-            }).length}
-            /{activeHabits.length}
+            {completedCount}/{activeHabits.length}
           </Badge>
         </div>
         <div className="flex items-center gap-2">
@@ -295,15 +314,7 @@ export function HabitsView({ toolInstanceId }: { toolInstanceId?: string }): Rea
             <p className="text-sm text-muted-foreground">No habits yet — create one to start tracking!</p>
           </div>
         )}
-        {activeHabits.map((item) => {
-          const data = dataOf(item);
-          const frequency = data.frequency ?? 'daily';
-          const target = data.target_count ?? 1;
-          const completions = data.completions ?? {};
-          const key = periodKey(frequency);
-          const current = completions[key] ?? 0;
-          const completed = current >= target;
-          const streak = getStreak(completions, target, frequency);
+        {activeHabitsDerived.map(({ item, frequency, target, current, completed, streak }) => {
           const color = item.core.color;
           const icon = item.core.icon || '✅';
 

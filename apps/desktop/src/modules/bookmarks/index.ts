@@ -1,20 +1,26 @@
-import { eventBus } from '@/core/events';
+import type { HybridEntity } from '@syncrohws/shared-types';
 
 export { BookmarksView } from './BookmarksView';
 
-/** Extract display title from a bookmark payload. */
-export function getEntityTitle(payload: Record<string, unknown>): string {
-  return (typeof payload['title'] === 'string' && payload['title'])
-    || (typeof payload['url'] === 'string' ? payload['url'] : 'Untitled Bookmark');
+function bookmarkData(entity: HybridEntity): Record<string, unknown> {
+  return (entity.aspects.find((a) => a.aspect_type === 'bookmark')?.data ?? {}) as Record<string, unknown>;
 }
 
-/** Extract subtitle from a bookmark payload (URL domain). */
-export function getEntitySubtitle(payload: Record<string, unknown>): string | undefined {
-  if (typeof payload['url'] !== 'string') return undefined;
+/** Extract display title from a bookmark hybrid entity. */
+export function getEntityTitle(entity: HybridEntity): string {
+  if (entity.core.title) return entity.core.title;
+  const data = bookmarkData(entity);
+  return (typeof data['url'] === 'string' ? data['url'] : 'Untitled Bookmark');
+}
+
+/** Extract subtitle from a bookmark hybrid entity (URL domain). */
+export function getEntitySubtitle(entity: HybridEntity): string | undefined {
+  const data = bookmarkData(entity);
+  if (typeof data['url'] !== 'string') return undefined;
   try {
-    return new URL(payload['url']).hostname;
+    return new URL(data['url']).hostname;
   } catch {
-    return payload['url'];
+    return data['url'];
   }
 }
 
@@ -22,10 +28,5 @@ export function getEntitySubtitle(payload: Record<string, unknown>): string | un
  * Bookmarks module — event bus hooks.
  */
 export function init(): void {
-  eventBus.on('entity:created', ({ entity }) => {
-    if (entity.type !== 'bookmark') return;
-    console.log('[module:bookmarks] bookmark created:', entity.id);
-  });
-
   console.log('[module:bookmarks] initialised');
 }

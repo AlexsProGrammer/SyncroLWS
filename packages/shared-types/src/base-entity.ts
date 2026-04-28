@@ -270,6 +270,8 @@ export const ASPECT_TYPES = [
   'pomodoro_session',
   'habit',
   'bookmark',
+  'file_attachment',
+  'project',
 ] as const;
 
 export type AspectType = (typeof ASPECT_TYPES)[number];
@@ -430,6 +432,35 @@ export const BookmarkAspectDataSchema = z.object({
 });
 export type BookmarkAspectData = z.infer<typeof BookmarkAspectDataSchema>;
 
+export const FileAttachmentAspectDataSchema = z.object({
+  /** SHA-256 of file bytes — joins to local_files.hash. */
+  hash: z.string(),
+  /** Original file name as uploaded. */
+  name: z.string().default(''),
+  mime_type: z.string().default('application/octet-stream'),
+  size_bytes: z.number().int().nonnegative().default(0),
+});
+export type FileAttachmentAspectData = z.infer<typeof FileAttachmentAspectDataSchema>;
+
+export const ProjectAspectDataSchema = z.object({
+  status: z.enum(['active', 'on_hold', 'completed', 'archived']).default('active'),
+  due_date: z.string().datetime().nullable().default(null),
+  /** Free-form owner / responsible label. */
+  owner_label: z.string().default(''),
+  /** Optional milestones — id + label + done flag + optional due date. */
+  milestones: z
+    .array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        done: z.boolean().default(false),
+        due_date: z.string().datetime().nullable().default(null),
+      }),
+    )
+    .default([]),
+});
+export type ProjectAspectData = z.infer<typeof ProjectAspectDataSchema>;
+
 // ── tRPC context (shared between backend routes; safe to import everywhere) ──
 
 /**
@@ -450,4 +481,6 @@ export const ASPECT_DATA_SCHEMAS = {
   pomodoro_session: PomodoroAspectDataSchema,
   habit: HabitAspectDataSchema,
   bookmark: BookmarkAspectDataSchema,
+  file_attachment: FileAttachmentAspectDataSchema,
+  project: ProjectAspectDataSchema,
 } as const satisfies Record<AspectType, z.ZodType>;

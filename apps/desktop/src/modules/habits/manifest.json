@@ -13,6 +13,6 @@
     "type": "habit",
     "label": "Habit",
     "defaultData": { "frequency": "daily", "target_count": 1, "completions": {}, "archived": false },
-    "requiresToolInstance": false
+    "requiresToolInstance": true
   }
 }

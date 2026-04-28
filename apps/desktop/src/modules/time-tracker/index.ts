@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { eventBus } from '@/core/events';
-import type { TimeLogPayload } from '@syncrohws/shared-types';
+import type { HybridEntity } from '@syncrohws/shared-types';
 
 export { TimeTrackerView } from './TimeTrackerView';
 export type { TimeLogItem } from './TimeTrackerView';
@@ -8,20 +8,27 @@ export { formatDuration } from './TimeTrackerView';
 export { ManualEntryForm } from './ManualEntryForm';
 export { TimeTrackerReports } from './TimeTrackerReports';
 
-/** Extract display title from a time log payload. */
-export function getEntityTitle(payload: Record<string, unknown>): string {
-  return (typeof payload['description'] === 'string' && payload['description']) || 'Time Log';
+function timeLogData(entity: HybridEntity): Record<string, unknown> {
+  return (entity.aspects.find((a) => a.aspect_type === 'time_log')?.data ?? {}) as Record<string, unknown>;
 }
 
-/** Extract subtitle from a time log payload (duration + project). */
-export function getEntitySubtitle(payload: Record<string, unknown>): string | undefined {
+/** Extract display title from a time-log hybrid entity. */
+export function getEntityTitle(entity: HybridEntity): string {
+  if (entity.core.title) return entity.core.title;
+  const data = timeLogData(entity);
+  return (typeof data['description'] === 'string' && data['description']) || 'Time Log';
+}
+
+/** Extract subtitle from a time-log hybrid entity. */
+export function getEntitySubtitle(entity: HybridEntity): string | undefined {
+  const data = timeLogData(entity);
   const parts: string[] = [];
-  if (typeof payload['duration_seconds'] === 'number' && payload['duration_seconds'] > 0) {
-    const mins = Math.round(payload['duration_seconds'] / 60);
+  if (typeof data['duration_seconds'] === 'number' && data['duration_seconds'] > 0) {
+    const mins = Math.round(data['duration_seconds'] / 60);
     parts.push(mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`);
   }
-  if (typeof payload['project'] === 'string' && payload['project']) parts.push(payload['project']);
-  if (payload['billable'] === true) parts.push('billable');
+  if (typeof data['project'] === 'string' && data['project']) parts.push(data['project']);
+  if (data['billable'] === true) parts.push('billable');
   return parts.length ? parts.join(' · ') : undefined;
 }
 
@@ -96,20 +103,3 @@ function _stopWindowPoller(): void {
   }
 }
 
-export function createTimeLog(
-  description: string,
-  windowTitle: string,
-  billable = false,
-): TimeLogPayload {
-  return {
-    description,
-    start: new Date().toISOString(),
-    end: null,
-    duration_seconds: null,
-    window_title: windowTitle,
-    billable,
-    hourly_rate_cents: 0,
-    project: '',
-    manual: false,
-  };
-}

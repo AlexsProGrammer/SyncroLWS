@@ -16,6 +16,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { eventBus } from '@/core/events';
+import { useEntityEvents } from '@/ui/hooks/useEntityEvents';
 import {
   createEntity,
   listByAspect,
@@ -127,29 +128,7 @@ export function TasksView({ toolInstanceId }: { toolInstanceId?: string }): Reac
     void loadTasks();
   }, [loadTasks]);
 
-  useEffect(() => {
-    const onChange = (): void => void loadTasks();
-    eventBus.on('core:created', onChange);
-    eventBus.on('core:updated', onChange);
-    eventBus.on('core:deleted', onChange);
-    eventBus.on('aspect:added', onChange);
-    eventBus.on('aspect:updated', onChange);
-    eventBus.on('aspect:removed', onChange);
-    eventBus.on('entity:created', onChange);
-    eventBus.on('entity:updated', onChange);
-    eventBus.on('entity:deleted', onChange);
-    return () => {
-      eventBus.off('core:created', onChange);
-      eventBus.off('core:updated', onChange);
-      eventBus.off('core:deleted', onChange);
-      eventBus.off('aspect:added', onChange);
-      eventBus.off('aspect:updated', onChange);
-      eventBus.off('aspect:removed', onChange);
-      eventBus.off('entity:created', onChange);
-      eventBus.off('entity:updated', onChange);
-      eventBus.off('entity:deleted', onChange);
-    };
-  }, [loadTasks]);
+  useEntityEvents(loadTasks, { aspectType: 'task' });
 
   // ── Open detail (shared sheet) ────────────────────────────────────────────
 

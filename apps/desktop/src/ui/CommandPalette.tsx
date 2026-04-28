@@ -4,13 +4,14 @@ import { eventBus } from '@/core/events';
 import { ftsSearch } from '@/core/db';
 import { getToolByEntityType, getAllAspectPlugins } from '@/registry/ToolRegistry';
 import { getEntity } from '@/core/entityStore';
-import type { AspectType, BaseEntity } from '@syncrohws/shared-types';
+import type { AspectType, BaseEntity, HybridEntity } from '@syncrohws/shared-types';
 
-type SearchResult = Pick<BaseEntity, 'id' | 'type'> & {
+interface SearchResult {
+  entity: HybridEntity;
+  primaryAspectType: AspectType | 'general';
   title: string;
   subtitle?: string;
-  payload: Record<string, unknown>;
-};
+}
 
 export function CommandPalette(): React.ReactElement {
   const [open, setOpen] = useState(false);
@@ -67,33 +68,24 @@ export function CommandPalette(): React.ReactElement {
         setResults([]);
         return;
       }
-      // Phase F: hydrate via entityStore (HybridEntity); legacy `type`/`payload`
-      // columns no longer exist. Synthesize a payload-like object from the
-      // primary aspect for tool-supplied getEntityTitle/Subtitle helpers.
+      // Phase G.3: hydrate via entityStore and pass the HybridEntity directly
+      // to tool helpers — no more synthesized payload shim.
       const hydrated = await Promise.all(ids.map((id) => getEntity(id)));
       const mapped: SearchResult[] = hydrated
         .filter((h): h is NonNullable<typeof h> => h !== null)
         .map((h) => {
           const primary = h.aspects[0];
-          const aspectType = primary?.aspect_type ?? 'general';
-          const payload: Record<string, unknown> = {
-            title: h.core.title,
-            description: h.core.description,
-            color: h.core.color,
-            ...((primary?.data as Record<string, unknown> | undefined) ?? {}),
-          };
+          const aspectType: AspectType | 'general' = primary?.aspect_type ?? 'general';
           const tool = getToolByEntityType(aspectType);
-          const title = h.core.title
-            || tool?.getEntityTitle?.(payload)
-            || h.core.id;
-          const subtitle = h.core.description || tool?.getEntitySubtitle?.(payload);
-          return {
-            id: h.core.id,
-            type: aspectType as BaseEntity['type'],
-            title,
-            subtitle,
-            payload,
-          };
+          const title =
+            (h.core.title && h.core.title.trim()) ||
+            tool?.getEntityTitle?.(h) ||
+            h.core.id;
+          const subtitle =
+            (h.core.description && h.core.description.trim()) ||
+            tool?.getEntitySubtitle?.(h) ||
+            undefined;
+          return { entity: h, primaryAspectType: aspectType, title, subtitle };
         });
       console.log('[fts] results:', mapped);
       setResults(mapped);
@@ -164,33 +156,35 @@ export function CommandPalette(): React.ReactElement {
             </Command.Empty>
           )}
           {results.map((r) => {
-            const tool = getToolByEntityType(r.type);
+            const tool = getToolByEntityType(r.primaryAspectType);
             const ToolIcon = tool?.icon;
+            const id = r.entity.core.id;
+            const navType = r.primaryAspectType as BaseEntity['type'];
 
             // Allow module to provide a full custom render
             if (tool?.renderSearchResult) {
               return (
                 <Command.Item
-                  key={r.id}
-                  value={r.id}
+                  key={id}
+                  value={id}
                   onSelect={() => {
-                    eventBus.emit('nav:open-entity', { id: r.id, type: r.type });
+                    eventBus.emit('nav:open-entity', { id, type: navType });
                     setOpen(false);
                     setQuery('');
                   }}
                   className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-accent aria-selected:bg-accent"
                 >
-                  {tool.renderSearchResult({ id: r.id, type: r.type, title: r.title, payload: r.payload })}
+                  {tool.renderSearchResult(r.entity)}
                 </Command.Item>
               );
             }
 
             return (
               <Command.Item
-                key={r.id}
-                value={r.id}
+                key={id}
+                value={id}
                 onSelect={() => {
-                  eventBus.emit('nav:open-entity', { id: r.id, type: r.type });
+                  eventBus.emit('nav:open-entity', { id, type: navType });
                   setOpen(false);
                   setQuery('');
                 }}
@@ -200,7 +194,7 @@ export function CommandPalette(): React.ReactElement {
                   <ToolIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
                 ) : (
                   <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-                    {r.type}
+                    {r.primaryAspectType}
                   </span>
                 )}
                 <div className="flex min-w-0 flex-1 flex-col">
@@ -210,7 +204,7 @@ export function CommandPalette(): React.ReactElement {
                   )}
                 </div>
                 <span className="shrink-0 text-[10px] text-muted-foreground/60 capitalize">
-                  {tool?.name ?? r.type}
+                  {tool?.name ?? r.primaryAspectType}
                 </span>
               </Command.Item>
             );

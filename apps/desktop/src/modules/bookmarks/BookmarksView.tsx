@@ -4,6 +4,7 @@
  */
 import React, { useState, useEffect, useCallback } from 'react';
 import { eventBus } from '@/core/events';
+import { useEntityEvents } from '@/ui/hooks/useEntityEvents';
 import {
   createEntity,
   listByAspect,
@@ -75,16 +76,7 @@ export function BookmarksView({ toolInstanceId }: { toolInstanceId?: string }): 
     void load();
   }, [load]);
 
-  useEffect(() => {
-    const onChange = (): void => void load();
-    const events = [
-      'core:created', 'core:updated', 'core:deleted',
-      'aspect:added', 'aspect:updated', 'aspect:removed',
-      'entity:created', 'entity:updated', 'entity:deleted',
-    ] as const;
-    events.forEach((e) => eventBus.on(e, onChange));
-    return () => events.forEach((e) => eventBus.off(e, onChange));
-  }, [load]);
+  useEntityEvents(load, { aspectType: 'bookmark' });
 
   // ── Create ────────────────────────────────────────────────────────────────
 

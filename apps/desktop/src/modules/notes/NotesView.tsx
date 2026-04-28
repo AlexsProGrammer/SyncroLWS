@@ -9,6 +9,7 @@ import {
 } from '@/ui/components/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { eventBus } from '@/core/events';
+import { useEntityEvents } from '@/ui/hooks/useEntityEvents';
 import {
   createEntity,
   listByAspect,
@@ -70,31 +71,7 @@ export function NotesView({ toolInstanceId }: { toolInstanceId?: string }): Reac
     void loadNotes();
   }, [loadNotes]);
 
-  useEffect(() => {
-    const onUpdate = (): void => {
-      void loadNotes();
-    };
-    eventBus.on('core:created', onUpdate);
-    eventBus.on('core:updated', onUpdate);
-    eventBus.on('core:deleted', onUpdate);
-    eventBus.on('aspect:added', onUpdate);
-    eventBus.on('aspect:updated', onUpdate);
-    eventBus.on('aspect:removed', onUpdate);
-    eventBus.on('entity:created', onUpdate);
-    eventBus.on('entity:updated', onUpdate);
-    eventBus.on('entity:deleted', onUpdate);
-    return () => {
-      eventBus.off('core:created', onUpdate);
-      eventBus.off('core:updated', onUpdate);
-      eventBus.off('core:deleted', onUpdate);
-      eventBus.off('aspect:added', onUpdate);
-      eventBus.off('aspect:updated', onUpdate);
-      eventBus.off('aspect:removed', onUpdate);
-      eventBus.off('entity:created', onUpdate);
-      eventBus.off('entity:updated', onUpdate);
-      eventBus.off('entity:deleted', onUpdate);
-    };
-  }, [loadNotes]);
+  useEntityEvents(loadNotes, { aspectType: 'note' });
 
   const openNote = useCallback((id: string): void => {
     eventBus.emit('nav:open-detail-sheet', { id, initialAspectType: 'note' });

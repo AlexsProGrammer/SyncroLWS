@@ -17,14 +17,8 @@ export type AppEvents = {
     resolve: (resolved: BaseEntity) => void;
   };
 
-  // ── Entity CRUD ───────────────────────────────────────────────────────────
-  'entity:created': { entity: BaseEntity };
-  'entity:updated': { entity: BaseEntity };
-  'entity:deleted': { id: string; type: BaseEntity['type'] };
-
-  // ── Hybrid entity model (Phase A) ─────────────────────────────────────────
-  // Emitted by the new entityStore. The legacy 'entity:*' events above remain
-  // for modules that haven't migrated yet — they will be removed in Phase F.
+  // ── Hybrid entity model ───────────────────────────────────────────────────
+  // Emitted by the entityStore. Phase G.3 removed the legacy `entity:*` events.
   /** A new base entity (with optional initial aspects) was created. */
   'core:created': { core: EntityCore; aspects: EntityAspect[] };
   /** Shared core fields (title/description/color/icon/tags/parent_id) changed. */

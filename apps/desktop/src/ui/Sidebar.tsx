@@ -805,7 +805,7 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
       });
       void loadWorkspaceTools();
       // Trigger view refresh
-      eventBus.emit('entity:deleted', { id: '_reset_', type: 'note' as const });
+      eventBus.emit('core:deleted', { id: '_reset_' });
       eventBus.emit('notification:show', {
         title: 'Tool Reset',
         body: `All data for "${tool?.name ?? toolId}" has been removed.`,

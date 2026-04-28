@@ -1,18 +1,26 @@
 import { eventBus } from '@/core/events';
+import type { HybridEntity } from '@syncrohws/shared-types';
 
 export { PomodoroView } from './PomodoroView';
 
-/** Extract display title from a pomodoro session payload. */
-export function getEntityTitle(payload: Record<string, unknown>): string {
-  return (typeof payload['label'] === 'string' && payload['label']) || 'Pomodoro Session';
+function pomodoroData(entity: HybridEntity): Record<string, unknown> {
+  return (entity.aspects.find((a) => a.aspect_type === 'pomodoro_session')?.data ?? {}) as Record<string, unknown>;
 }
 
-/** Extract subtitle from a pomodoro session payload. */
-export function getEntitySubtitle(payload: Record<string, unknown>): string | undefined {
+/** Extract display title from a pomodoro hybrid entity. */
+export function getEntityTitle(entity: HybridEntity): string {
+  if (entity.core.title) return entity.core.title;
+  const data = pomodoroData(entity);
+  return (typeof data['label'] === 'string' && data['label']) || 'Pomodoro Session';
+}
+
+/** Extract subtitle from a pomodoro hybrid entity. */
+export function getEntitySubtitle(entity: HybridEntity): string | undefined {
+  const data = pomodoroData(entity);
   const parts: string[] = [];
-  if (typeof payload['phase'] === 'string') parts.push(payload['phase'].replace('_', ' '));
-  if (typeof payload['completed_sessions'] === 'number') {
-    parts.push(`${payload['completed_sessions']} sessions`);
+  if (typeof data['phase'] === 'string') parts.push(data['phase'].replace('_', ' '));
+  if (typeof data['completed_sessions'] === 'number') {
+    parts.push(`${data['completed_sessions']} sessions`);
   }
   return parts.length ? parts.join(' · ') : undefined;
 }

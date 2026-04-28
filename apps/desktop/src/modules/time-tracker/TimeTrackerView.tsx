@@ -5,6 +5,7 @@
  */
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { eventBus } from '@/core/events';
+import { useEntityEvents } from '@/ui/hooks/useEntityEvents';
 import {
   listByAspect,
   softDeleteEntity,
@@ -131,16 +132,7 @@ export function TimeTrackerView({ toolInstanceId }: { toolInstanceId?: string })
   }, []);
 
   // Reload on entity changes
-  useEffect(() => {
-    const onChange = (): void => void loadLogs();
-    const events = [
-      'core:created', 'core:updated', 'core:deleted',
-      'aspect:added', 'aspect:updated', 'aspect:removed',
-      'entity:created', 'entity:updated', 'entity:deleted',
-    ] as const;
-    events.forEach((e) => eventBus.on(e, onChange));
-    return () => events.forEach((e) => eventBus.off(e, onChange));
-  }, [loadLogs]);
+  useEntityEvents(loadLogs, { aspectType: 'time_log' });
 
   // ── Elapsed timer ─────────────────────────────────────────────────────────
 

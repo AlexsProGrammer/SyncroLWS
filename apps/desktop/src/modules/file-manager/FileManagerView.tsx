@@ -6,10 +6,12 @@
  * File attachment entities in `base_entities` reference files by hash.
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { getWorkspaceDB, getCurrentProfileId, getCurrentWorkspaceId } from '@/core/db';
 import { eventBus } from '@/core/events';
+import { useEntityEvents } from '@/ui/hooks/useEntityEvents';
+import { createEntity, softDeleteEntity, listByAspect } from '@/core/entityStore';
+import type { FileAttachmentAspectData } from '@syncrohws/shared-types';
 import { Button } from '@/ui/components/button';
 import { Badge } from '@/ui/components/badge';
 import { Input } from '@/ui/components/input';
@@ -29,16 +31,9 @@ interface FileItem {
   size_bytes: number;
   reference_count: number;
   created_at: string;
-  /** Display name from the file_attachment entity */
+  /** Display name from the file_attachment aspect. */
   name: string;
   entity_id: string;
-}
-
-interface FileAttachmentPayload {
-  name: string;
-  hash: string;
-  mime_type: string;
-  size_bytes: number;
 }
 
 type ViewMode = 'grid' | 'list';
@@ -94,40 +89,54 @@ export function FileManagerView({ toolInstanceId: _toolInstanceId }: { toolInsta
   const loadFiles = useCallback(async () => {
     try {
       const db = getWorkspaceDB();
+      const aspects = await listByAspect('file_attachment');
 
-      // Join local_files with base_entities to get display names
-      const rows = await db.select<{
-        hash: string;
-        local_path: string;
-        mime_type: string;
-        size_bytes: number;
-        reference_count: number;
-        created_at: string;
-        entity_id: string;
-        payload: string;
-      }[]>(
-        `SELECT lf.hash, lf.local_path, lf.mime_type, lf.size_bytes,
-                lf.reference_count, lf.created_at,
-                be.id as entity_id, be.payload
-         FROM local_files lf
-         JOIN base_entities be ON json_extract(be.payload, '$.hash') = lf.hash
-         WHERE be.type = 'file_attachment' AND be.deleted_at IS NULL
-         ORDER BY lf.created_at DESC`,
-      );
+      const hashes = aspects
+        .map(({ aspect }) => (aspect.data as Partial<FileAttachmentAspectData>).hash)
+        .filter((h): h is string => typeof h === 'string' && h.length > 0);
 
-      const items: FileItem[] = rows.map((r) => {
-        const p = JSON.parse(r.payload) as FileAttachmentPayload;
-        return {
-          hash: r.hash,
-          local_path: r.local_path,
-          mime_type: r.mime_type,
-          size_bytes: r.size_bytes,
-          reference_count: r.reference_count,
-          created_at: r.created_at,
-          name: p.name || 'Untitled',
-          entity_id: r.entity_id,
-        };
-      });
+      let lfByHash = new Map<
+        string,
+        { local_path: string; mime_type: string; size_bytes: number; reference_count: number; created_at: string }
+      >();
+      if (hashes.length > 0) {
+        const placeholders = hashes.map(() => '?').join(',');
+        const lfRows = await db.select<
+          {
+            hash: string;
+            local_path: string;
+            mime_type: string;
+            size_bytes: number;
+            reference_count: number;
+            created_at: string;
+          }[]
+        >(
+          `SELECT hash, local_path, mime_type, size_bytes, reference_count, created_at
+             FROM local_files WHERE hash IN (${placeholders})`,
+          hashes,
+        );
+        lfByHash = new Map(lfRows.map((r) => [r.hash, r]));
+      }
+
+      const items: FileItem[] = [];
+      for (const { core, aspect } of aspects) {
+        const data = aspect.data as Partial<FileAttachmentAspectData>;
+        const hash = data.hash;
+        if (!hash) continue;
+        const lf = lfByHash.get(hash);
+        if (!lf) continue;
+        items.push({
+          hash,
+          local_path: lf.local_path,
+          mime_type: lf.mime_type,
+          size_bytes: lf.size_bytes,
+          reference_count: lf.reference_count,
+          created_at: lf.created_at,
+          name: data.name || core.title || 'Untitled',
+          entity_id: core.id,
+        });
+      }
+      items.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
       setFiles(items);
     } catch (err) {
       console.error('[file-manager] load failed:', err);
@@ -138,17 +147,7 @@ export function FileManagerView({ toolInstanceId: _toolInstanceId }: { toolInsta
     void loadFiles();
   }, [loadFiles]);
 
-  useEffect(() => {
-    const handler = (): void => {
-      void loadFiles();
-    };
-    eventBus.on('entity:created', handler);
-    eventBus.on('entity:deleted', handler);
-    return () => {
-      eventBus.off('entity:created', handler);
-      eventBus.off('entity:deleted', handler);
-    };
-  }, [loadFiles]);
+  useEntityEvents(loadFiles, { aspectType: 'file_attachment' });
 
   // ── Upload handler ────────────────────────────────────────────────────────
 
@@ -177,63 +176,51 @@ export function FileManagerView({ toolInstanceId: _toolInstanceId }: { toolInsta
             workspaceUuid: workspaceId,
           });
           const filePath = `${workspacePath}/files/${fileName}`;
+          const mime = file.type || 'application/octet-stream';
+          const now = new Date().toISOString();
 
-          // Write file using Tauri FS
-          const uint8 = new Uint8Array(buffer);
-          const { writeFile: tauriWriteFile } = await import('@tauri-apps/plugin-fs');
-          await tauriWriteFile(filePath, uint8);
-
-          // Check for dedup
+          // Dedup check.
           const existing = await db.select<{ hash: string }[]>(
             `SELECT hash FROM local_files WHERE hash = ?`,
             [hash],
           );
 
-          const now = new Date().toISOString();
-
           if (existing.length > 0) {
-            // Increment reference count
             await db.execute(
               `UPDATE local_files SET reference_count = reference_count + 1 WHERE hash = ?`,
               [hash],
             );
           } else {
-            // New file
+            // Write bytes only when we don't already have them.
+            const uint8 = new Uint8Array(buffer);
+            const { writeFile: tauriWriteFile } = await import('@tauri-apps/plugin-fs');
+            await tauriWriteFile(filePath, uint8);
+
             await db.execute(
               `INSERT INTO local_files (hash, local_path, mime_type, size_bytes, reference_count, created_at)
-               VALUES (?, ?, ?, ?, 1, ?)`,
-              [hash, filePath, file.type || 'application/octet-stream', file.size, now],
+                 VALUES (?, ?, ?, ?, 1, ?)`,
+              [hash, filePath, mime, file.size, now],
             );
           }
 
-          // Create file_attachment entity
-          const entityId = crypto.randomUUID();
-          const payload: FileAttachmentPayload = {
-            name: file.name,
-            hash,
-            mime_type: file.type || 'application/octet-stream',
-            size_bytes: file.size,
-          };
-
-          await db.execute(
-            `INSERT INTO base_entities
-               (id, type, payload, metadata, tags, parent_id, created_at, updated_at)
-             VALUES (?, 'file_attachment', ?, '{}', '[]', NULL, ?, ?)`,
-            [entityId, JSON.stringify(payload), now, now],
-          );
-
-          eventBus.emit('entity:created', {
-            entity: {
-              id: entityId,
-              type: 'file_attachment',
-              payload: payload as unknown as Record<string, unknown>,
-              metadata: {},
+          // Create the file_attachment entity via the hybrid API so events fire.
+          await createEntity({
+            core: {
+              title: file.name,
+              icon: 'files',
               tags: [],
-              parent_id: null,
-              created_at: now,
-              updated_at: now,
-              deleted_at: null,
             },
+            aspects: [
+              {
+                aspect_type: 'file_attachment',
+                data: {
+                  hash,
+                  name: file.name,
+                  mime_type: mime,
+                  size_bytes: file.size,
+                },
+              },
+            ],
           });
 
           successCount++;
@@ -247,11 +234,13 @@ export function FileManagerView({ toolInstanceId: _toolInstanceId }: { toolInsta
         }
       }
 
-      eventBus.emit('notification:show', {
-        title: 'Upload complete',
-        body: `${successCount} file(s) imported`,
-        type: 'info',
-      });
+      if (successCount > 0) {
+        eventBus.emit('notification:show', {
+          title: 'Upload complete',
+          body: `${successCount} file(s) imported`,
+          type: 'info',
+        });
+      }
 
       void loadFiles();
     },
@@ -290,21 +279,29 @@ export function FileManagerView({ toolInstanceId: _toolInstanceId }: { toolInsta
     async (item: FileItem) => {
       try {
         const db = getWorkspaceDB();
-        const now = new Date().toISOString();
 
-        // Soft-delete the entity
-        await db.execute(
-          `UPDATE base_entities SET deleted_at = ? WHERE id = ?`,
-          [now, item.entity_id],
-        );
+        // Soft-delete the entity (cascades to its aspects).
+        await softDeleteEntity(item.entity_id);
 
-        // Decrement reference count
+        // Decrement reference count; physically delete bytes when it hits 0.
         await db.execute(
           `UPDATE local_files SET reference_count = reference_count - 1 WHERE hash = ?`,
           [item.hash],
         );
+        const remaining = await db.select<{ reference_count: number }[]>(
+          `SELECT reference_count FROM local_files WHERE hash = ?`,
+          [item.hash],
+        );
+        if (remaining[0] && remaining[0].reference_count <= 0) {
+          await db.execute(`DELETE FROM local_files WHERE hash = ?`, [item.hash]);
+          try {
+            const { remove } = await import('@tauri-apps/plugin-fs');
+            await remove(item.local_path);
+          } catch (err) {
+            console.warn('[file-manager] could not remove file bytes:', err);
+          }
+        }
 
-        eventBus.emit('entity:deleted', { id: item.entity_id, type: 'file_attachment' });
         void loadFiles();
       } catch (err) {
         console.error('[file-manager] delete failed:', err);
