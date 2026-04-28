@@ -2,6 +2,16 @@ import { create } from 'zustand';
 import { getDB, loadWorkspaceDB, closeWorkspaceDB, getWorkspaceDB, setProfileSetting, getProfileSetting } from '@/core/db';
 import { eventBus } from '@/core/events';
 import { getAllTools } from '@/registry/ToolRegistry';
+import {
+  loadMembershipCache,
+  loadWorkspaceViews,
+  setWorkspaceViewParent,
+  reconcileRemoteWorkspaces,
+  SHARED_VIRTUAL_PARENT_ID,
+  type MembershipCacheRow,
+  type WorkspaceRole,
+  type WorkspaceViewRow,
+} from '@/core/sharing';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -31,6 +41,10 @@ interface WorkspaceState {
   activeWorkspaceId: string | null;
   loading: boolean;
   workspaceTools: WorkspaceTool[];
+  /** Phase U — local view-state overlay for shared workspaces. */
+  workspaceViews: WorkspaceViewRow[];
+  /** Phase U — caller's role per workspace + owner info. */
+  membership: MembershipCacheRow[];
 }
 
 interface WorkspaceActions {
@@ -59,6 +73,12 @@ interface WorkspaceActions {
   getLastWorkspaceId: () => Promise<string | null>;
   /** (Re-)load workspace tools for the active workspace DB. */
   loadWorkspaceTools: () => Promise<void>;
+  /** Phase U — load view-state + membership cache from DB. */
+  loadSharingState: () => Promise<void>;
+  /** Phase U — pull remote workspace list, merge into local mirrors. */
+  reconcileShares: () => Promise<void>;
+  /** Phase U — move a (shared) workspace into a folder; null = back to virtual "Shared with me". */
+  moveSharedWorkspaceToFolder: (workspaceId: string, parentId: string | null) => Promise<void>;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -69,6 +89,8 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
     activeWorkspaceId: null,
     loading: false,
     workspaceTools: [],
+    workspaceViews: [],
+    membership: [],
 
     loadWorkspaces: async () => {
       const db = getDB();
@@ -270,6 +292,37 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         set({ workspaceTools: [] });
       }
     },
+
+    // ── Phase U sharing actions ────────────────────────────────────────────
+    loadSharingState: async () => {
+      try {
+        const [views, membership] = await Promise.all([
+          loadWorkspaceViews(),
+          loadMembershipCache(),
+        ]);
+        set({ workspaceViews: views, membership });
+      } catch (err) {
+        console.warn('[workspace] loadSharingState failed:', err);
+        set({ workspaceViews: [], membership: [] });
+      }
+    },
+
+    reconcileShares: async () => {
+      try {
+        await reconcileRemoteWorkspaces();
+        // Refresh local mirrors so the Sidebar tree picks up new shares.
+        await get().loadWorkspaces();
+        await get().loadSharingState();
+      } catch (err) {
+        console.warn('[workspace] reconcileShares failed:', err);
+      }
+    },
+
+    moveSharedWorkspaceToFolder: async (workspaceId, parentId) => {
+      await setWorkspaceViewParent(workspaceId, parentId);
+      const views = await loadWorkspaceViews();
+      set({ workspaceViews: views });
+    },
   }),
 );
 
@@ -294,4 +347,81 @@ export function buildWorkspaceTree(workspaces: Workspace[]): (Workspace & { chil
   }
 
   return buildChildren(null);
+}
+
+// ── Phase U selectors ─────────────────────────────────────────────────────────
+
+export { SHARED_VIRTUAL_PARENT_ID };
+
+/** Returns the caller's role for the given workspace, or 'owner' if it isn't
+ *  in the membership cache (i.e. personal-mode / locally-owned workspace). */
+export function workspaceRole(
+  workspaceId: string,
+  membership: MembershipCacheRow[],
+): WorkspaceRole {
+  return membership.find((m) => m.workspace_id === workspaceId)?.role ?? 'owner';
+}
+
+/** True when the caller can write to this workspace (owner or editor). */
+export function canMutateWorkspace(
+  workspaceId: string,
+  membership: MembershipCacheRow[],
+): boolean {
+  const role = workspaceRole(workspaceId, membership);
+  return role === 'owner' || role === 'editor';
+}
+
+/**
+ * Compose the Sidebar tree for an enterprise profile:
+ *   - Owned/personal workspaces use `workspaces.parent_id` as before.
+ *   - Shared workspaces (caller is editor or viewer) use `workspace_view.parent_id`
+ *     when set; otherwise they are grouped under a synthetic "Shared with me"
+ *     folder (id = SHARED_VIRTUAL_PARENT_ID).
+ */
+export function buildSidebarTree(
+  workspaces: Workspace[],
+  membership: MembershipCacheRow[],
+  views: WorkspaceViewRow[],
+): (Workspace & { children: Workspace[] })[] {
+  const viewByWs = new Map(views.map((v) => [v.workspace_id, v]));
+  const roleByWs = new Map(membership.map((m) => [m.workspace_id, m.role]));
+
+  const sharedOrphans: Workspace[] = [];
+  const remapped: Workspace[] = [];
+  let hasShared = false;
+
+  for (const w of workspaces) {
+    const role = roleByWs.get(w.id);
+    const isShared = role === 'editor' || role === 'viewer';
+    if (!isShared) {
+      remapped.push(w);
+      continue;
+    }
+    hasShared = true;
+    const view = viewByWs.get(w.id);
+    if (view?.hidden) continue;
+    if (view && view.parent_id) {
+      remapped.push({ ...w, parent_id: view.parent_id });
+    } else {
+      sharedOrphans.push({ ...w, parent_id: SHARED_VIRTUAL_PARENT_ID });
+    }
+  }
+
+  if (hasShared && sharedOrphans.length > 0) {
+    const synthetic: Workspace = {
+      id: SHARED_VIRTUAL_PARENT_ID,
+      name: 'Shared with me',
+      description: '',
+      icon: 'folder-group',
+      color: '#64748b',
+      parent_id: null,
+      sort_order: 9999,
+      created_at: '',
+      updated_at: '',
+      deleted_at: null,
+    };
+    remapped.push(synthetic, ...sharedOrphans);
+  }
+
+  return buildWorkspaceTree(remapped);
 }

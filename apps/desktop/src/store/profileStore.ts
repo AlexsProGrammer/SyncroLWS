@@ -88,6 +88,19 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
           useWorkspaceStore.setState({ workspaces: [], activeWorkspaceId: null });
           await wsStore.loadWorkspaces();
 
+          // Phase U — reconcile shared workspaces from the enterprise server,
+          // then load membership cache + view-state. Best-effort: failures
+          // (offline, expired token) are swallowed so personal mode keeps
+          // working unchanged.
+          const profile = get().profiles.find((p) => p.id === id);
+          if (profile?.mode === 'enterprise') {
+            try {
+              await wsStore.reconcileShares();
+            } catch { /* best-effort */ }
+          } else {
+            await wsStore.loadSharingState();
+          }
+
           // 4. Switch to the first non-folder workspace (if any)
           const workspaces = useWorkspaceStore.getState().workspaces;
           const firstReal = workspaces.find((w) => w.icon !== 'folder-group');

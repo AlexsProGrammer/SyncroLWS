@@ -22,6 +22,38 @@ export const workspaces = sqliteTable('workspaces', {
   deleted_at: text('deleted_at'),
 });
 
+// ── workspace_view (Phase U) ─────────────────────────────────────────────────
+/**
+ * Per-profile view-state for SHARED workspaces (those owned by another user
+ * on the enterprise server). Lets the user drag a shared workspace out of
+ * the virtual "Shared with me" folder into a custom local folder without
+ * trying to sync that move back to the server.
+ *
+ * For locally-owned workspaces, the existing `workspaces.parent_id` is
+ * authoritative and this table is unused.
+ */
+export const workspaceView = sqliteTable('workspace_view', {
+  workspace_id: text('workspace_id').primaryKey(),
+  parent_id: text('parent_id'),
+  sort_order: integer('sort_order').notNull().default(0),
+  hidden: integer('hidden', { mode: 'boolean' }).notNull().default(false),
+});
+
+// ── workspace_membership_cache (Phase U) ─────────────────────────────────────
+/**
+ * Mirror of `auth.workspaces.list` for the active enterprise profile.
+ * Refreshed on profile activate / sync tick. Drives the "rights badge"
+ * and the viewer-role mutation gate.
+ */
+export const workspaceMembershipCache = sqliteTable('workspace_membership_cache', {
+  workspace_id: text('workspace_id').primaryKey(),
+  owner_user_id: text('owner_user_id').notNull(),
+  owner_display_name: text('owner_display_name').notNull().default(''),
+  role: text('role').notNull(), // 'owner' | 'editor' | 'viewer'
+  member_user_ids: text('member_user_ids').notNull().default('[]'), // JSON string
+  last_synced_at: text('last_synced_at').notNull(),
+});
+
 // ── active_tools ─────────────────────────────────────────────────────────────
 /**
  * Tracks which tools are enabled for this profile.

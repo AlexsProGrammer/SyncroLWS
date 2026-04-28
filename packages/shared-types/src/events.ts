@@ -102,4 +102,8 @@ export type AppEvents = {
   // ── App lock (Phase T) ────────────────────────────────────────────────────
   'lock:locked': void;
   'lock:unlocked': void;
+
+  // ── Sharing (Phase U) ─────────────────────────────────────────────────────
+  /** Remote workspace list reconciled into local mirrors. */
+  'sharing:reconciled': { count: number };
 };

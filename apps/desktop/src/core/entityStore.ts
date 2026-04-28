@@ -17,6 +17,8 @@
 
 import { getWorkspaceDB } from './db';
 import { eventBus } from './events';
+import { useSyncStore } from '@/store/syncStore';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 import type {
   AspectType,
   EntityAspect,
@@ -35,6 +37,34 @@ function nowIso(): string {
 
 function uuid(): string {
   return crypto.randomUUID();
+}
+
+/**
+ * Phase U — block mutations when:
+ *   - the user's enterprise token has expired (sync engine flipped readonly), OR
+ *   - the active workspace is shared and the caller's role is `viewer`.
+ *
+ * Lazy imports keep this module decoupled from the React stores during
+ * test/SSR contexts.
+ */
+function assertCanMutate(): void {
+  let readonly = false;
+  let role: 'owner' | 'editor' | 'viewer' | undefined;
+  try {
+    readonly = !!useSyncStore.getState().readonly;
+    const ws = useWorkspaceStore.getState();
+    if (ws.activeWorkspaceId) {
+      role = ws.membership.find((m) => m.workspace_id === ws.activeWorkspaceId)?.role;
+    }
+  } catch {
+    return; // stores unavailable — fall through (e.g. unit tests)
+  }
+  if (readonly) {
+    throw new Error('Sync session is read-only. Reconnect to make changes.');
+  }
+  if (role === 'viewer') {
+    throw new Error('You have viewer access only. Ask the workspace owner for editor rights.');
+  }
 }
 
 interface CoreRow {
@@ -161,6 +191,7 @@ export interface CreateEntityInput {
 
 /** Create a new base entity, optionally seeding it with aspects. */
 export async function createEntity(input: CreateEntityInput): Promise<HybridEntity> {
+  assertCanMutate();
   const db = getWorkspaceDB();
   const now = nowIso();
   const core: EntityCore = {
@@ -242,6 +273,7 @@ export interface CoreUpdate {
 
 /** Patch shared core fields; emits `core:updated`. */
 export async function updateCore(id: string, patch: CoreUpdate): Promise<EntityCore> {
+  assertCanMutate();
   const db = getWorkspaceDB();
   const sets: string[] = [];
   const params: unknown[] = [];
@@ -270,6 +302,7 @@ export async function updateCore(id: string, patch: CoreUpdate): Promise<EntityC
 
 /** Soft-delete an entity and all of its aspects. */
 export async function softDeleteEntity(id: string): Promise<void> {
+  assertCanMutate();
   const db = getWorkspaceDB();
   const now = nowIso();
   await db.execute(
@@ -339,6 +372,7 @@ export async function addAspect(
     sort_order?: number;
   },
 ): Promise<EntityAspect> {
+  assertCanMutate();
   const aspect = await insertAspect(entity_id, input);
   eventBus.emit('aspect:added', { aspect });
   notifyDirty();
@@ -356,6 +390,7 @@ export async function updateAspect(
   aspect_id: string,
   patch: AspectUpdate,
 ): Promise<EntityAspect> {
+  assertCanMutate();
   const db = getWorkspaceDB();
   const rows = await db.select<AspectRow[]>(
     `SELECT id, entity_id, aspect_type, data, tool_instance_id, sort_order, created_at, updated_at, deleted_at
@@ -394,6 +429,7 @@ export async function updateAspect(
 
 /** Soft-delete a single aspect. Emits `aspect:removed`. */
 export async function removeAspect(aspect_id: string): Promise<void> {
+  assertCanMutate();
   const db = getWorkspaceDB();
   const rows = await db.select<AspectRow[]>(
     `SELECT id, entity_id, aspect_type FROM entity_aspects WHERE id = ? LIMIT 1`,
@@ -523,6 +559,7 @@ export async function addRelation(
   kind: RelationKind,
   metadata: Record<string, unknown> = {},
 ): Promise<EntityRelation> {
+  assertCanMutate();
   const db = getWorkspaceDB();
   const relation: EntityRelation = {
     id: uuid(),
@@ -552,6 +589,7 @@ export async function addRelation(
 
 /** Remove a relation by id. Emits `relation:removed`. */
 export async function removeRelation(id: string): Promise<void> {
+  assertCanMutate();
   const db = getWorkspaceDB();
   const rows = await db.select<(RelationRow & { revision: number })[]>(
     `SELECT id, from_entity_id, to_entity_id, revision FROM entity_relations WHERE id = ? LIMIT 1`,

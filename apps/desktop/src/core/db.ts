@@ -189,6 +189,20 @@ CREATE TABLE IF NOT EXISTS \`profile_settings\` (
   \`key\` text PRIMARY KEY NOT NULL,
   \`value\` text NOT NULL
 );
+CREATE TABLE IF NOT EXISTS \`workspace_view\` (
+  \`workspace_id\` text PRIMARY KEY NOT NULL,
+  \`parent_id\` text,
+  \`sort_order\` integer DEFAULT 0 NOT NULL,
+  \`hidden\` integer DEFAULT 0 NOT NULL
+);
+CREATE TABLE IF NOT EXISTS \`workspace_membership_cache\` (
+  \`workspace_id\` text PRIMARY KEY NOT NULL,
+  \`owner_user_id\` text NOT NULL,
+  \`owner_display_name\` text DEFAULT '' NOT NULL,
+  \`role\` text NOT NULL,
+  \`member_user_ids\` text DEFAULT '[]' NOT NULL,
+  \`last_synced_at\` text NOT NULL
+);
 `;
 
 async function runProfileMigrations(db: Database): Promise<void> {

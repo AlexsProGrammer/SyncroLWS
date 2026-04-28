@@ -6,7 +6,14 @@ import { getDB, getWorkspaceDB } from '@/core/db';
 import { useProfileStore, type Profile } from '@/store/profileStore';
 import { invoke } from '@tauri-apps/api/core';
 import { transferWorkspaceToProfile } from '@/core/workspaceIO';
-import { useWorkspaceStore, buildWorkspaceTree, type Workspace } from '@/store/workspaceStore';
+import {
+  useWorkspaceStore,
+  buildSidebarTree,
+  workspaceRole,
+  SHARED_VIRTUAL_PARENT_ID,
+  type Workspace,
+} from '@/store/workspaceStore';
+import { ManageMembersDialog } from '@/ui/ManageMembersDialog';
 import { useThemeStore } from '@/store/themeStore';
 import { Input } from '@/ui/components/input';
 import { Button } from '@/ui/components/button';
@@ -146,6 +153,25 @@ function IconMoreVertical({ className }: { className?: string }): React.ReactEle
     </svg>
   );
 }
+function IconUsers({ className }: { className?: string }): React.ReactElement {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+function IconLogOut({ className }: { className?: string }): React.ReactElement {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  );
+}
 
 // ── Sidebar component ─────────────────────────────────────────────────────────
 
@@ -245,6 +271,9 @@ function WorkspaceTreeItem({
   onDelete,
   onTransfer,
   hasOtherProfiles,
+  getRole,
+  onManageMembers,
+  onLeave,
 }: {
   node: WorkspaceTreeNode;
   depth: number;
@@ -256,11 +285,17 @@ function WorkspaceTreeItem({
   onDelete?: (id: string, name: string, isFolder: boolean, hasChildren: boolean) => void;
   onTransfer?: (id: string, name: string, mode: 'copy' | 'move') => void;
   hasOtherProfiles?: boolean;
+  getRole?: (workspaceId: string) => 'owner' | 'editor' | 'viewer' | undefined;
+  onManageMembers?: (id: string) => void;
+  onLeave?: (id: string, name: string) => void;
 }): React.ReactElement {
   const [expanded, setExpanded] = useState(true);
   const [dragOver, setDragOver] = useState(false);
   const isFolder = node.icon === 'folder-group';
   const hasChildren = node.children.length > 0;
+  const isSharedVirtual = node.id === SHARED_VIRTUAL_PARENT_ID;
+  const role = !isFolder && getRole ? getRole(node.id) : undefined;
+  const isShared = role === 'editor' || role === 'viewer';
 
   const handleDragStart = (e: React.DragEvent): void => {
     e.dataTransfer.setData('text/plain', node.id);
@@ -322,8 +357,16 @@ function WorkspaceTreeItem({
           />
         )}
         {!sidebarCollapsed && <span className="truncate flex-1 text-left">{node.name}</span>}
+        {!sidebarCollapsed && isShared && (
+          <span
+            className="shrink-0 rounded px-1 text-[10px] font-medium uppercase tracking-wide bg-muted text-muted-foreground"
+            title={`Your role: ${role}`}
+          >
+            {role === 'editor' ? 'E' : 'V'}
+          </span>
+        )}
       </button>
-      {!sidebarCollapsed && (
+      {!sidebarCollapsed && !isSharedVirtual && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -334,6 +377,19 @@ function WorkspaceTreeItem({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
+            {!isFolder && role === 'owner' && (
+              <DropdownMenuItem onClick={() => onManageMembers?.(node.id)}>
+                <IconUsers className="mr-2 h-3.5 w-3.5" />
+                Manage members…
+              </DropdownMenuItem>
+            )}
+            {!isFolder && isShared && (
+              <DropdownMenuItem onClick={() => onManageMembers?.(node.id)}>
+                <IconUsers className="mr-2 h-3.5 w-3.5" />
+                Members
+              </DropdownMenuItem>
+            )}
+            {(role === 'owner' || isShared) && !isFolder && <DropdownMenuSeparator />}
             <DropdownMenuItem onClick={() => onRename?.(node.id, node.name)}>
               <IconEdit className="mr-2 h-3.5 w-3.5" />
               Rename
@@ -352,13 +408,23 @@ function WorkspaceTreeItem({
               </>
             )}
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onClick={() => onDelete?.(node.id, node.name, isFolder, hasChildren)}
-            >
-              <IconTrash className="mr-2 h-3.5 w-3.5" />
-              Delete
-            </DropdownMenuItem>
+            {isShared ? (
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => onLeave?.(node.id, node.name)}
+              >
+                <IconLogOut className="mr-2 h-3.5 w-3.5" />
+                Leave workspace
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onClick={() => onDelete?.(node.id, node.name, isFolder, hasChildren)}
+              >
+                <IconTrash className="mr-2 h-3.5 w-3.5" />
+                Delete
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
@@ -377,6 +443,9 @@ function WorkspaceTreeItem({
               onDelete={onDelete}
               onTransfer={onTransfer}
               hasOtherProfiles={hasOtherProfiles}
+              getRole={getRole}
+              onManageMembers={onManageMembers}
+              onLeave={onLeave}
             />
           ))}
         </div>
@@ -658,16 +727,43 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
   const createWorkspace = useWorkspaceStore((s) => s.createWorkspace);
   const updateWorkspace = useWorkspaceStore((s) => s.updateWorkspace);
   const deleteWorkspace = useWorkspaceStore((s) => s.deleteWorkspace);
+  const membership = useWorkspaceStore((s) => s.membership);
+  const workspaceViews = useWorkspaceStore((s) => s.workspaceViews);
+  const moveSharedWorkspaceToFolder = useWorkspaceStore((s) => s.moveSharedWorkspaceToFolder);
 
   const profiles = useProfileStore((s) => s.profiles);
   const activeProfileId = useProfileStore((s) => s.activeProfileId);
 
-  const tree = buildWorkspaceTree(workspaces);
+  const [manageMembersWsId, setManageMembersWsId] = useState<string | null>(null);
+  const [leaveTargetWs, setLeaveTargetWs] = useState<{ id: string; name: string } | null>(null);
+
+  const tree = useMemo(
+    () => buildSidebarTree(workspaces, membership, workspaceViews),
+    [workspaces, membership, workspaceViews],
+  );
+
+  const getRole = useCallback(
+    (id: string): 'owner' | 'editor' | 'viewer' | undefined => {
+      const role = membership.find((m) => m.workspace_id === id)?.role;
+      // No membership entry → personal/locally-owned workspace.
+      return role ?? (membership.length === 0 ? undefined : 'owner');
+    },
+    [membership],
+  );
 
   /** Handle drag-and-drop: reparent item to target folder */
   const handleTreeDrop = useCallback(
     (dragId: string, targetFolderId: string) => {
       const dragItem = workspaces.find((w) => w.id === dragId);
+      const dragRole = membership.find((m) => m.workspace_id === dragId)?.role;
+      const isSharedDrag = dragRole === 'editor' || dragRole === 'viewer';
+
+      // Drop onto the synthetic shared folder — only valid for shared ws.
+      if (targetFolderId === SHARED_VIRTUAL_PARENT_ID) {
+        if (isSharedDrag) void moveSharedWorkspaceToFolder(dragId, null);
+        return;
+      }
+
       const target = workspaces.find((w) => w.id === targetFolderId);
       if (!dragItem || !target) return;
       // Target must be a folder
@@ -685,9 +781,14 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
       };
       if (isDescendant(dragId, targetFolderId)) return;
 
-      void updateWorkspace(dragId, { parent_id: targetFolderId });
+      if (isSharedDrag) {
+        // Shared workspaces persist their parent override locally only.
+        void moveSharedWorkspaceToFolder(dragId, targetFolderId);
+      } else {
+        void updateWorkspace(dragId, { parent_id: targetFolderId });
+      }
     },
-    [workspaces, updateWorkspace],
+    [workspaces, updateWorkspace, membership, moveSharedWorkspaceToFolder],
   );
 
   /** Handle drop on root area (unparent item) */
@@ -697,11 +798,17 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
       const dragId = e.dataTransfer.getData('text/plain');
       if (!dragId) return;
       const item = workspaces.find((w) => w.id === dragId);
-      if (item && item.parent_id !== null) {
+      if (!item) return;
+      const dragRole = membership.find((m) => m.workspace_id === dragId)?.role;
+      const isSharedDrag = dragRole === 'editor' || dragRole === 'viewer';
+      if (isSharedDrag) {
+        // Snap shared workspace back into the virtual "Shared with me" folder.
+        void moveSharedWorkspaceToFolder(dragId, null);
+      } else if (item.parent_id !== null) {
         void updateWorkspace(dragId, { parent_id: null });
       }
     },
-    [workspaces, updateWorkspace],
+    [workspaces, updateWorkspace, membership, moveSharedWorkspaceToFolder],
   );
 
   // ── Load workspace tools from workspace DB ──────────────────────────────
@@ -1028,6 +1135,9 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
                 setTransferWs({ id, name, mode });
               }}
               hasOtherProfiles={profiles.length > 1}
+              getRole={getRole}
+              onManageMembers={(id) => setManageMembersWsId(id)}
+              onLeave={(id, name) => setLeaveTargetWs({ id, name })}
             />
           ))}
         </div>
@@ -1460,6 +1570,44 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
                 Cancel
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Phase U — manage members dialog */}
+      <ManageMembersDialog
+        open={!!manageMembersWsId}
+        workspaceId={manageMembersWsId}
+        onClose={() => setManageMembersWsId(null)}
+      />
+
+      {/* Phase U — leave workspace confirm */}
+      <Dialog open={!!leaveTargetWs} onOpenChange={(v) => { if (!v) setLeaveTargetWs(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Leave workspace?</DialogTitle>
+          </DialogHeader>
+          <p className="mt-2 text-sm text-muted-foreground">
+            You will lose access to <strong>{leaveTargetWs?.name}</strong> until the owner re-invites you.
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setLeaveTargetWs(null)}>Cancel</Button>
+            <Button
+              variant="destructive"
+              onClick={async () => {
+                if (!leaveTargetWs) return;
+                try {
+                  const { leaveWorkspace } = await import('@/core/sharing');
+                  await leaveWorkspace(leaveTargetWs.id);
+                  await useWorkspaceStore.getState().reconcileShares();
+                } catch (err) {
+                  console.error('[sidebar] leave failed:', err);
+                }
+                setLeaveTargetWs(null);
+              }}
+            >
+              Leave
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

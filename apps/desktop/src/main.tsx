@@ -50,6 +50,15 @@ async function bootstrap(): Promise<void> {
     const wsStore = useWorkspaceStore.getState();
     await wsStore.loadWorkspaces();
 
+    // Phase U — load shared-workspace view-state + membership cache.
+    // For enterprise profiles also kick off a remote reconcile (best-effort).
+    const activeProfile = profiles.find((p) => p.id === profileId);
+    if (activeProfile?.mode === 'enterprise') {
+      try { await wsStore.reconcileShares(); } catch { /* offline ok */ }
+    } else {
+      await wsStore.loadSharingState();
+    }
+
     const workspaces = useWorkspaceStore.getState().workspaces;
     if (workspaces.length === 0) {
       await wsStore.createWorkspace({ name: 'Personal', icon: 'folder', color: '#6366f1' });
