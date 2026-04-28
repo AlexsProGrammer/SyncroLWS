@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { CommandPalette } from './ui/CommandPalette';
 import { Sidebar, useEnabledTools, type ActiveView } from './ui/Sidebar';
 import { SettingsView } from './ui/SettingsView';
+import { SearchView } from './ui/SearchView';
 import { Toaster } from './ui/Toaster';
 import { Separator } from './ui/components/separator';
 import { EntityDetailSheetHost } from './ui/components/EntityDetailSheetHost';
@@ -56,7 +57,7 @@ export default function App(): React.ReactElement {
 
   // If activeView is a legacy tool.id (not an instance UUID), resolve to first matching instance
   useEffect(() => {
-    if (activeView === 'settings') return;
+    if (activeView === 'settings' || activeView === 'search') return;
     if (instanceMap.has(activeView)) return; // already an instance UUID
     // It's a legacy tool.id string — find first matching instance
     const wt = workspaceTools.find((w) => w.tool_id === activeView);
@@ -108,15 +109,49 @@ export default function App(): React.ReactElement {
     };
     eventBus.on('nav:open-entity', onOpenEntity);
 
-    // deeplink:received → parse syncrohws://entity/<type>/<id> and navigate
+    // deeplink:received → parse syncrohws:// URLs and route accordingly
     const onDeepLink = ({ path, params }: { path: string; params: Record<string, string> }): void => {
       console.log('[deep-link] App received:', path, params);
-      const match = path.match(/^\/entity\/([^/]+)\/([^/]+)/);
-      if (match && match[1] && match[2]) {
-        const type = match[1] as BaseEntity['type'];
-        const id = match[2];
+
+      // /entity/<type>/<id> — switch to matching tool tab AND open the universal detail sheet
+      const entityMatch = path.match(/^\/entity\/([^/]+)\/([^/]+)/);
+      if (entityMatch && entityMatch[1] && entityMatch[2]) {
+        const type = entityMatch[1] as BaseEntity['type'];
+        const id = entityMatch[2];
         eventBus.emit('nav:open-entity', { id, type });
+        eventBus.emit('nav:open-detail-sheet', { id });
+        return;
       }
+
+      // /workspace/<id> — switch active workspace (no-op if already active or missing).
+      const workspaceMatch = path.match(/^\/workspace\/([^/]+)/);
+      if (workspaceMatch && workspaceMatch[1]) {
+        const id = workspaceMatch[1];
+        const state = useWorkspaceStore.getState();
+        if (state.activeWorkspaceId !== id && state.workspaces.some((w) => w.id === id)) {
+          void state.switchWorkspace(id);
+        } else if (!state.workspaces.some((w) => w.id === id)) {
+          eventBus.emit('notification:show', {
+            title: 'Workspace not found',
+            body: `No workspace with id ${id.slice(0, 8)} in this profile.`,
+            type: 'warning',
+          });
+        }
+        return;
+      }
+
+      // /share/<token> — Phase M will resolve share-link tokens. For now just notify.
+      const shareMatch = path.match(/^\/share\/([^/]+)/);
+      if (shareMatch && shareMatch[1]) {
+        eventBus.emit('notification:show', {
+          title: 'Share link received',
+          body: 'Share-link routing arrives in the upcoming portal phase.',
+          type: 'info',
+        });
+        return;
+      }
+
+      console.warn('[deep-link] unhandled URL', path, params);
     };
     eventBus.on('deeplink:received', onDeepLink);
 
@@ -158,6 +193,7 @@ export default function App(): React.ReactElement {
   // Resolve the active view's component (memoized to avoid unnecessary remounts)
   const renderedView = useMemo(() => {
     if (activeView === 'settings') return <SettingsView />;
+    if (activeView === 'search') return <SearchView />;
     // Resolve instance UUID → tool_id → component
     const toolId = instanceMap.get(activeView);
     const tool = toolId ? getTool(toolId) : getTool(activeView); // fallback for legacy strings
@@ -174,7 +210,9 @@ export default function App(): React.ReactElement {
   const headerTitle =
     activeView === 'settings'
       ? 'Settings'
-      : (activeWt?.name ?? getTool(activeToolId)?.name ?? activeView).replace('-', ' ');
+      : activeView === 'search'
+        ? 'Search & Tags'
+        : (activeWt?.name ?? getTool(activeToolId)?.name ?? activeView).replace('-', ' ');
 
   const activeWorkspace = useWorkspaceStore((s) =>
     s.workspaces.find((w) => w.id === s.activeWorkspaceId),

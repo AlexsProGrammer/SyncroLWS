@@ -18,6 +18,16 @@ import { useProfileStore, type Profile } from '@/store/profileStore';
 import { useSyncStore } from '@/store/syncStore';
 import { useThemeStore } from '@/store/themeStore';
 import { syncEngine } from '@/core/sync';
+import {
+  type BackupConfig,
+  DEFAULT_BACKUP_CONFIG,
+  getBackupConfig,
+  setBackupConfig,
+  runBackupNow,
+  listAvailableBackups,
+  restoreFromBackup,
+} from '@/core/backup';
+import { exportWorkspace, importWorkspace, downloadJsonBundle, pickJsonBundle, type ImportPolicy } from '@/core/workspaceIO';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -318,6 +328,9 @@ export function SettingsView(): React.ReactElement {
             <TabsTrigger value="tools" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
               Tools
             </TabsTrigger>
+            <TabsTrigger value="backup" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
+              Backup
+            </TabsTrigger>
             <TabsTrigger value="sync" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
               Sync
             </TabsTrigger>
@@ -515,6 +528,11 @@ export function SettingsView(): React.ReactElement {
               })}
             </div>
           </section>
+          </TabsContent>
+
+          {/* ── Backup tab ──────────────────────────────────────────── */}
+          <TabsContent value="backup">
+            <BackupSettingsPanel />
           </TabsContent>
 
           {/* ── Sync tab ────────────────────────────────────────────── */}
@@ -773,5 +791,241 @@ function SyncStatusPanel(): React.ReactElement | null {
         </p>
       )}
     </div>
+  );
+}
+
+// ── BackupSettingsPanel ───────────────────────────────────────────────────────
+
+function BackupSettingsPanel(): React.ReactElement {
+  const [config, setConfig] = useState<BackupConfig>(DEFAULT_BACKUP_CONFIG);
+  const [snapshots, setSnapshots] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [importPolicy, setImportPolicy] = useState<ImportPolicy>('skip');
+
+  const refresh = useCallback(async (): Promise<void> => {
+    const [c, snaps] = await Promise.all([getBackupConfig(), listAvailableBackups()]);
+    setConfig(c);
+    setSnapshots(snaps);
+  }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  const updateConfig = async (next: BackupConfig): Promise<void> => {
+    setConfig(next);
+    await setBackupConfig(next);
+  };
+
+  const handleScheduleKindChange = async (kind: BackupConfig['schedule']['kind']): Promise<void> => {
+    let schedule: BackupConfig['schedule'];
+    if (kind === 'on_open') schedule = { kind: 'on_open' };
+    else if (kind === 'every_n_hours') schedule = { kind: 'every_n_hours', intervalHours: 6 };
+    else schedule = { kind: 'daily_at', hhmm: '03:00' };
+    await updateConfig({ ...config, schedule });
+  };
+
+  const onBackupNow = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      await runBackupNow();
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onRestore = async (timestamp: string): Promise<void> => {
+    if (!window.confirm(`Restore from snapshot ${timestamp}? This overwrites the current databases.`)) return;
+    setBusy(true);
+    try {
+      await restoreFromBackup(timestamp);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onExport = async (): Promise<void> => {
+    setBusy(true);
+    try {
+      const bundle = await exportWorkspace();
+      downloadJsonBundle(bundle);
+    } catch (err) {
+      eventBus.emit('notification:show', {
+        title: 'Export failed',
+        body: err instanceof Error ? err.message : String(err),
+        type: 'error',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onImport = async (): Promise<void> => {
+    const bundle = await pickJsonBundle();
+    if (!bundle) return;
+    setBusy(true);
+    try {
+      await importWorkspace(bundle, importPolicy);
+    } catch (err) {
+      eventBus.emit('notification:show', {
+        title: 'Import failed',
+        body: err instanceof Error ? err.message : String(err),
+        type: 'error',
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="max-w-2xl space-y-8">
+      {/* Schedule */}
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Backup schedule</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Snapshots copy your profile + active workspace SQLite files into <code className="rounded bg-muted px-1 text-xs">$APPDATA/backups</code>.
+          </p>
+        </div>
+
+        <div className="flex items-center justify-between rounded-lg border border-border p-3">
+          <div>
+            <p className="text-sm font-medium text-foreground">Automatic backups</p>
+            <p className="text-xs text-muted-foreground">Disable to take snapshots manually only.</p>
+          </div>
+          <Switch
+            checked={config.enabled}
+            onCheckedChange={(v) => void updateConfig({ ...config, enabled: v })}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-foreground">Frequency</label>
+          <Select value={config.schedule.kind} onValueChange={(v) => void handleScheduleKindChange(v as BackupConfig['schedule']['kind'])}>
+            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="on_open">On app start</SelectItem>
+              <SelectItem value="every_n_hours">Every N hours</SelectItem>
+              <SelectItem value="daily_at">Daily at fixed time</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {config.schedule.kind === 'every_n_hours' && (
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-foreground">Interval (hours)</label>
+            <Input
+              type="number"
+              min={1}
+              max={168}
+              value={config.schedule.intervalHours}
+              onChange={(e) => {
+                const intervalHours = Math.max(1, Number(e.target.value) || 1);
+                void updateConfig({ ...config, schedule: { kind: 'every_n_hours', intervalHours } });
+              }}
+            />
+          </div>
+        )}
+
+        {config.schedule.kind === 'daily_at' && (
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-foreground">Time of day</label>
+            <Input
+              type="time"
+              value={config.schedule.hhmm}
+              onChange={(e) => {
+                void updateConfig({ ...config, schedule: { kind: 'daily_at', hhmm: e.target.value || '03:00' } });
+              }}
+            />
+          </div>
+        )}
+
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-foreground">Retention (snapshots to keep)</label>
+          <Input
+            type="number"
+            min={0}
+            max={500}
+            value={config.retentionCount}
+            onChange={(e) => {
+              const retentionCount = Math.max(0, Number(e.target.value) || 0);
+              void updateConfig({ ...config, retentionCount });
+            }}
+          />
+          <p className="text-xs text-muted-foreground">Set to 0 to disable pruning.</p>
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* Manual */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold text-foreground">Manual</h3>
+        <div className="flex gap-2">
+          <Button onClick={() => void onBackupNow()} disabled={busy} variant="default">
+            Backup now
+          </Button>
+          <Button onClick={() => void refresh()} disabled={busy} variant="outline">
+            Refresh list
+          </Button>
+        </div>
+
+        <div className="rounded-lg border border-border">
+          <div className="border-b border-border bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground">
+            Snapshots ({snapshots.length})
+          </div>
+          {snapshots.length === 0 ? (
+            <p className="px-3 py-3 text-xs text-muted-foreground">No snapshots yet.</p>
+          ) : (
+            <ul className="max-h-64 divide-y divide-border overflow-y-auto">
+              {snapshots.map((ts) => (
+                <li key={ts} className="flex items-center justify-between px-3 py-2 text-xs">
+                  <span className="font-mono">{ts}</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => void onRestore(ts)}
+                  >
+                    Restore
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      <Separator />
+
+      {/* Export / Import */}
+      <div className="space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Export &amp; Import</h3>
+          <p className="text-xs text-muted-foreground">
+            Export the active workspace as a JSON bundle (entities, aspects, relations, file metadata). Import to merge into the current workspace.
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-foreground">Import collision policy</label>
+          <Select value={importPolicy} onValueChange={(v) => setImportPolicy(v as ImportPolicy)}>
+            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="skip">Skip rows whose id already exists</SelectItem>
+              <SelectItem value="overwrite">Overwrite existing rows</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex gap-2">
+          <Button onClick={() => void onExport()} disabled={busy} variant="default">
+            Export workspace
+          </Button>
+          <Button onClick={() => void onImport()} disabled={busy} variant="outline">
+            Import workspace
+          </Button>
+        </div>
+      </div>
+    </section>
   );
 }

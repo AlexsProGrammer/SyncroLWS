@@ -1096,6 +1096,19 @@ export function Sidebar({ active, onNavigate }: SidebarProps): React.ReactElemen
       {/* Profile switcher + Settings/Theme + Collapse */}
       <div className="border-t border-border p-2 space-y-0.5">
         <ProfileSwitcher collapsed={collapsed} onNavigate={onNavigate} />
+        <button
+          onClick={() => onNavigate('search')}
+          title={collapsed ? 'Search & Tags' : undefined}
+          className={cn(
+            'flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-sm transition-colors',
+            active === 'search'
+              ? 'bg-accent text-accent-foreground font-medium'
+              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+          )}
+        >
+          <IconSearch className="h-4 w-4 shrink-0" />
+          {!collapsed && <span className="flex-1 text-left">Search &amp; Tags</span>}
+        </button>
         <div className="flex w-full items-center gap-0.5">
           <button
             onClick={() => onNavigate('settings')}

@@ -40,6 +40,10 @@
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$APPDATA/**" }]
     },
+    {
+      "identifier": "fs:allow-remove",
+      "allow": [{ "path": "$APPDATA/**" }]
+    },
     "sql:allow-load",
     "sql:allow-execute",
     "sql:allow-select",
