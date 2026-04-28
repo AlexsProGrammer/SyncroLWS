@@ -2,7 +2,6 @@ import * as React from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from './tabs';
 import { Input } from './input';
-import { Textarea } from './textarea';
 import { Button } from './button';
 import { Badge } from './badge';
 import {
@@ -13,6 +12,7 @@ import {
 } from './dropdown-menu';
 import { AddAspectDialog } from './AddAspectDialog';
 import { LinkedItemsPanel } from './LinkedItemsPanel';
+import { RichTextEditor } from './RichTextEditor';
 import {
   getEntity,
   updateCore,
@@ -271,8 +271,8 @@ export function EntityDetailSheet({
             </TabsList>
 
             {/* General tab */}
-            <TabsContent value="general" className="flex-1 overflow-y-auto px-4 py-3">
-              <div className="space-y-4">
+            <TabsContent value="general" className="flex-1 overflow-hidden px-4 py-3 data-[state=active]:flex data-[state=active]:flex-col">
+              <div className="flex flex-1 min-h-0 flex-col gap-4">
                 {missingAspectPlugins.length > 0 && (
                   <div>
                     <label className="text-xs font-medium text-muted-foreground">
@@ -300,15 +300,33 @@ export function EntityDetailSheet({
                     </div>
                   </div>
                 )}
-                <div>
+                <div className="flex min-h-0 flex-1 flex-col">
                   <label className="text-xs font-medium text-muted-foreground">Description</label>
-                  <Textarea
-                    value={core?.description ?? ''}
-                    onChange={(e) => patchCore({ description: e.target.value })}
-                    placeholder="Describe this entity…"
-                    rows={4}
-                    className="mt-1"
-                  />
+                  <div className="mt-1 flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-input bg-transparent">
+                    <RichTextEditor
+                      contentJson={core?.description_json}
+                      contentMd={core?.description ?? ''}
+                      placeholder="Describe this entity…"
+                      minHeight={120}
+                      autosaveMs={600}
+                      showToolbar
+                      features={{
+                        wikiLinks: false,
+                        tagHighlight: false,
+                        taskList: true,
+                        typography: true,
+                        highlight: true,
+                        link: true,
+                      }}
+                      className="flex-1 overflow-y-auto"
+                      onChange={({ content_md, content_json }) => {
+                        patchCore({
+                          description: content_md,
+                          description_json: content_json,
+                        });
+                      }}
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Aspects</label>
@@ -411,19 +429,44 @@ function ColorPicker({
   onChange: (color: string) => void;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
+  const [pos, setPos] = React.useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const btnRef = React.useRef<HTMLButtonElement>(null);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+
+  const openMenu = (): void => {
+    if (!btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    setPos({ top: rect.bottom + 4, left: rect.left });
+    setOpen(true);
+  };
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent): void => {
+      if (
+        btnRef.current && !btnRef.current.contains(e.target as Node) &&
+        menuRef.current && !menuRef.current.contains(e.target as Node)
+      ) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
   return (
-    <div className="relative">
+    <>
       <button
+        ref={btnRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={openMenu}
         className="h-8 w-8 rounded-md border border-border"
         style={{ backgroundColor: value }}
         aria-label="Pick color"
       />
       {open && (
         <div
-          className="absolute left-0 top-10 z-50 grid grid-cols-5 gap-1.5 rounded-md border border-border bg-popover p-2 shadow-lg"
-          onMouseLeave={() => setOpen(false)}
+          ref={menuRef}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999 }}
+          className="grid grid-cols-5 gap-1.5 rounded-md border border-border bg-popover p-2 shadow-lg"
         >
           {COLOR_SWATCHES.map((c) => (
             <button
@@ -439,6 +482,6 @@ function ColorPicker({
           ))}
         </div>
       )}
-    </div>
+    </>
   );
 }

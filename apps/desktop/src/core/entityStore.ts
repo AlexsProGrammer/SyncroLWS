@@ -41,6 +41,7 @@ interface CoreRow {
   id: string;
   title: string;
   description: string;
+  description_json: string | null;
   color: string;
   icon: string;
   tags: string;
@@ -76,6 +77,7 @@ function rowToCore(row: CoreRow): EntityCore {
     id: row.id,
     title: row.title,
     description: row.description,
+    description_json: row.description_json ?? undefined,
     color: row.color,
     icon: row.icon,
     tags: JSON.parse(row.tags) as string[],
@@ -140,6 +142,7 @@ export async function createEntity(input: CreateEntityInput): Promise<HybridEnti
     id: uuid(),
     title: input.core.title ?? '',
     description: input.core.description ?? '',
+    description_json: input.core.description_json,
     color: input.core.color ?? '#6366f1',
     icon: input.core.icon ?? 'box',
     tags: input.core.tags ?? [],
@@ -154,12 +157,13 @@ export async function createEntity(input: CreateEntityInput): Promise<HybridEnti
 
   await db.execute(
     `INSERT INTO base_entities
-       (id, title, description, color, icon, tags, parent_id, created_at, updated_at, deleted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+       (id, title, description, description_json, color, icon, tags, parent_id, created_at, updated_at, deleted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     [
       core.id,
       core.title,
       core.description,
+      core.description_json ?? null,
       core.color,
       core.icon,
       JSON.stringify(core.tags),
@@ -183,7 +187,7 @@ export async function createEntity(input: CreateEntityInput): Promise<HybridEnti
 export async function getEntity(id: string): Promise<HybridEntity | null> {
   const db = getWorkspaceDB();
   const rows = await db.select<CoreRow[]>(
-    `SELECT id, title, description, color, icon, tags, parent_id, created_at, updated_at, deleted_at
+    `SELECT id, title, description, description_json, color, icon, tags, parent_id, created_at, updated_at, deleted_at
        FROM base_entities WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
     [id],
   );
@@ -203,6 +207,7 @@ export async function getEntity(id: string): Promise<HybridEntity | null> {
 export interface CoreUpdate {
   title?: string;
   description?: string;
+  description_json?: string | null;
   color?: string;
   icon?: string;
   tags?: string[];
@@ -217,6 +222,7 @@ export async function updateCore(id: string, patch: CoreUpdate): Promise<EntityC
 
   if (patch.title !== undefined) { sets.push('title = ?'); params.push(patch.title); }
   if (patch.description !== undefined) { sets.push('description = ?'); params.push(patch.description); }
+  if (patch.description_json !== undefined) { sets.push('description_json = ?'); params.push(patch.description_json); }
   if (patch.color !== undefined) { sets.push('color = ?'); params.push(patch.color); }
   if (patch.icon !== undefined) { sets.push('icon = ?'); params.push(patch.icon); }
   if (patch.tags !== undefined) { sets.push('tags = ?'); params.push(JSON.stringify(patch.tags)); }
@@ -425,6 +431,7 @@ export async function listByAspect(
        b.id          AS b_id,
        b.title       AS title,
        b.description AS description,
+       b.description_json AS description_json,
        b.color       AS color,
        b.icon        AS icon,
        b.tags        AS tags,
@@ -452,6 +459,7 @@ export async function listByAspect(
       id: r.b_id,
       title: r.title,
       description: r.description,
+      description_json: r.description_json ?? undefined,
       color: r.color,
       icon: r.icon,
       tags: JSON.parse(r.tags) as string[],

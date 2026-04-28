@@ -134,7 +134,11 @@ export function NotesView(): React.ReactElement {
     [openNote],
   );
 
-  const deleteNote = useCallback(async (id: string) => {
+  const deleteNote = useCallback(async (id: string, skipConfirm = false) => {
+    if (!skipConfirm) {
+      const confirmed = window.confirm('Delete this note? This action cannot be undone.');
+      if (!confirmed) return;
+    }
     try {
       await softDeleteEntity(id);
       setNotes((prev) => prev.filter((n) => n.id !== id));
@@ -207,7 +211,7 @@ export function NotesView(): React.ReactElement {
               entityId={note.id}
               existingTypes={['note']}
               openInitialAspectType="note"
-              onDelete={() => void deleteNote(note.id)}
+              onDelete={() => void deleteNote(note.id, false)}
             >
             <div
               role="button"
@@ -229,7 +233,7 @@ export function NotesView(): React.ReactElement {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    void deleteNote(note.id);
+                    void deleteNote(note.id, false);
                   }}
                   className="shrink-0 opacity-0 transition-opacity text-muted-foreground hover:text-red-400 group-hover:opacity-100"
                   title="Delete entity"

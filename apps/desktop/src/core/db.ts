@@ -214,6 +214,7 @@ CREATE TABLE IF NOT EXISTS \`base_entities\` (
   \`id\` text PRIMARY KEY NOT NULL,
   \`title\` text DEFAULT '' NOT NULL,
   \`description\` text DEFAULT '' NOT NULL,
+  \`description_json\` text,
   \`color\` text DEFAULT '#6366f1' NOT NULL,
   \`icon\` text DEFAULT 'box' NOT NULL,
   \`tags\` text DEFAULT '[]' NOT NULL,
@@ -311,6 +312,7 @@ async function runWorkspaceMigrations(db: Database): Promise<void> {
   // Phase A: backfill new core columns on pre-existing dev DBs.
   await ensureColumn(db, 'base_entities', 'title', `\`title\` text DEFAULT '' NOT NULL`);
   await ensureColumn(db, 'base_entities', 'description', `\`description\` text DEFAULT '' NOT NULL`);
+  await ensureColumn(db, 'base_entities', 'description_json', `\`description_json\` text`);
   await ensureColumn(db, 'base_entities', 'color', `\`color\` text DEFAULT '#6366f1' NOT NULL`);
   await ensureColumn(db, 'base_entities', 'icon', `\`icon\` text DEFAULT 'box' NOT NULL`);
 

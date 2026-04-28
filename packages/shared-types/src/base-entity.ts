@@ -281,6 +281,8 @@ export const EntityCoreSchema = z.object({
   id: z.string().uuid(),
   title: z.string().default(''),
   description: z.string().default(''),
+  /** Rich-text description as TipTap JSON (stringified). */
+  description_json: z.string().optional(),
   color: z.string().default('#6366f1'),
   icon: z.string().default('box'),
   tags: z.array(z.string()).default([]),

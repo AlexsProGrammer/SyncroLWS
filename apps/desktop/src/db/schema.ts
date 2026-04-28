@@ -49,6 +49,7 @@ export const baseEntities = sqliteTable('base_entities', {
   id: text('id').primaryKey(),
   title: text('title').notNull().default(''),
   description: text('description').notNull().default(''),
+  description_json: text('description_json'),
   color: text('color').notNull().default('#6366f1'),
   icon: text('icon').notNull().default('box'),
   tags: text('tags').notNull().default('[]'),
