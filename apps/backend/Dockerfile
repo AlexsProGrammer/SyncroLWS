@@ -2,7 +2,7 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install postgresql-client for pg_isready
+# Install postgresql-client for pg_isready and psql
 RUN apk add --no-cache postgresql-client
 
 # Copy root config files
@@ -20,6 +20,7 @@ COPY apps/backend/src ./src
 COPY apps/backend/drizzle.config.ts ./
 COPY apps/backend/drizzle ./drizzle
 COPY apps/backend/entrypoint.sh ./
+COPY apps/backend/run-migrations.sh ./
 
 WORKDIR /app
 
@@ -31,8 +32,8 @@ RUN cd /app/packages/shared-types && npx tsc
 
 WORKDIR /app/apps/backend
 
-# Make entrypoint executable
-RUN chmod +x entrypoint.sh
+# Make scripts executable
+RUN chmod +x entrypoint.sh && chmod +x run-migrations.sh
 
 EXPOSE 3000
 

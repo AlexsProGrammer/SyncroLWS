@@ -12,8 +12,10 @@ echo "PostgreSQL is ready!"
 
 # Run database migrations
 echo "Running database migrations..."
-cd /app/apps/backend
-npm run db:push || true
+/app/apps/backend/run-migrations.sh
+
+sleep 2
 
 echo "Starting backend..."
+cd /app/apps/backend
 npm run dev
