@@ -30,17 +30,6 @@ import type {
 
 type ViewMode = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/**
- * FullCalendar gives date-only strings ("2026-04-26") for all-day events.
- * CalendarEventAspectDataSchema requires full ISO 8601 datetimes, so we
- * normalise any bare date string to midnight UTC.
- */
-function toISOStr(s: string): string {
-  return s.includes('T') ? s : new Date(s).toISOString();
-}
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function CalendarView(): React.ReactElement {
@@ -180,24 +169,12 @@ export function CalendarView(): React.ReactElement {
   const quickCreate = useCallback(
     async (start: string, end: string, allDay: boolean) => {
       try {
-        // FullCalendar all-day selections give date-only strings ("2026-04-26").
-        // Normalise to full ISO datetimes required by CalendarEventAspectDataSchema.
-        const startISO = toISOStr(start);
-        // All-day end from FullCalendar is exclusive (next day); shift to
-        // end-of-day of the last day so the stored range is inclusive.
-        let endISO = toISOStr(end);
-        if (allDay && !end.includes('T')) {
-          const d = new Date(end);
-          d.setDate(d.getDate() - 1);
-          d.setHours(23, 59, 59, 999);
-          endISO = d.toISOString();
-        }
         const created = await createEntity({
           core: { title: 'New event', color: '#3b82f6' },
           aspects: [
             {
               aspect_type: 'calendar_event',
-              data: { start: startISO, end: endISO, all_day: allDay },
+              data: { start, end, all_day: allDay },
             },
           ],
         });
@@ -255,8 +232,8 @@ export function CalendarView(): React.ReactElement {
       if (!aspectId) return;
       void updateAspect(aspectId, {
         data: {
-          start: toISOStr(dropInfo.event.startStr),
-          end: toISOStr(dropInfo.event.endStr || dropInfo.event.startStr),
+          start: dropInfo.event.startStr,
+          end: dropInfo.event.endStr || dropInfo.event.startStr,
           all_day: dropInfo.event.allDay,
         },
       }).catch((err) => console.error('[calendar] drop save failed:', err));
@@ -271,8 +248,8 @@ export function CalendarView(): React.ReactElement {
     if (!aspectId) return;
     void updateAspect(aspectId, {
       data: {
-        start: toISOStr(resizeInfo.event.startStr),
-        end: toISOStr(resizeInfo.event.endStr || resizeInfo.event.startStr),
+        start: resizeInfo.event.startStr,
+        end: resizeInfo.event.endStr || resizeInfo.event.startStr,
       },
     }).catch((err) => console.error('[calendar] resize save failed:', err));
   }, []);
