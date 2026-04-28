@@ -20,12 +20,14 @@ const envSchema = z.object({
     .string()
     .min(32, 'JWT_SECRET must be at least 32 characters for adequate security'),
 
-  POWERSYNC_URL: z
-    .string()
-    .url('POWERSYNC_URL must be a valid URL (e.g. http://localhost:8080)'),
-
   // ── Optional with defaults ──────────────────────────────────────────────────
   PORT: z.coerce.number().int().positive().default(3000),
+
+  POWERSYNC_URL: z
+    .string()
+    .url('POWERSYNC_URL must be a valid URL')
+    .optional()
+    .default('http://localhost:8080'),
 
   MINIO_BUCKET: z.string().default('syncrohws-files'),
   MINIO_ACCESS_KEY: z.string().default('syncrohws'),

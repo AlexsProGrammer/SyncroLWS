@@ -24,8 +24,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: syncrohws
-      MINIO_ROOT_PASSWORD: syncrohws_secret
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-syncrohws}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-syncrohws_secret}
     ports:
       - "9000:9000"   # API
       - "9001:9001"   # Web console
@@ -36,6 +36,30 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: apps/backend/Dockerfile
+    container_name: syncrohws_backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file: .env
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://syncrohws:syncrohws@postgres:5432/syncrohws
+      MINIO_URL: http://minio:9000
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/apps/backend/src
 
   # PowerSync self-hosted — uncomment when ready to enable real-time sync
   # powersync:
