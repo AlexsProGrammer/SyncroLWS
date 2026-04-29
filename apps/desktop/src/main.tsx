@@ -19,6 +19,21 @@ import { getAllTools, discoverAndRegisterTools } from './registry/ToolRegistry';
 import { eventBus } from './core/events';
 
 async function bootstrap(): Promise<void> {
+  // ── PiP mode: lightweight timer window, skip full bootstrap ───────────────
+  // The main window opens the PiP child at ?pip=pomodoro (same origin) so it
+  // gets the Tauri IPC bridge. We detect that here and render only the tiny
+  // circular-timer widget instead of the full app.
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('pip') === 'pomodoro') {
+    const { PomodoroPip } = await import('./modules/pomodoro/PomodoroView');
+    ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
+      <React.StrictMode>
+        <PomodoroPip />
+      </React.StrictMode>,
+    );
+    return;
+  }
+
   // ── Phase T: idle/lock watcher ────────────────────────────────────────────
   const { startIdleWatcher } = await import('./core/lock');
   startIdleWatcher();

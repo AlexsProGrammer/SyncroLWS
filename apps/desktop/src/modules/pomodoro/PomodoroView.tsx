@@ -14,6 +14,7 @@ import { Button } from '@/ui/components/button';
 import { Input } from '@/ui/components/input';
 import { Badge } from '@/ui/components/badge';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { listen } from '@tauri-apps/api/event';
 import type { PomodoroAspectData, TimeLogAspectData } from '@syncrohws/shared-types';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -172,43 +173,6 @@ export function PomodoroView({ toolInstanceId }: { toolInstanceId?: string }): R
   );
 
   // ── Picture-in-Picture via Tauri WebviewWindow ─────────────────────────────
-
-  const pipHtmlUrl = `data:text/html,${encodeURIComponent(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:#1a1a2e; display:flex; align-items:center; justify-content:center; height:100vh; font-family:system-ui,sans-serif; overflow:hidden; -webkit-user-select:none; }
-  .wrap { position:relative; display:flex; flex-direction:column; align-items:center; }
-  .text { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; text-align:center; }
-  .time { font-size:28px; font-weight:bold; font-variant-numeric:tabular-nums; }
-  .label { font-size:11px; text-transform:uppercase; letter-spacing:1px; margin-top:2px; }
-</style></head><body>
-<div class="wrap">
-  <svg width="140" height="140" viewBox="0 0 140 140" style="transform:rotate(-90deg)">
-    <circle cx="70" cy="70" r="50" fill="none" stroke="#333" stroke-width="6"/>
-    <circle id="arc" cx="70" cy="70" r="50" fill="none" stroke="#6366f1" stroke-width="6" stroke-linecap="round"
-      stroke-dasharray="314.16" stroke-dashoffset="0"/>
-  </svg>
-  <div class="text">
-    <div id="time" class="time">00:00</div>
-    <div id="label" class="label" style="color:#6366f1">Ready</div>
-  </div>
-</div>
-<script>
-  function update(d) {
-    document.body.style.background = d.bg;
-    document.getElementById('arc').setAttribute('stroke', d.color);
-    document.getElementById('arc').setAttribute('stroke-dashoffset', String(d.offset));
-    document.getElementById('time').textContent = d.time;
-    const lbl = document.getElementById('label');
-    lbl.textContent = d.label;
-    lbl.style.color = d.color;
-  }
-  if (window.__TAURI__) {
-    window.__TAURI__.event.listen('pip-update', function(e) { update(e.payload); });
-  }
-</script>
-</body></html>`)}`;
-
   const getPipData = useCallback(() => {
     const progress = totalSeconds > 0 ? remaining / totalSeconds : 0;
     const circumference = 2 * Math.PI * 50;
@@ -229,12 +193,16 @@ export function PomodoroView({ toolInstanceId }: { toolInstanceId?: string }): R
       catch { pipWindowRef.current = null; }
     }
     try {
+      // Load the PiP window at the main app origin with ?pip=pomodoro so the
+      // child window gets the full Tauri IPC bridge. data: URLs are blocked by
+      // Tauri's CSP (default-src 'self') and open silently without any JS error.
+      const pipUrl = `${window.location.origin}/?pip=pomodoro`;
       const pip = new WebviewWindow('pomodoro-pip', {
         title: 'Pomodoro Timer',
         width: 220, height: 240,
         resizable: false, alwaysOnTop: true, decorations: true,
         center: false, x: 100, y: 100,
-        url: pipHtmlUrl,
+        url: pipUrl,
       });
       pip.once('tauri://created', () => {
         setTimeout(() => {
@@ -255,7 +223,7 @@ export function PomodoroView({ toolInstanceId }: { toolInstanceId?: string }): R
         type: 'warning',
       });
     }
-  }, [pipHtmlUrl, getPipData]);
+  }, [getPipData]);
 
   const closePip = useCallback(async () => {
     if (pipWindowRef.current) {
@@ -494,6 +462,86 @@ export function PomodoroView({ toolInstanceId }: { toolInstanceId?: string }): R
             }}
           />
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ── PiP window component ──────────────────────────────────────────────────────
+// Rendered by main.tsx when the window URL contains ?pip=pomodoro.
+// Receives live timer state via Tauri 'pip-update' events emitted from the
+// main PomodoroView (see the useEffect that calls pipWindowRef.current.emitTo).
+
+interface PipState {
+  bg: string;
+  color: string;
+  offset: number;
+  time: string;
+  label: string;
+}
+
+const PIP_INITIAL: PipState = {
+  bg: '#1a1a2e',
+  color: '#6366f1',
+  offset: 0,
+  time: '00:00',
+  label: 'Ready',
+};
+
+export function PomodoroPip(): React.ReactElement {
+  const [state, setState] = useState<PipState>(PIP_INITIAL);
+  const circumference = 2 * Math.PI * 50; // r=50 → C≈314.16
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<PipState>('pip-update', (e) => {
+      setState(e.payload);
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
+
+  return (
+    <div
+      style={{
+        background: state.bg,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100vh',
+        margin: 0,
+        overflow: 'hidden',
+        fontFamily: 'system-ui, sans-serif',
+        userSelect: 'none',
+      }}
+    >
+      <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <svg width="140" height="140" viewBox="0 0 140 140" style={{ transform: 'rotate(-90deg)' }}>
+          <circle cx="70" cy="70" r="50" fill="none" stroke="#333" strokeWidth="6" />
+          <circle
+            cx="70" cy="70" r="50" fill="none"
+            stroke={state.color} strokeWidth="6" strokeLinecap="round"
+            strokeDasharray={String(circumference)}
+            strokeDashoffset={String(state.offset)}
+            style={{ transition: 'stroke-dashoffset 0.5s linear' }}
+          />
+        </svg>
+        <div
+          style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            color: '#fff',
+            textAlign: 'center',
+          }}
+        >
+          <div style={{ fontSize: '28px', fontWeight: 'bold', fontVariantNumeric: 'tabular-nums' }}>
+            {state.time}
+          </div>
+          <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', marginTop: '2px', color: state.color }}>
+            {state.label}
+          </div>
+        </div>
       </div>
     </div>
   );
