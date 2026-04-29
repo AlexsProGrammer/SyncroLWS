@@ -30,7 +30,7 @@ import {
 import { exportWorkspace, importWorkspace, downloadJsonBundle, pickJsonBundle, type ImportPolicy } from '@/core/workspaceIO';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { getAISettings, saveAISettings, ai } from '@/core/ai';
-import { logout as authLogout, hashForStorage, verifyForStorage } from '@/core/auth';
+import { logout as authLogout, loginAndCacheHash } from '@/core/auth';
 import { useAppLockStore } from '@/core/lock';
 import { UsersPanel } from '@/ui/admin/UsersPanel';
 import { AuditLogPanel } from '@/ui/admin/AuditLogPanel';
@@ -1417,8 +1417,31 @@ function AccountPanel(): React.ReactElement {
   const syncUrl = useSyncStore((s) => s.syncUrl);
   const clearUserSession = useSyncStore((s) => s.clearUserSession);
 
+  // Inline sign-in form state (shown in AccountPanel when !userToken)
+  const [signingIn, setSigningIn] = useState(false);
+  const [siUrl, setSiUrl] = useState('');
+  const [siEmail, setSiEmail] = useState('');
+  const [siPw, setSiPw] = useState('');
+  const [siBusy, setSiBusy] = useState(false);
+  const [siError, setSiError] = useState('');
+
   const handleSignOut = (): void => {
     authLogout();
+  };
+
+  const handleSignInSubmit = async (): Promise<void> => {
+    if (!profile || !siUrl || !siEmail || !siPw) return;
+    setSiBusy(true);
+    setSiError('');
+    try {
+      await loginAndCacheHash(siUrl.trim(), siEmail.trim(), siPw, profile.id);
+      setSiPw('');
+      setSigningIn(false);
+    } catch (e) {
+      setSiError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSiBusy(false);
+    }
   };
 
   const handleConvertToEnterprise = (): void => {
@@ -1472,6 +1495,7 @@ function AccountPanel(): React.ReactElement {
 
       {mode === 'enterprise' && (
         <>
+          {/* ── Signed-in state ──────────────────────────────────────── */}
           <div className="rounded-lg border border-border p-3 space-y-1">
             <p className="text-sm font-medium text-foreground">Signed in as</p>
             {userToken ? (
@@ -1498,217 +1522,95 @@ function AccountPanel(): React.ReactElement {
                   </Button>
                 </div>
               </>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground">
-                  Not signed in. Click below to open the sign-in dialog.
-                </p>
+            ) : signingIn ? (
+              /* Inline sign-in form */
+              <div className="space-y-3 pt-1">
                 <p className="text-xs text-muted-foreground">
                   First-time setup: use the <span className="font-mono">OWNER_BOOTSTRAP_EMAIL</span> and{' '}
                   <span className="font-mono">OWNER_BOOTSTRAP_PASSWORD</span> values from your backend&apos;s{' '}
-                  <span className="font-mono">.env</span> file (default: <span className="font-mono">admin@example.com</span>).
+                  <span className="font-mono">.env</span> file.
                 </p>
-                <Button
-                  size="sm"
-                  onClick={() => updateProfile(profile!.id, { mode: 'enterprise' })}
-                >
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">Server URL</label>
+                  <Input
+                    type="url"
+                    value={siUrl}
+                    onChange={(e) => setSiUrl(e.target.value)}
+                    placeholder="https://sync.example.com"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">Email</label>
+                  <Input
+                    type="email"
+                    value={siEmail}
+                    onChange={(e) => setSiEmail(e.target.value)}
+                    placeholder="you@example.com"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">Password</label>
+                  <Input
+                    type="password"
+                    value={siPw}
+                    onChange={(e) => setSiPw(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void handleSignInSubmit(); }}
+                    disabled={siBusy}
+                  />
+                </div>
+                {siError && <p className="text-xs text-destructive">{siError}</p>}
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={handleSignInSubmit}
+                    disabled={siBusy || !siUrl || !siEmail || !siPw}
+                  >
+                    {siBusy ? 'Signing in…' : 'Sign in'}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setSigningIn(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Not signed in. Sign in to connect this profile to a SyncroLWS server.
+                </p>
+                <Button size="sm" onClick={() => setSigningIn(true)}>
                   Sign in
                 </Button>
               </div>
             )}
           </div>
+
+          {/* ── Require enterprise password at login ─────────────────── */}
+          {profile?.enterprisePwHash && (
+            <div className="rounded-lg border border-border p-3">
+              <label className="flex items-start gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 accent-primary"
+                  checked={!!profile.useEnterprisePwAtLogin}
+                  onChange={(e) =>
+                    profile && updateProfile(profile.id, { useEnterprisePwAtLogin: e.target.checked })
+                  }
+                />
+                <div>
+                  <p className="text-sm font-medium text-foreground leading-none">
+                    Require enterprise password at login
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    When enabled, the ProfileGate always asks for your enterprise password
+                    to enter this profile — even when a valid session token is cached.
+                  </p>
+                </div>
+              </label>
+            </div>
+          )}
         </>
       )}
-
-      {/* ── Local profile password ───────────────────────────────────────── */}
-      <LocalProfilePwCard profile={profile ?? null} />
-
-      {/* ── Offline enterprise access ────────────────────────────────────── */}
-      {mode === 'enterprise' && <OfflineEnterpriseCard profile={profile ?? null} />}
     </section>
-  );
-}
-
-// ── Per-profile local password card ──────────────────────────────────────────
-
-function LocalProfilePwCard({ profile }: { profile: Profile | null }): React.ReactElement {
-  const setProfileLocalPw = useProfileStore((s) => s.setProfileLocalPw);
-  const [pw, setPw] = useState('');
-  const [confirm, setConfirm] = useState('');
-  const [currentPw, setCurrentPw] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [info, setInfo] = useState('');
-
-  const hasLocalPw = !!(profile?.localPwHash && profile?.localPwSalt);
-
-  const flash = (kind: 'info' | 'error', msg: string): void => {
-    if (kind === 'error') { setError(msg); setInfo(''); }
-    else { setInfo(msg); setError(''); }
-    setTimeout(() => { setError(''); setInfo(''); }, 4000);
-  };
-
-  const handleSet = async (): Promise<void> => {
-    if (!profile) return;
-    if (!pw) { flash('error', 'Password is required.'); return; }
-    if (pw !== confirm) { flash('error', 'Passwords do not match.'); return; }
-    if (pw.length < 4) { flash('error', 'Password must be at least 4 characters.'); return; }
-    if (hasLocalPw) {
-      const ok = await verifyForStorage(currentPw, profile.localPwHash!, profile.localPwSalt!);
-      if (!ok) { flash('error', 'Current password is incorrect.'); return; }
-    }
-    setBusy(true);
-    try {
-      const { hash_hex, salt_hex } = await hashForStorage(pw);
-      setProfileLocalPw(profile.id, hash_hex, salt_hex);
-      setPw(''); setConfirm(''); setCurrentPw('');
-      flash('info', hasLocalPw ? 'Profile password updated.' : 'Profile password set.');
-    } catch (e) {
-      flash('error', e instanceof Error ? e.message : String(e));
-    } finally { setBusy(false); }
-  };
-
-  const handleRemove = async (): Promise<void> => {
-    if (!profile?.localPwHash || !profile?.localPwSalt) return;
-    const ok = await verifyForStorage(currentPw, profile.localPwHash, profile.localPwSalt);
-    if (!ok) { flash('error', 'Current password is incorrect.'); return; }
-    setProfileLocalPw(profile.id, null, null);
-    setCurrentPw('');
-    flash('info', 'Profile password removed.');
-  };
-
-  if (!profile) return <></>;
-
-  return (
-    <div className="rounded-lg border border-border p-3 space-y-3">
-      <div>
-        <p className="text-sm font-medium text-foreground">Local profile password</p>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Require a password to enter this profile from the launch screen.
-          {hasLocalPw ? ' Currently enabled.' : ' Currently disabled.'}
-        </p>
-      </div>
-
-      {error && <p className="text-xs text-destructive">{error}</p>}
-      {info && <p className="text-xs text-green-500">{info}</p>}
-
-      {hasLocalPw && (
-        <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground">Current password (to change or remove)</label>
-          <Input
-            type="password"
-            value={currentPw}
-            onChange={(e) => setCurrentPw(e.target.value)}
-            placeholder="Current password"
-          />
-        </div>
-      )}
-
-      <div className="space-y-1.5">
-        <label className="text-xs text-muted-foreground">{hasLocalPw ? 'New password' : 'Password'}</label>
-        <Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="••••••••" />
-      </div>
-      <div className="space-y-1.5">
-        <label className="text-xs text-muted-foreground">Confirm password</label>
-        <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="••••••••" />
-      </div>
-
-      <div className="flex gap-2">
-        <Button size="sm" onClick={handleSet} disabled={busy || !pw || !confirm}>
-          {hasLocalPw ? 'Update password' : 'Set password'}
-        </Button>
-        {hasLocalPw && (
-          <Button size="sm" variant="ghost" onClick={handleRemove} disabled={busy || !currentPw}>
-            Remove password
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Offline enterprise access card ────────────────────────────────────────────
-
-function OfflineEnterpriseCard({ profile }: { profile: Profile | null }): React.ReactElement {
-  const setProfileEnterprisePwHash = useProfileStore((s) => s.setProfileEnterprisePwHash);
-  const userEmail = useSyncStore((s) => s.userEmail);
-  const [pw, setPw] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [info, setInfo] = useState('');
-
-  const hasCached = !!(profile?.enterprisePwHash && profile?.enterprisePwSalt);
-
-  const flash = (kind: 'info' | 'error', msg: string): void => {
-    if (kind === 'error') { setError(msg); setInfo(''); }
-    else { setInfo(msg); setError(''); }
-    setTimeout(() => { setError(''); setInfo(''); }, 4000);
-  };
-
-  const handleCache = async (): Promise<void> => {
-    if (!profile || !pw) return;
-    setBusy(true);
-    try {
-      const { hash_hex, salt_hex } = await hashForStorage(pw);
-      setProfileEnterprisePwHash(profile.id, hash_hex, salt_hex);
-      setPw('');
-      flash('info', 'Password cached for offline access.');
-    } catch (e) {
-      flash('error', e instanceof Error ? e.message : String(e));
-    } finally { setBusy(false); }
-  };
-
-  const handleClear = (): void => {
-    if (!profile) return;
-    setProfileEnterprisePwHash(profile.id, null, null);
-    flash('info', 'Offline password cache cleared.');
-  };
-
-  if (!profile) return <></>;
-
-  return (
-    <div className="rounded-lg border border-border p-3 space-y-3">
-      <div>
-        <p className="text-sm font-medium text-foreground">Offline enterprise access</p>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Cache a hashed copy of your enterprise password locally so you can
-          unlock this profile when the server is unreachable.
-          {hasCached ? ' A cache is stored.' : ' No cache stored.'}
-        </p>
-      </div>
-
-      {error && <p className="text-xs text-destructive">{error}</p>}
-      {info && <p className="text-xs text-green-500">{info}</p>}
-
-      {userEmail && (
-        <p className="text-xs text-muted-foreground">
-          Account: <span className="font-medium text-foreground">{userEmail}</span>
-        </p>
-      )}
-
-      <div className="space-y-1.5">
-        <label className="text-xs text-muted-foreground">
-          {hasCached ? 'Update cached password' : 'Enterprise password to cache'}
-        </label>
-        <Input
-          type="password"
-          value={pw}
-          onChange={(e) => setPw(e.target.value)}
-          placeholder="Enterprise password"
-        />
-      </div>
-
-      <div className="flex gap-2">
-        <Button size="sm" onClick={handleCache} disabled={busy || !pw}>
-          {hasCached ? 'Update cache' : 'Cache password'}
-        </Button>
-        {hasCached && (
-          <Button size="sm" variant="ghost" onClick={handleClear} disabled={busy}>
-            Clear cache
-          </Button>
-        )}
-      </div>
-    </div>
   );
 }
 

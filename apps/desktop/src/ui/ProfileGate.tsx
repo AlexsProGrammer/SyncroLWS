@@ -243,11 +243,18 @@ type AuthState =
 
 function resolveAuthState(profile: Profile, syncState: ReturnType<typeof useSyncStore.getState>): AuthState {
   if (profile.mode === 'enterprise') {
+    // "Require enterprise password at login" → always ask for password, even
+    // when a valid token is cached. Gives an extra factor every launch.
+    if (
+      profile.useEnterprisePwAtLogin &&
+      profile.enterprisePwHash &&
+      profile.enterprisePwSalt
+    ) return 'offline-pw';
     if (syncState.userToken && isTokenValid(syncState.tokenExpiresAt)) return 'continue';
     if (profile.enterprisePwHash && profile.enterprisePwSalt) return 'offline-pw';
     return 'full-login';
   }
-  if (profile.localPwHash && profile.localPwSalt) return 'local-pw';
+  // Personal profiles: no local pw UI — always direct.
   return 'direct';
 }
 
@@ -534,12 +541,11 @@ export function ProfileGate(): React.ReactElement {
     // enterprise: finishAuth already ran inside AddProfileForm → gate passed
   }, []);
 
-  // Auto-select when only one profile and no password required
+  // Auto-select when only one personal profile (no password gate — direct entry).
   React.useEffect(() => {
     if (profiles.length === 1 && !selected && !adding) {
       const p = profiles[0]!;
-      if (p.mode !== 'enterprise' && !p.localPwHash) {
-        // Personal profile with no password — auto-select
+      if (p.mode !== 'enterprise') {
         setSelected(p.id);
       }
     }

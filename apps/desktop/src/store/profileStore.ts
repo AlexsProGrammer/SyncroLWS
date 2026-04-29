@@ -26,6 +26,10 @@ export interface Profile {
   enterprisePwHash?: string;
   /** Salt for enterprisePwHash (hex, 16 bytes). */
   enterprisePwSalt?: string;
+  /** When true, the ProfileGate always demands the enterprise password to
+   *  enter this profile — even if a valid token is already cached. Gives
+   *  an extra authentication factor every launch. */
+  useEnterprisePwAtLogin?: boolean;
 }
 
 interface ProfileState {
@@ -46,7 +50,7 @@ interface ProfileActions {
   /** Rename an existing profile. */
   renameProfile: (id: string, name: string) => void;
   /** Update profile fields (name, color, avatar_url, mode). */
-  updateProfile: (id: string, data: Partial<Pick<Profile, 'name' | 'color' | 'avatar_url' | 'mode'>>) => void;
+  updateProfile: (id: string, data: Partial<Pick<Profile, 'name' | 'color' | 'avatar_url' | 'mode' | 'useEnterprisePwAtLogin'>>) => void;
   /** Delete a profile (does NOT delete files on disk). */
   deleteProfile: (id: string) => void;
   // ── ProfileGate actions ───────────────────────────────────────────────────
@@ -161,7 +165,7 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
         }));
       },
 
-      updateProfile: (id: string, data: Partial<Pick<Profile, 'name' | 'color' | 'avatar_url' | 'mode'>>) => {
+      updateProfile: (id: string, data: Partial<Pick<Profile, 'name' | 'color' | 'avatar_url' | 'mode' | 'useEnterprisePwAtLogin'>>) => {
         set((state) => ({
           profiles: state.profiles.map((p) =>
             p.id === id ? { ...p, ...data } : p,
