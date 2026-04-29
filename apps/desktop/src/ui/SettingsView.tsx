@@ -1099,6 +1099,10 @@ interface ShareLinkRow {
 function ShareLinksPanel(): React.ReactElement {
   const syncUrl = useSyncStore((s) => s.syncUrl);
   const deviceToken = useSyncStore((s) => s.deviceToken);
+  const userToken = useSyncStore((s) => s.userToken);
+  // In enterprise mode the user JWT is the bearer; in personal mode use the device JWT.
+  const activeProfile = useProfileStore((s) => s.profiles.find((p) => p.id === s.activeProfileId));
+  const authToken = activeProfile?.mode === 'enterprise' ? userToken : deviceToken;
   const activeProfileId = useProfileStore((s) => s.activeProfileId);
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
@@ -1119,11 +1123,11 @@ function ShareLinksPanel(): React.ReactElement {
   }, [activeWorkspaceId, newWorkspaceId]);
 
   const reload = useCallback(async (): Promise<void> => {
-    if (!syncUrl || !deviceToken) return;
+    if (!syncUrl || !authToken) return;
     setLoading(true); setError(null);
     try {
       const res = await fetch(`${syncUrl.replace(/\/$/, '')}/share-links`, {
-        headers: { Authorization: `Bearer ${deviceToken}` },
+        headers: { Authorization: `Bearer ${authToken}` },
       });
       if (!res.ok) throw new Error(`${res.status}`);
       const j = (await res.json()) as { links: ShareLinkRow[] };
@@ -1133,12 +1137,12 @@ function ShareLinksPanel(): React.ReactElement {
     } finally {
       setLoading(false);
     }
-  }, [syncUrl, deviceToken]);
+  }, [syncUrl, authToken]);
 
   useEffect(() => { void reload(); }, [reload]);
 
   const onCreate = async (): Promise<void> => {
-    if (!syncUrl || !deviceToken || !activeProfileId || !newWorkspaceId) return;
+    if (!syncUrl || !authToken || !activeProfileId || !newWorkspaceId) return;
     setCreating(true); setError(null); setLastMintedToken(null);
     try {
       const expiresInSec = newExpiryDays.trim()
@@ -1146,7 +1150,7 @@ function ShareLinksPanel(): React.ReactElement {
         : undefined;
       const res = await fetch(`${syncUrl.replace(/\/$/, '')}/share-links`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${deviceToken}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           profile_id: activeProfileId,
           workspace_id: newWorkspaceId,
@@ -1169,11 +1173,11 @@ function ShareLinksPanel(): React.ReactElement {
   };
 
   const onRevoke = async (id: string): Promise<void> => {
-    if (!syncUrl || !deviceToken) return;
+    if (!syncUrl || !authToken) return;
     try {
       await fetch(`${syncUrl.replace(/\/$/, '')}/share-links/${id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${deviceToken}` },
+        headers: { Authorization: `Bearer ${authToken}` },
       });
       void reload();
     } catch (err) {
@@ -1184,12 +1188,14 @@ function ShareLinksPanel(): React.ReactElement {
   const portalUrl = (token: string): string =>
     `${syncUrl.replace(/\/$/, '')}/portal/?token=${encodeURIComponent(token)}`;
 
-  if (!deviceToken) {
+  if (!authToken) {
     return (
       <section className="max-w-lg space-y-3">
         <h2 className="text-lg font-semibold text-foreground">Share Links</h2>
         <p className="text-sm text-muted-foreground">
-          Pair this device with the backend (Sync tab) to mint client-portal share links.
+          {activeProfile?.mode === 'enterprise'
+            ? 'Sign in to your enterprise account to manage share links.'
+            : 'Pair this device with the backend (Sync tab) to mint client-portal share links.'}
         </p>
       </section>
     );
@@ -1424,7 +1430,8 @@ function AccountPanel(): React.ReactElement {
   const handleConvertToEnterprise = (): void => {
     if (!profile) return;
     if (!window.confirm(
-      'Convert this profile to Enterprise mode?\n\nYou will be prompted to sign in to a server. ' +
+      'Convert this profile to Enterprise mode?\n\nYou will be prompted to sign in to a SyncroLWS server. ' +
+      'Use the admin account defined in the backend .env (OWNER_BOOTSTRAP_EMAIL / OWNER_BOOTSTRAP_PASSWORD). ' +
       'Local data stays on this device — sync becomes server-driven once signed in.',
     )) return;
     updateProfile(profile.id, { mode: 'enterprise' });
@@ -1498,10 +1505,22 @@ function AccountPanel(): React.ReactElement {
                 </div>
               </>
             ) : (
-              <p className="text-xs text-muted-foreground">
-                Not signed in. The sign-in dialog opens automatically when this
-                profile is active.
-              </p>
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Not signed in. Click below to open the sign-in dialog.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  First-time setup: use the <span className="font-mono">OWNER_BOOTSTRAP_EMAIL</span> and{' '}
+                  <span className="font-mono">OWNER_BOOTSTRAP_PASSWORD</span> values from your backend&apos;s{' '}
+                  <span className="font-mono">.env</span> file (default: <span className="font-mono">admin@example.com</span>).
+                </p>
+                <Button
+                  size="sm"
+                  onClick={() => updateProfile(profile!.id, { mode: 'enterprise' })}
+                >
+                  Sign in
+                </Button>
+              </div>
             )}
           </div>
         </>

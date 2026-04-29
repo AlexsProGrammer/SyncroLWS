@@ -101,13 +101,20 @@ const pullProcedure = protectedProcedure
     const limit = input.limit;
 
     // For enterprise (user-token) callers, gate by workspace membership.
+    // Org admins bypass the membership check — they have implicit access to
+    // all workspaces (needed on first login before any workspace_members rows
+    // have been created for the admin).
     if (scope.mode === 'user') {
-      const role = await userWorkspaceRole(input.workspace_id, scope.userId);
-      if (!role) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Not a member of this workspace.',
-        });
+      const auth = ctx.auth as { kind: 'user'; orgRole: string };
+      const isOrgAdmin = auth.orgRole === 'admin';
+      if (!isOrgAdmin) {
+        const role = await userWorkspaceRole(input.workspace_id, scope.userId);
+        if (!role) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Not a member of this workspace.',
+          });
+        }
       }
     }
 
@@ -237,19 +244,24 @@ const pushProcedure = protectedProcedure
     const scope = requireSyncAuth(ctx);
 
     // Enterprise: must be owner/editor in the target workspace.
+    // Org admins bypass the membership check — implicit write access to all workspaces.
     if (scope.mode === 'user') {
-      const role = await userWorkspaceRole(input.workspace_id, scope.userId);
-      if (!role) {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Not a member of this workspace.',
-        });
-      }
-      if (role === 'viewer') {
-        throw new TRPCError({
-          code: 'FORBIDDEN',
-          message: 'Viewer role cannot push changes.',
-        });
+      const auth = ctx.auth as { kind: 'user'; orgRole: string };
+      const isOrgAdmin = auth.orgRole === 'admin';
+      if (!isOrgAdmin) {
+        const role = await userWorkspaceRole(input.workspace_id, scope.userId);
+        if (!role) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Not a member of this workspace.',
+          });
+        }
+        if (role === 'viewer') {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Viewer role cannot push changes.',
+          });
+        }
       }
     }
 

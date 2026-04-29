@@ -367,7 +367,20 @@ export default function App(): React.ReactElement {
       <Toaster />
       <EntityDetailSheetHost />
       <AddAspectDialogHost />      <FirstRunSetupDialog open={showFirstRun} onComplete={() => { /* main.tsx will react to profile creation */ }} />
-      <EnterpriseLoginDialog open={showLoginDialog} onClose={() => { /* dialog closes itself on success */ }} />
+      <EnterpriseLoginDialog
+        open={showLoginDialog}
+        onClose={() => {
+          // Only revert to personal if the dialog was cancelled (no token stored).
+          // If login succeeded, userToken is now set — keep the enterprise mode.
+          const syncState = useSyncStore.getState();
+          if (!syncState.userToken) {
+            const { activeProfileId, updateProfile } = useProfileStore.getState();
+            if (activeProfileId) {
+              updateProfile(activeProfileId, { mode: 'personal' });
+            }
+          }
+        }}
+      />
       <ChangePasswordDialog
         open={showForcedChange || showVoluntaryChange}
         forced={showForcedChange}

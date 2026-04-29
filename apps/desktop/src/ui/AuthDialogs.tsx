@@ -26,7 +26,7 @@ interface EnterpriseLoginDialogProps {
 
 export function EnterpriseLoginDialog({ open, onClose }: EnterpriseLoginDialogProps): React.ReactElement {
   const syncUrl = useSyncStore((s) => s.syncUrl);
-  const setSyncUrl = useSyncStore((s) => s.setSyncUrl);
+  // NOTE: setSyncUrl removed — login() calls setUserSession({ serverUrl }) which sets it atomically.
 
   const [serverUrl, setServerUrl] = useState(syncUrl || 'http://localhost:3000');
   const [email, setEmail] = useState('');
@@ -34,21 +34,22 @@ export function EnterpriseLoginDialog({ open, onClose }: EnterpriseLoginDialogPr
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Reset fields only when the dialog opens — not on every syncUrl store change
+  // (which would clear email/password mid-request).
   useEffect(() => {
     if (open) {
-      setServerUrl(syncUrl || 'http://localhost:3000');
+      setServerUrl(useSyncStore.getState().syncUrl || 'http://localhost:3000');
       setEmail('');
       setPassword('');
       setError(null);
     }
-  }, [open, syncUrl]);
+  }, [open]);
 
   const submit = async (): Promise<void> => {
     setBusy(true);
     setError(null);
     try {
       const url = serverUrl.replace(/\/+$/, '');
-      setSyncUrl(url);
       await login(url, email.trim(), password);
       setPassword('');
       onClose();
