@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
-import { loadProfileDB } from '@/core/db';
+import { loadProfileDB, isProfileDBLoaded } from '@/core/db';
 import { eventBus } from '@/core/events';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -97,7 +97,11 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
           console.error(`[profile] cannot switch — profile ${id} not found`);
           return;
         }
-        if (id === get().activeProfileId) return;
+        // Only skip if both the ID matches AND the DB is already loaded.
+        // On cold starts, activeProfileId persists from localStorage but the
+        // DB reference does not — without this check, the guard would fire
+        // and skip loadProfileDB, leaving the DB uninitialized.
+        if (id === get().activeProfileId && isProfileDBLoaded(id)) return;
 
         set({ switching: true });
 

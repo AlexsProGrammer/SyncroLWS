@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from '@/ui/components/dialog';
 import { getAllTools } from '@/registry/ToolRegistry';
-import { getDB } from '@/core/db';
+import { getDB, closeProfileDB, loadProfileDB } from '@/core/db';
 import { eventBus } from '@/core/events';
 import { useProfileStore, type Profile } from '@/store/profileStore';
 import { useSyncStore } from '@/store/syncStore';
@@ -31,6 +31,7 @@ import { exportWorkspace, importWorkspace, downloadJsonBundle, pickJsonBundle, t
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { getAISettings, saveAISettings, ai } from '@/core/ai';
 import { logout as authLogout, loginAndCacheHash } from '@/core/auth';
+import { invoke } from '@tauri-apps/api/core';
 import { useAppLockStore } from '@/core/lock';
 import { UsersPanel } from '@/ui/admin/UsersPanel';
 import { AuditLogPanel } from '@/ui/admin/AuditLogPanel';
@@ -199,6 +200,39 @@ export function SettingsView(): React.ReactElement {
     },
     [activeProfileId, loadToolStates],
   );
+
+  // ── Danger zone ───────────────────────────────────────────────────────────
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const [clearBusy, setClearBusy] = useState(false);
+
+  const handleClearProfileData = useCallback(async () => {
+    if (!activeProfileId) return;
+    setClearBusy(true);
+    try {
+      // 1. Drop the in-memory DB references before removing files
+      await closeProfileDB();
+      // 2. Delete all workspaces + profile DB on disk
+      await invoke('clear_profile_data', { uuid: activeProfileId });
+      // 3. Reload the profile DB (migrations run fresh)
+      await loadProfileDB(activeProfileId);
+      // 4. Reload workspaces (will be empty)
+      const { useWorkspaceStore } = await import('@/store/workspaceStore');
+      useWorkspaceStore.setState({ workspaces: [], activeWorkspaceId: null });
+      await useWorkspaceStore.getState().loadWorkspaces();
+      // 5. Reload tool toggles for the fresh DB
+      void loadToolStates();
+      setClearConfirmOpen(false);
+    } catch (err) {
+      console.error('[settings] failed to clear profile data:', err);
+      eventBus.emit('notification:show', {
+        title: 'Clear failed',
+        body: err instanceof Error ? err.message : String(err),
+        type: 'error',
+      });
+    } finally {
+      setClearBusy(false);
+    }
+  }, [activeProfileId, loadToolStates]);
 
   // ── Test backend connection ────────────────────────────────────────────────
   const testConnection = useCallback(async () => {
@@ -398,6 +432,70 @@ export function SettingsView(): React.ReactElement {
                   SyncroLWS v0.1.0 — Local-first workspace manager.
                 </p>
               </div>
+
+              <Separator />
+
+              {/* ── Danger zone ──────────────────────────────────────── */}
+              <div>
+                <h2 className="text-lg font-semibold text-destructive">Danger Zone</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Irreversible actions that affect all data in this profile.
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-destructive/40 p-4 space-y-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Delete and clear all profile data</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Permanently deletes all workspaces, notes, tasks, and other data stored in this profile.
+                    The profile itself is kept but will be completely empty. This cannot be undone.
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => setClearConfirmOpen(true)}
+                  disabled={!activeProfileId}
+                >
+                  Clear all data…
+                </Button>
+              </div>
+
+              {/* Confirm dialog */}
+              <Dialog open={clearConfirmOpen} onOpenChange={(v) => { if (!v && !clearBusy) setClearConfirmOpen(false); }}>
+                <DialogContent className="max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle className="text-destructive">Clear all profile data?</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 mt-2">
+                    <p className="text-sm text-muted-foreground">
+                      This will permanently delete <span className="font-semibold text-foreground">all workspaces,
+                      notes, tasks, bookmarks, habits, and every other item</span> stored in the profile{' '}
+                      <span className="font-mono text-foreground">{activeProfile?.name}</span>.
+                    </p>
+                    <p className="text-sm font-medium text-destructive">
+                      This action cannot be undone. Make sure you have a backup if needed.
+                    </p>
+                    <div className="flex gap-2 pt-1">
+                      <Button
+                        variant="destructive"
+                        onClick={() => void handleClearProfileData()}
+                        disabled={clearBusy}
+                        className="flex-1"
+                      >
+                        {clearBusy ? 'Clearing…' : 'Yes, delete everything'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => setClearConfirmOpen(false)}
+                        disabled={clearBusy}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </section>
           </TabsContent>
 

@@ -87,6 +87,15 @@ export function getCurrentProfileId(): string | null {
   return _currentProfileId;
 }
 
+/**
+ * Returns true when a profile DB is open and matches the given profile ID.
+ * Used to guard against the early-return in setActiveProfile on cold starts
+ * where activeProfileId is persisted but the DB reference is not.
+ */
+export function isProfileDBLoaded(profileId: string): boolean {
+  return _profileDb !== null && _currentProfileId === profileId;
+}
+
 // ── Profile Settings Helpers ──────────────────────────────────────────────────
 
 export async function getProfileSetting(key: string): Promise<string | null> {

@@ -265,3 +265,42 @@ pub fn copy_workspace_data(
     );
     Ok(())
 }
+
+/// Clears all data stored for a profile — deletes the workspaces/ directory and
+/// the profile data.sqlite — then recreates the empty scaffold (files/).
+/// The JS side is responsible for closing the DB connection before calling this
+/// and reloading it afterwards.
+///
+/// Frontend: `invoke('clear_profile_data', { uuid: '...' })`
+#[tauri::command]
+pub fn clear_profile_data(app: tauri::AppHandle, uuid: String) -> Result<(), String> {
+    validate_uuid(&uuid)?;
+
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data dir: {e}"))?;
+
+    let profile_dir = app_data.join("profiles").join(&uuid);
+
+    // Remove workspaces/ directory (contains all workspace DBs and files)
+    let workspaces_dir = profile_dir.join("workspaces");
+    if workspaces_dir.exists() {
+        std::fs::remove_dir_all(&workspaces_dir)
+            .map_err(|e| format!("Failed to remove workspaces dir: {e}"))?;
+    }
+
+    // Remove the profile DB so it is recreated fresh with migrations
+    let profile_db = profile_dir.join("data.sqlite");
+    if profile_db.exists() {
+        std::fs::remove_file(&profile_db)
+            .map_err(|e| format!("Failed to remove profile data.sqlite: {e}"))?;
+    }
+
+    // Recreate the empty files/ scaffold
+    std::fs::create_dir_all(profile_dir.join("files"))
+        .map_err(|e| format!("Failed to recreate profile folder scaffold: {e}"))?;
+
+    println!("[profile] cleared all data for: {uuid}");
+    Ok(())
+}
