@@ -15,10 +15,9 @@ import { useProfileStore } from './store/profileStore';
 import { useSyncStore } from './store/syncStore';
 import { useAppLockStore } from './core/lock';
 import { LockScreen } from './ui/LockScreen';
+import { ProfileGate } from './ui/ProfileGate';
 import {
-  EnterpriseLoginDialog,
   ChangePasswordDialog,
-  FirstRunSetupDialog,
 } from './ui/AuthDialogs';
 import { toast } from './ui/hooks/use-toast';
 
@@ -244,28 +243,28 @@ export default function App(): React.ReactElement {
   }, []);
 
   // ── Phase T: app lock gate ───────────────────────────────────────────────────
-  const lockEnabled = useAppLockStore((s) => s.enabled);
   const locked = useAppLockStore((s) => s.locked);
 
-  // ── Phase S: enterprise auth gate ─────────────────────────────────────────────
-  const profiles = useProfileStore((s) => s.profiles);
-  const activeProfileMode = activeProfile?.mode;
+  // ── ProfileGate: per-session authentication gate ──────────────────────────
+  const gatePassed = useProfileStore((s) => s.gatePassed);
+
+  // ── Phase S: enterprise auth (forced pw-change only; login is in ProfileGate) ──
   const userToken = useSyncStore((s) => s.userToken);
   const mustChangePassword = useSyncStore((s) => s.mustChangePassword);
   const readonly = useSyncStore((s) => s.readonly);
 
-  const showFirstRun = profiles.length === 0;
-  const showLoginDialog =
-    !showFirstRun && activeProfileMode === 'enterprise' && !userToken;
   const showForcedChange = !!userToken && mustChangePassword;
   const [showVoluntaryChange, setShowVoluntaryChange] = useState(false);
 
-  // Listen for auth:expired events → clear token so login dialog reappears.
+  // Listen for auth:expired events → clear token so ProfileGate reappears.
   useEffect(() => {
     const onExpired = (): void => {
       // Don't clear during pw change — user is mid-flow.
       if (useSyncStore.getState().mustChangePassword) return;
-      useSyncStore.getState().clearUserSession();
+      const profileStoreId = useProfileStore.getState().activeProfileId ?? undefined;
+      useSyncStore.getState().clearUserSession(profileStoreId);
+      // Drop the gate so the user has to re-authenticate.
+      useProfileStore.getState().setGatePassed(false);
       toast({
         title: 'Signed out',
         description: 'Your session expired. Please sign in again.',
@@ -289,6 +288,16 @@ export default function App(): React.ReactElement {
     return (
       <>
         <LockScreen />
+        <Toaster />
+      </>
+    );
+  }
+
+  // ProfileGate: authenticate before the main UI loads.
+  if (!gatePassed) {
+    return (
+      <>
+        <ProfileGate />
         <Toaster />
       </>
     );
@@ -366,21 +375,7 @@ export default function App(): React.ReactElement {
       <CommandPalette />
       <Toaster />
       <EntityDetailSheetHost />
-      <AddAspectDialogHost />      <FirstRunSetupDialog open={showFirstRun} onComplete={() => { /* main.tsx will react to profile creation */ }} />
-      <EnterpriseLoginDialog
-        open={showLoginDialog}
-        onClose={() => {
-          // Only revert to personal if the dialog was cancelled (no token stored).
-          // If login succeeded, userToken is now set — keep the enterprise mode.
-          const syncState = useSyncStore.getState();
-          if (!syncState.userToken) {
-            const { activeProfileId, updateProfile } = useProfileStore.getState();
-            if (activeProfileId) {
-              updateProfile(activeProfileId, { mode: 'personal' });
-            }
-          }
-        }}
-      />
+      <AddAspectDialogHost />
       <ChangePasswordDialog
         open={showForcedChange || showVoluntaryChange}
         forced={showForcedChange}

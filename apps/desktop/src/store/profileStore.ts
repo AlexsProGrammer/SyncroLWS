@@ -16,11 +16,24 @@ export interface Profile {
   /** Phase S — controls the auth + sync model used by this profile.
    *  Defaults to 'personal' for back-compat with pre-Phase-S profiles. */
   mode?: ProfileMode;
+  // ── Per-profile security (ProfileGate) ──────────────────────────────────
+  /** PBKDF2-SHA256 hash of the per-profile local PIN/password (hex). */
+  localPwHash?: string;
+  /** Random salt used when hashing localPwHash (hex, 16 bytes). */
+  localPwSalt?: string;
+  /** Cached PBKDF2-SHA256 hash of the enterprise login password (hex).
+   *  Stored so the user can authenticate offline without the server. */
+  enterprisePwHash?: string;
+  /** Salt for enterprisePwHash (hex, 16 bytes). */
+  enterprisePwSalt?: string;
 }
 
 interface ProfileState {
   profiles: Profile[];
   activeProfileId: string | null;
+  /** True once the user has passed the ProfileGate for this session.
+   *  Always false on first load (not persisted). */
+  gatePassed: boolean;
 }
 
 interface ProfileActions {
@@ -36,6 +49,13 @@ interface ProfileActions {
   updateProfile: (id: string, data: Partial<Pick<Profile, 'name' | 'color' | 'avatar_url' | 'mode'>>) => void;
   /** Delete a profile (does NOT delete files on disk). */
   deleteProfile: (id: string) => void;
+  // ── ProfileGate actions ───────────────────────────────────────────────────
+  /** Mark the ProfileGate as passed for this session. */
+  setGatePassed: (v: boolean) => void;
+  /** Set or clear the per-profile local password hash. Pass null to remove. */
+  setProfileLocalPw: (id: string, pwHash: string | null, pwSalt: string | null) => void;
+  /** Set or clear the cached enterprise password hash for offline auth. */
+  setProfileEnterprisePwHash: (id: string, hash: string | null, salt: string | null) => void;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -45,6 +65,7 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
     (set, get) => ({
       profiles: [],
       activeProfileId: null,
+      gatePassed: false,
       switching: false,
 
       createProfile: async (name: string, color?: string, mode: ProfileMode = 'personal'): Promise<Profile> => {
@@ -158,6 +179,30 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
           return { profiles, activeProfileId };
         });
       },
+
+      // ── ProfileGate actions ───────────────────────────────────────────────
+
+      setGatePassed: (v: boolean) => set({ gatePassed: v }),
+
+      setProfileLocalPw: (id: string, pwHash: string | null, pwSalt: string | null) => {
+        set((state) => ({
+          profiles: state.profiles.map((p) =>
+            p.id === id
+              ? { ...p, localPwHash: pwHash ?? undefined, localPwSalt: pwSalt ?? undefined }
+              : p,
+          ),
+        }));
+      },
+
+      setProfileEnterprisePwHash: (id: string, hash: string | null, salt: string | null) => {
+        set((state) => ({
+          profiles: state.profiles.map((p) =>
+            p.id === id
+              ? { ...p, enterprisePwHash: hash ?? undefined, enterprisePwSalt: salt ?? undefined }
+              : p,
+          ),
+        }));
+      },
     }),
     {
       name: 'syncrolws-profiles',
@@ -166,6 +211,7 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
       partialize: (state) => ({
         profiles: state.profiles,
         activeProfileId: state.activeProfileId,
+        // gatePassed intentionally excluded — always false on reboot
       }),
     },
   ),

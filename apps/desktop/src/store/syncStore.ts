@@ -131,7 +131,9 @@ interface SyncActions {
   setPairing: (p: { token: string; deviceId: string; deviceName: string; profileId: string }) => void;
   /** Drop the device JWT (e.g. revoked by owner). Keeps URL. */
   clearPairing: () => void;
-  /** Phase S — install an enterprise user session after /auth.login. */
+  /** Phase S — install an enterprise user session after /auth.login.
+   *  Pass `profileStoreId` (useProfileStore.activeProfileId) so the session
+   *  is saved under the correct profile UUID key in profileConfigs. */
   setUserSession: (s: {
     serverUrl?: string;
     token: string;
@@ -141,9 +143,13 @@ interface SyncActions {
     displayName: string;
     orgRole: 'admin' | 'member';
     mustChangePassword?: boolean;
+    /** The zustand profile store's active profile UUID. Required for
+     *  enterprise users who have no device pairing (s.profileId = ''). */
+    profileStoreId?: string;
   }) => void;
-  /** Phase S — clear the enterprise user session (sign out / token expired). */
-  clearUserSession: () => void;
+  /** Phase S — clear the enterprise user session (sign out / token expired).
+   *  Pass `profileStoreId` so the entry in profileConfigs is cleared too. */
+  clearUserSession: (profileStoreId?: string) => void;
   /** Phase S — mark mustChangePassword (cleared after successful change). */
   setMustChangePassword: (v: boolean) => void;
   /** Phase S — toggle read-only mode. */
@@ -284,9 +290,12 @@ export const useSyncStore = create<SyncState & SyncActions>()(
           };
         }),
 
-      setUserSession: ({ serverUrl, token, expiresAt, userId, email, displayName, orgRole, mustChangePassword }) =>
+      setUserSession: ({ serverUrl, token, expiresAt, userId, email, displayName, orgRole, mustChangePassword, profileStoreId }) =>
         set((s) => {
-          const profileKey = s.profileId || '';
+          // Use the caller-supplied profile store UUID first; fall back to the
+          // device-pairing profile ID. Enterprise users without pairing have
+          // s.profileId = '' so profileStoreId is essential.
+          const profileKey = profileStoreId || s.profileId || '';
           const patch = {
             syncUrl: serverUrl ?? s.syncUrl,
             userToken: token,
@@ -312,9 +321,9 @@ export const useSyncStore = create<SyncState & SyncActions>()(
           };
         }),
 
-      clearUserSession: () =>
+      clearUserSession: (profileStoreId?: string) =>
         set((s) => {
-          const profileKey = s.profileId || '';
+          const profileKey = profileStoreId || s.profileId || '';
           const cleared: PerProfileSyncConfig = {
             ...extractConfig(s),
             userToken: '',

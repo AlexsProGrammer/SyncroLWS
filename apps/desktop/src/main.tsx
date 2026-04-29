@@ -12,8 +12,6 @@ import './styles/globals.css';
 
 import { loadProfileDB, getDB, getWorkspaceDB, ftsSearch } from './core/db';
 import { initDeepLink } from './core/deep-link';
-import { useProfileStore } from './store/profileStore';
-import { useWorkspaceStore } from './store/workspaceStore';
 
 // Import the ToolRegistry — triggers manifest-based discovery
 import { getAllTools, discoverAndRegisterTools } from './registry/ToolRegistry';
@@ -29,51 +27,10 @@ async function bootstrap(): Promise<void> {
   const { startTokenExpiryWatcher } = await import('./core/auth');
   startTokenExpiryWatcher();
 
-  // ── 1. Load or create the active profile's SQLite database ─────────────────
-  // Phase S: do NOT auto-create a default profile here. App.tsx renders the
-  // FirstRunSetupDialog when `profiles.length === 0` so the user can pick
-  // personal vs enterprise. We still load the active profile's DB if one
-  // already exists.
-  const { activeProfileId, profiles } = useProfileStore.getState();
-  const profileId =
-    activeProfileId && profiles.some((p) => p.id === activeProfileId)
-      ? activeProfileId
-      : profiles[0]?.id ?? null;
-
-  if (profileId) {
-    await loadProfileDB(profileId);
-
-    // ── 1b. Discover tools from manifests ──────────────────────────────────────
-    discoverAndRegisterTools();
-
-    // ── 1c. Load or create the default workspace ──────────────────────────────
-    const wsStore = useWorkspaceStore.getState();
-    await wsStore.loadWorkspaces();
-
-    // Phase U — load shared-workspace view-state + membership cache.
-    // For enterprise profiles also kick off a remote reconcile (best-effort).
-    const activeProfile = profiles.find((p) => p.id === profileId);
-    if (activeProfile?.mode === 'enterprise') {
-      try { await wsStore.reconcileShares(); } catch { /* offline ok */ }
-    } else {
-      await wsStore.loadSharingState();
-    }
-
-    const workspaces = useWorkspaceStore.getState().workspaces;
-    if (workspaces.length === 0) {
-      await wsStore.createWorkspace({ name: 'Personal', icon: 'folder', color: '#6366f1' });
-    } else {
-      // Restore last active workspace, or fall back to the first one
-      const lastId = await wsStore.getLastWorkspaceId();
-      const target = (lastId && workspaces.some((w) => w.id === lastId))
-        ? lastId
-        : workspaces[0]!.id;
-      await wsStore.switchWorkspace(target);
-    }
-  } else {
-    // No profile yet — still discover tools so the registry is populated.
-    discoverAndRegisterTools();
-  }
+  // ── 1. Discover tools from manifests (always, before React mounts) ────────
+  // ProfileGate (rendered by App.tsx) handles DB loading, workspace loading,
+  // and profile config restoration via setActiveProfile().
+  discoverAndRegisterTools();
 
   // ── 2. Expose helpers on window in dev mode for console verification ───────
   if (import.meta.env.DEV) {
@@ -131,10 +88,6 @@ async function bootstrap(): Promise<void> {
   // ── 3b. Phase I: start the sync engine. It no-ops until a workspace is
   // loaded AND the device is paired (deviceToken + syncUrl + isSyncActive).
   const { syncEngine } = await import('./core/sync');
-  const { useSyncStore } = await import('./store/syncStore');
-  // Ensure the flat sync fields reflect the active profile's stored config
-  // before the engine runs its first cycle.
-  if (profileId) useSyncStore.getState().loadProfileConfig(profileId);
   syncEngine.start();
 
   // ── 4. Register OS deep-link listener (bridges Tauri event → eventBus) ──────

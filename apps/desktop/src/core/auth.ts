@@ -132,6 +132,7 @@ export async function login(
     displayName: result.user.display_name,
     orgRole: result.user.org_role,
     mustChangePassword: result.mustChangePassword,
+    profileStoreId: useProfileStore.getState().activeProfileId ?? undefined,
   });
 
   if (result.mustChangePassword) {
@@ -182,6 +183,7 @@ export async function changePassword(
     displayName: s.userDisplayName,
     orgRole: (s.orgRole || 'member') as 'admin' | 'member',
     mustChangePassword: false,
+    profileStoreId: useProfileStore.getState().activeProfileId ?? undefined,
   });
   eventBus.emit('auth:signed-in', {
     userId: s.userId,
@@ -191,7 +193,8 @@ export async function changePassword(
 
 /** Local sign-out — clears the user session in syncStore. */
 export function logout(): void {
-  useSyncStore.getState().clearUserSession();
+  const profileStoreId = useProfileStore.getState().activeProfileId ?? undefined;
+  useSyncStore.getState().clearUserSession(profileStoreId);
   eventBus.emit('auth:signed-out', undefined);
 }
 
@@ -246,4 +249,109 @@ export function stopTokenExpiryWatcher(): void {
     clearInterval(expiryTimer);
     expiryTimer = null;
   }
+}
+
+// ── Per-profile offline auth crypto ─────────────────────────────────────────
+// Same PBKDF2-SHA256 / 250k iterations as the app-lock in core/lock.ts.
+
+const PBKDF2_ITER = 250_000;
+const HASH_BYTES = 32;
+const SALT_BYTES = 16;
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  if (hex.length % 2 !== 0) throw new Error('invalid hex string');
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+async function pbkdf2(password: string, salt: Uint8Array): Promise<Uint8Array> {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(password),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits'],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: salt.buffer.slice(
+        salt.byteOffset,
+        salt.byteOffset + salt.byteLength,
+      ) as ArrayBuffer,
+      iterations: PBKDF2_ITER,
+      hash: 'SHA-256',
+    },
+    key,
+    HASH_BYTES * 8,
+  );
+  return new Uint8Array(bits);
+}
+
+function constTimeEq(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i += 1) r |= (a[i] ?? 0) ^ (b[i] ?? 0);
+  return r === 0;
+}
+
+/**
+ * Hash a password for local storage. Returns hex-encoded hash + salt.
+ * Used for both per-profile local passwords and cached enterprise passwords.
+ */
+export async function hashForStorage(
+  password: string,
+): Promise<{ hash_hex: string; salt_hex: string }> {
+  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+  const hash = await pbkdf2(password, salt);
+  return { hash_hex: bytesToHex(hash), salt_hex: bytesToHex(salt) };
+}
+
+/**
+ * Verify a password against a stored hash + salt.
+ */
+export async function verifyForStorage(
+  password: string,
+  hash_hex: string,
+  salt_hex: string,
+): Promise<boolean> {
+  try {
+    const salt = hexToBytes(salt_hex);
+    const expected = hexToBytes(hash_hex);
+    const actual = await pbkdf2(password, salt);
+    return constTimeEq(actual, expected);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Login to an enterprise server AND cache the password hash locally for
+ * offline authentication on the next boot.
+ */
+export async function loginAndCacheHash(
+  serverUrl: string,
+  email: string,
+  password: string,
+  profileId: string,
+): Promise<LoginResult> {
+  // Authenticate with the server first.
+  const result = await login(serverUrl, email, password);
+
+  // Cache the password hash for offline auth.
+  const { hash_hex, salt_hex } = await hashForStorage(password);
+  const { setProfileEnterprisePwHash } = useProfileStore.getState();
+  setProfileEnterprisePwHash(profileId, hash_hex, salt_hex);
+
+  return result;
 }
