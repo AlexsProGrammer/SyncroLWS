@@ -59,6 +59,10 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
           activeProfileId: id,
         }));
 
+        // Reset sync config for the new profile (sync disabled by default).
+        const { useSyncStore } = await import('./syncStore');
+        useSyncStore.getState().loadProfileConfig(id);
+
         return profile;
       },
 
@@ -81,6 +85,10 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
 
           // 2. Update active profile in store
           set({ activeProfileId: id });
+
+          // 2b. Swap in this profile's sync configuration.
+          const { useSyncStore } = await import('./syncStore');
+          useSyncStore.getState().loadProfileConfig(id);
 
           // 3. Reload workspaces from the new profile DB
           const wsStore = useWorkspaceStore.getState();

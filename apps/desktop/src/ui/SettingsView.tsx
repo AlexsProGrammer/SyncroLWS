@@ -116,7 +116,6 @@ export function SettingsView(): React.ReactElement {
   const deviceToken = useSyncStore((s) => s.deviceToken);
   const deviceName = useSyncStore((s) => s.deviceName);
   const deviceId = useSyncStore((s) => s.deviceId);
-  const pairedProfileId = useSyncStore((s) => s.profileId);
   const isSyncActive = useSyncStore((s) => s.isSyncActive);
   const setSyncUrl = useSyncStore((s) => s.setSyncUrl);
   const setIsSyncActive = useSyncStore((s) => s.setIsSyncActive);
@@ -613,11 +612,6 @@ export function SettingsView(): React.ReactElement {
                     <p className="text-sm font-medium text-foreground">Paired</p>
                     <p className="text-xs text-muted-foreground">
                       <span className="font-mono">{deviceName || deviceId.slice(0, 8)}</span>
-                      {pairedProfileId && pairedProfileId !== activeProfileId && (
-                        <span className="ml-2 text-amber-500">
-                          (bound to a different profile)
-                        </span>
-                      )}
                     </p>
                   </div>
                   <Button variant="outline" size="sm" onClick={unpair}>

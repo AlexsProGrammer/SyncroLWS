@@ -131,6 +131,10 @@ async function bootstrap(): Promise<void> {
   // ── 3b. Phase I: start the sync engine. It no-ops until a workspace is
   // loaded AND the device is paired (deviceToken + syncUrl + isSyncActive).
   const { syncEngine } = await import('./core/sync');
+  const { useSyncStore } = await import('./store/syncStore');
+  // Ensure the flat sync fields reflect the active profile's stored config
+  // before the engine runs its first cycle.
+  if (profileId) useSyncStore.getState().loadProfileConfig(profileId);
   syncEngine.start();
 
   // ── 4. Register OS deep-link listener (bridges Tauri event → eventBus) ──────

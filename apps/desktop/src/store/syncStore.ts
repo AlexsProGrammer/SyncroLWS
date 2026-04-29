@@ -2,6 +2,64 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
 /**
+ * Per-profile sync configuration snapshot.
+ * Each profile stores its own pairing credentials, server URL, and
+ * enterprise session independently. New profiles default to all-empty/false.
+ */
+export interface PerProfileSyncConfig {
+  syncUrl: string;
+  deviceToken: string;
+  deviceId: string;
+  deviceName: string;
+  profileId: string;
+  isSyncActive: boolean;
+  encryptAtRest: boolean;
+  userToken: string;
+  tokenExpiresAt: string | null;
+  userId: string;
+  userEmail: string;
+  userDisplayName: string;
+  orgRole: 'admin' | 'member' | '';
+  mustChangePassword: boolean;
+}
+
+const PER_PROFILE_DEFAULTS: PerProfileSyncConfig = {
+  syncUrl: '',
+  deviceToken: '',
+  deviceId: '',
+  deviceName: '',
+  profileId: '',
+  isSyncActive: false,
+  encryptAtRest: false,
+  userToken: '',
+  tokenExpiresAt: null,
+  userId: '',
+  userEmail: '',
+  userDisplayName: '',
+  orgRole: '',
+  mustChangePassword: false,
+};
+
+function extractConfig(state: SyncState): PerProfileSyncConfig {
+  return {
+    syncUrl: state.syncUrl,
+    deviceToken: state.deviceToken,
+    deviceId: state.deviceId,
+    deviceName: state.deviceName,
+    profileId: state.profileId,
+    isSyncActive: state.isSyncActive,
+    encryptAtRest: state.encryptAtRest,
+    userToken: state.userToken,
+    tokenExpiresAt: state.tokenExpiresAt,
+    userId: state.userId,
+    userEmail: state.userEmail,
+    userDisplayName: state.userDisplayName,
+    orgRole: state.orgRole,
+    mustChangePassword: state.mustChangePassword,
+  };
+}
+
+/**
  * Sync configuration. Phase H pairing model:
  *   - syncUrl: backend base URL.
  *   - deviceToken: long-lived device JWT minted by the owner during pairing.
@@ -57,6 +115,13 @@ interface SyncState {
    *  (401) and we cannot reach the server to refresh. UI shows a banner;
    *  entityStore mutations are blocked until cleared. */
   readonly: boolean;
+
+  /**
+   * Per-profile sync configuration map.
+   * Keyed by profile UUID. Each profile stores its own credentials
+   * independently so switching profiles swaps in the right config.
+   */
+  profileConfigs: Record<string, PerProfileSyncConfig>;
 }
 
 interface SyncActions {
@@ -87,6 +152,16 @@ interface SyncActions {
   resetSync: () => void;
   /** Update transient sync status fields (called by the sync engine). */
   setStatus: (patch: Partial<Pick<SyncState, 'inFlight' | 'lastPulledAt' | 'lastPushedAt' | 'pendingChanges' | 'lastError' | 'online' | 'windowVisible'>>) => void;
+  /**
+   * Load the stored config for the given profile into the flat state fields.
+   * Call this whenever the active profile changes (profile switch, boot, create).
+   * - Saves the current flat config for the current active profile first.
+   * - If the new profile has a stored config, restores it.
+   * - Otherwise resets flat fields to clean defaults (sync disabled, no token).
+   * Migration: if the old single-profile flat data already matches the new
+   * profile's ID it is inherited so existing pairings are not lost.
+   */
+  loadProfileConfig: (profileId: string) => void;
 }
 
 const INITIAL_STATE: SyncState = {
@@ -113,68 +188,211 @@ const INITIAL_STATE: SyncState = {
   online: typeof navigator !== 'undefined' ? navigator.onLine : true,
   windowVisible: typeof document !== 'undefined' ? document.visibilityState !== 'hidden' : true,
   readonly: false,
+  profileConfigs: {},
 };
 
 export const useSyncStore = create<SyncState & SyncActions>()(
   persist(
     (set) => ({
       ...INITIAL_STATE,
-      setSyncUrl: (url) => set({ syncUrl: url }),
-      setIsSyncActive: (active) => set({ isSyncActive: active }),
-      setEncryptAtRest: (enabled) => set({ encryptAtRest: enabled }),
+
+      // ── Helper: save current flat config back into the per-profile map ───
+      // Called internally by every config-writing action.
+      // Not exposed in the public SyncActions interface.
+
+      setSyncUrl: (url) =>
+        set((s) => {
+          const active = s.profileId || '';
+          const updated = { ...extractConfig(s), syncUrl: url };
+          return {
+            syncUrl: url,
+            profileConfigs: active
+              ? { ...s.profileConfigs, [active]: updated }
+              : s.profileConfigs,
+          };
+        }),
+
+      setIsSyncActive: (active) =>
+        set((s) => {
+          const profileKey = s.profileId || '';
+          const updated = { ...extractConfig(s), isSyncActive: active };
+          return {
+            isSyncActive: active,
+            profileConfigs: profileKey
+              ? { ...s.profileConfigs, [profileKey]: updated }
+              : s.profileConfigs,
+          };
+        }),
+
+      setEncryptAtRest: (enabled) =>
+        set((s) => {
+          const profileKey = s.profileId || '';
+          const updated = { ...extractConfig(s), encryptAtRest: enabled };
+          return {
+            encryptAtRest: enabled,
+            profileConfigs: profileKey
+              ? { ...s.profileConfigs, [profileKey]: updated }
+              : s.profileConfigs,
+          };
+        }),
+
       setPairing: ({ token, deviceId, deviceName, profileId }) =>
-        set({
-          deviceToken: token,
-          deviceId,
-          deviceName,
-          profileId,
-          isSyncActive: true,
+        set((s) => {
+          const updated: PerProfileSyncConfig = {
+            ...extractConfig(s),
+            deviceToken: token,
+            deviceId,
+            deviceName,
+            profileId,
+            isSyncActive: true,
+          };
+          return {
+            deviceToken: token,
+            deviceId,
+            deviceName,
+            profileId,
+            isSyncActive: true,
+            profileConfigs: { ...s.profileConfigs, [profileId]: updated },
+          };
         }),
+
       clearPairing: () =>
-        set({
-          deviceToken: '',
-          deviceId: '',
-          deviceName: '',
-          profileId: '',
-          isSyncActive: false,
-          inFlight: false,
-          lastPulledAt: null,
-          lastPushedAt: null,
-          pendingChanges: 0,
-          lastError: null,
+        set((s) => {
+          const profileKey = s.profileId || '';
+          const cleared: PerProfileSyncConfig = {
+            ...extractConfig(s),
+            deviceToken: '',
+            deviceId: '',
+            deviceName: '',
+            profileId: '',
+            isSyncActive: false,
+          };
+          return {
+            deviceToken: '',
+            deviceId: '',
+            deviceName: '',
+            profileId: '',
+            isSyncActive: false,
+            inFlight: false,
+            lastPulledAt: null,
+            lastPushedAt: null,
+            pendingChanges: 0,
+            lastError: null,
+            profileConfigs: profileKey
+              ? { ...s.profileConfigs, [profileKey]: cleared }
+              : s.profileConfigs,
+          };
         }),
+
       setUserSession: ({ serverUrl, token, expiresAt, userId, email, displayName, orgRole, mustChangePassword }) =>
-        set((s) => ({
-          syncUrl: serverUrl ?? s.syncUrl,
-          userToken: token,
-          tokenExpiresAt: expiresAt,
-          userId,
-          userEmail: email,
-          userDisplayName: displayName,
-          orgRole,
-          mustChangePassword: !!mustChangePassword,
-          isSyncActive: !mustChangePassword,
-          readonly: false,
-          lastError: null,
-        })),
-      clearUserSession: () =>
-        set({
-          userToken: '',
-          tokenExpiresAt: null,
-          userId: '',
-          userEmail: '',
-          userDisplayName: '',
-          orgRole: '',
-          mustChangePassword: false,
-          isSyncActive: false,
-          readonly: false,
-          inFlight: false,
-          pendingChanges: 0,
+        set((s) => {
+          const profileKey = s.profileId || '';
+          const patch = {
+            syncUrl: serverUrl ?? s.syncUrl,
+            userToken: token,
+            tokenExpiresAt: expiresAt,
+            userId,
+            userEmail: email,
+            userDisplayName: displayName,
+            orgRole,
+            mustChangePassword: !!mustChangePassword,
+            isSyncActive: !mustChangePassword,
+            readonly: false,
+            lastError: null,
+          };
+          const updated: PerProfileSyncConfig = {
+            ...extractConfig(s),
+            ...patch,
+          };
+          return {
+            ...patch,
+            profileConfigs: profileKey
+              ? { ...s.profileConfigs, [profileKey]: updated }
+              : s.profileConfigs,
+          };
         }),
-      setMustChangePassword: (v) => set({ mustChangePassword: v }),
+
+      clearUserSession: () =>
+        set((s) => {
+          const profileKey = s.profileId || '';
+          const cleared: PerProfileSyncConfig = {
+            ...extractConfig(s),
+            userToken: '',
+            tokenExpiresAt: null,
+            userId: '',
+            userEmail: '',
+            userDisplayName: '',
+            orgRole: '',
+            mustChangePassword: false,
+            isSyncActive: false,
+          };
+          return {
+            userToken: '',
+            tokenExpiresAt: null,
+            userId: '',
+            userEmail: '',
+            userDisplayName: '',
+            orgRole: '',
+            mustChangePassword: false,
+            isSyncActive: false,
+            readonly: false,
+            inFlight: false,
+            pendingChanges: 0,
+            profileConfigs: profileKey
+              ? { ...s.profileConfigs, [profileKey]: cleared }
+              : s.profileConfigs,
+          };
+        }),
+
+      setMustChangePassword: (v) =>
+        set((s) => {
+          const profileKey = s.profileId || '';
+          const updated = { ...extractConfig(s), mustChangePassword: v };
+          return {
+            mustChangePassword: v,
+            profileConfigs: profileKey
+              ? { ...s.profileConfigs, [profileKey]: updated }
+              : s.profileConfigs,
+          };
+        }),
+
       setReadonly: (v) => set({ readonly: v }),
       resetSync: () => set(INITIAL_STATE),
       setStatus: (patch) => set(patch),
+
+      loadProfileConfig: (profileId: string) =>
+        set((s) => {
+          // 1. Save the current flat config under whatever profile it belongs to
+          //    (identified by s.profileId — the "bound profile" stored in the token).
+          const currentKey = s.profileId || '';
+          const saved = currentKey
+            ? { ...s.profileConfigs, [currentKey]: extractConfig(s) }
+            : s.profileConfigs;
+
+          // 2. Look up the stored config for the new profile.
+          const stored = saved[profileId];
+          if (stored) {
+            // Restore the stored config for this profile.
+            return { ...stored, profileConfigs: saved };
+          }
+
+          // 3. Migration path: if the old flat state was already bound to this
+          //    profile (pre-profileConfigs era), inherit it rather than resetting.
+          if (s.profileId === profileId && s.deviceToken) {
+            const migrated = extractConfig(s);
+            return {
+              profileConfigs: { ...saved, [profileId]: migrated },
+            };
+          }
+
+          // 4. Genuinely new profile — reset to clean defaults.
+          //    Runtime-only fields (online, windowVisible, readonly, inFlight, etc.)
+          //    are left unchanged so connectivity state isn't disrupted.
+          return {
+            ...PER_PROFILE_DEFAULTS,
+            profileConfigs: saved,
+          };
+        }),
     }),
     {
       name: 'syncrolws-sync',
@@ -195,6 +413,7 @@ export const useSyncStore = create<SyncState & SyncActions>()(
         userDisplayName: state.userDisplayName,
         orgRole: state.orgRole,
         mustChangePassword: state.mustChangePassword,
+        profileConfigs: state.profileConfigs,
       }),
     },
   ),
