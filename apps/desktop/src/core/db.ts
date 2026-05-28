@@ -298,6 +298,19 @@ CREATE TABLE IF NOT EXISTS \`local_files\` (
   \`reference_count\` integer DEFAULT 1 NOT NULL,
   \`created_at\` text NOT NULL
 );
+CREATE TABLE IF NOT EXISTS \`analytics_datasets\` (
+  \`id\` text PRIMARY KEY NOT NULL,
+  \`name\` text NOT NULL,
+  \`row_count\` integer DEFAULT 0 NOT NULL,
+  \`headers\` text DEFAULT '[]' NOT NULL,
+  \`created_at\` text NOT NULL
+);
+CREATE TABLE IF NOT EXISTS \`analytics_raw_records\` (
+  \`id\` integer PRIMARY KEY AUTOINCREMENT,
+  \`dataset_id\` text NOT NULL,
+  \`row_index\` integer NOT NULL,
+  \`cells\` text NOT NULL
+);
 `;
 
 /**
@@ -488,6 +501,9 @@ async function runWorkspaceMigrations(db: Database): Promise<void> {
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_entity_aspects_dirty ON entity_aspects(dirty) WHERE dirty = 1;`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_entity_relations_dirty ON entity_relations(dirty) WHERE dirty = 1;`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_sync_tombstones_dirty ON sync_tombstones(dirty) WHERE dirty = 1;`);
+
+  // ── Analytics sandbox indexes (Phase 1) ───────────────────────────────────
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_raw_records_dataset ON analytics_raw_records(dataset_id);`);
 
   console.log('[db] Workspace migrations complete');
 }

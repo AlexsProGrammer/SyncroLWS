@@ -1,92 +1,104 @@
+```markdown
 # IMPLEMENTATION.md
 
 ## 1. Project Context & Architecture
-
-* **Goal:** Integrate a fully local-first, infinite canvas notebook system using `tldraw` into the polymorphic architecture of SyncroLWS. This maps drawing coordinates, vectors, and nodes cleanly to shape-level database assets under a granular `canvas_shape` aspect layout, bypassing massive document snapshots and enabling real-time delta sync handling.
-* **Tech Stack & Dependencies:**
-* **Core Frameworks:** Tauri 2.0, React, Vite, Drizzle ORM, Zod.
-* **Libraries:** `@tldraw/tldraw` (Infinite canvas logic).
-* **Package Command:** `cd apps/desktop && npm install @tldraw/tldraw`
-
-
-* **File Structure:**
-```text
-├── packages/
-│   └── shared-types/
-│       └── src/
-│           └── base-entity.ts    # Modified: Add canvas_shape aspect types and schemas
-└── apps/
-    └── desktop/
-        └── src/
-            ├── registry/
-            │   └── ToolRegistry.tsx # Modified: Auto-discover canvas tool and icons
-            └── modules/
-                └── canvas/       # Created: New module package root
-                    ├── manifest.json # Created: Tool capability specifications
-                    ├── index.ts      # Created: Registry initialization endpoints
-                    ├── CanvasView.tsx # Created: Infinite canvas workspace layout
-                    └── hooks/
-                        ├── useTldrawStore.ts # Created: Granular event listener hook
-                        └── useCanvasAssets.ts # Created: Content-addressable file receiver
+- **Goal:** Create an isolated, high-performance local analytics sandbox workspace inside SyncroLWS capable of ingestion and aggregation of large historical CSV datasets. This architecture passes raw flat-file processing onto Tauri's Rust core to run heavy I/O operations asynchronously in transactional batches, bypassing front-end single-threaded rendering bottlenecks.
+- **Tech Stack & Dependencies:**
+  - **Core Frameworks:** Tauri 2.0, React, Vite, Drizzle ORM, Tailwind CSS.
+  - **Rust Crates (src-tauri):** `csv = "1.3"`, `serde_json = "1.0"`, `rusqlite = { version = "*", features = ["bundled"] }` (or corresponding Tauri plugin sql engine driver).
+  - **Frontend Libraries:** `lucide-react` (Local icons), `recharts` or local SVG chart primitives for data rendering.
+  - **Commands:** - `cd apps/desktop/src-tauri && cargo add csv serde_json`
+    - `cd apps/desktop && npm install recharts`
+- **File Structure:**
+  ```text
+  ├── apps/
+  │   └── desktop/
+  │       ├── src-tauri/
+  │       │   └── src/
+  │       │       └── commands.rs   # Modified: Register native CSV batch parsing command
+  │       └── src/
+  │           ├── core/
+  │           │   └── db.ts         # Modified: Extend workspace schema migrations
+  │           ├── registry/
+  │           │   └── ToolRegistry.tsx # Modified: Register analytics tool icon map
+  │           └── modules/
+  │               └── analytics/    # Created: New business analytics module
+  │                   ├── manifest.json # Created: Tool discovery config
+  │                   ├── index.ts      # Created: Entrypoint initialization
+  │                   ├── AnalyticsDashboard.tsx # Created: High-performance dashboard container
+  │                   ├── components/
+  │                   │   ├── CSVImportZone.tsx   # Created: File picker & Rust thread invoker
+  │                   │   └── AxisConfigurator.tsx # Created: Field mapper selection interface
+  │                   └── utils/
+  │                       └── aggregationEngine.ts # Created: Dynamic SQL generator
 
 ```
 
+* **Attention Points:** - Large tabular records must live exclusively inside the dedicated analytical sandbox tables. Do not mix un-indexed arbitrary datasets into the primary `base_entities` table to protect global search index performance.
+* Raw imports must happen via native streaming layers. Front-end memory allocation arrays must never hold raw multi-megabyte CSV strings.
 
-* **Attention Points:** - Do not store the entire canvas state as a single JSON text stream inside a `base_entities` row. Individual shapes must map directly to rows in the `entity_aspects` layout.
-* Use Tauri's native filesystem capability to persist local image elements.
 
-
-* **DSGVO:** The infinite canvas tool must function under a complete network airgap with zero external requests. External CDN resource calls for tldraw canvas assets, standard subcomponents, or rendering utilities are completely forbidden. All assets are managed locally using an offline protocol handler mapping (`tauri://localhost/media/[HASH]`).
+* **DSGVO:** Dataset evaluations, computed statistics, file paths, and column values must reside strictly on the local sandbox instance. Transmitting analytical parameters, tracking values, metric headers, or record content to external calculation or modeling cloud instances is strictly prohibited.
 
 ---
 
 ## 2. Execution Phases
 
-#### Phase 1: Shared Schema Modification & Tool Registry Discovery
+#### Phase 1: Isolated Sandbox Schema Migrations
 
-* [x] **Step 1.1:** In `packages/shared-types/src/base-entity.ts`, add `'canvas_shape'` to the `ASPECT_TYPES` string array and add it to `AspectTypeSchema`.
-* [x] **Step 1.2:** In `packages/shared-types/src/base-entity.ts`, create and export a validated `CanvasShapeAspectDataSchema` using Zod that structures tldraw element definitions (id, type, x, y, rotation, index, props, and parentId). Register this layout within `ASPECT_DATA_SCHEMAS`.
-* [x] **Step 1.3:** Create `apps/desktop/src/modules/canvas/manifest.json`. Define the tool identifier (`"canvas"`), associate it with the `canvas_shape` type, add shortcut keys, flag `hasPortalView: true`, and define default schema config structures.
-* [x] **Step 1.4:** In `apps/desktop/src/registry/ToolRegistry.tsx`, implement a custom `IconCanvas` inline SVG renderer component. Map the string key `"canvas"` to this custom SVG icon inside the global `iconMap`.
-* [x] **Verification:** Run `cd packages/shared-types && npm run build` and ensure the shared models compile. Confirm the layout outputs no type verification anomalies.
+* [x] **Step 1.1:** In `apps/desktop/src/core/db.ts`, locate the `WORKSPACE_MIGRATION` constant query string block.
+* [x] **Step 1.2:** Append table definition instructions to create `analytics_datasets` (id TEXT PK, name TEXT, row_count INTEGER, headers TEXT, created_at TEXT).
+* [x] **Step 1.3:** Append table definition instructions to create `analytics_raw_records` (id INTEGER PK AUTOINCREMENT, dataset_id TEXT, row_index INTEGER, cells TEXT). Ensure the `cells` column accepts stringified raw layout arrays.
+* [x] **Step 1.4:** Append explicit indexing commands to create a fast composite index named `idx_raw_records_dataset` tracking the `dataset_id` foreign field key.
+* [x] **Verification:** Restart the application environment. Verify using a database client or log query trace that both sandbox tables exist in the underlying active workspace file with indices initialized.
 
-#### Phase 2: Canvas Workspace Core View Integration
+#### Phase 2: Rust-Powered Background CSV Stream Importer
 
-* [x] **Step 2.1:** Create `apps/desktop/src/modules/canvas/CanvasView.tsx`. Import the primary canvas framework components from `@tldraw/tldraw`. Build a view component that initializes the tldraw rendering envelope.
-* [x] **Step 2.2:** Create `apps/desktop/src/modules/canvas/index.ts`. Implement an entrypoint file that exports an `init()` method to add initialization entries to the `ToolRegistry` pipeline. Expose methods for search filtering and command palette results.
-* [x] **Step 2.3:** In `apps/desktop/src/modules/canvas/CanvasView.tsx`, configure the viewport element wrapper to leverage a standard full-size layout (`w-full h-full`) styled completely using local Tailwind configuration declarations.
-* [x] **Verification:** Launch the system build via `npm run tauri dev`. Confirm the new "Canvas" tool appears within the dynamic workspace layout and the component initializes.
+* [ ] **Step 2.1:** In `apps/desktop/src-tauri/src/commands.rs`, introduce a new cross-platform command function `stream_csv_to_sqlite(file_path: String, dataset_id: String, db_path: String) -> Result<u64, String>`.
+* [ ] **Step 2.2:** Inside this function, open a streaming reader pointing to `file_path` using the native Rust `csv::Reader` crate interface. Extract the first row automatically to map collection headers.
+* [ ] **Step 2.3:** Open a connection directly to the profile workspace database matching `db_path`. Build a chunk collection loop that aggregates parsed entries into discrete vectorized record slots.
+* [ ] **Step 2.4:** Every 5,000 row intervals, wrap database writes inside an explicit transaction execution block (`BEGIN TRANSACTION` / `COMMIT`). Format individual cell blocks as clean stringified arrays before pushing them to the SQLite statement engine. Update `analytics_datasets` upon stream exhaustion to reflect total rows and headers.
+* [ ] **Step 2.5:** Ensure the command is correctly bound to the execution harness setup within `apps/desktop/src-tauri/src/main.rs`.
+* [ ] **Verification:** Run `cd apps/desktop/src-tauri && cargo check` to confirm compiling integrity of your native background workers.
 
-#### Phase 3: Shape-Level Granular Event Interception
+#### Phase 3: Module Assembly & Dynamic Tool Registration
 
-* [x] **Step 3.1:** Create `apps/desktop/src/modules/canvas/hooks/useTldrawStore.ts`. Implement a custom React hook that accepts the active canvas session context handle.
-* [x] **Step 3.2:** Wire a tldraw change notification handler using `store.listen()`. Intercept individual node changes and break the payload mutations down into discrete operation classes (`added`, `updated`, `removed`).
-* [x] **Step 3.3:** Map canvas mutations directly into local storage statements using Drizzle ORM. Writes must run queries against the local `entity_aspects` workspace structure, mapping shape payloads into the `data` json column and toggling database state flags to `dirty = 1`.
-* [x] **Step 3.4:** For node deletion operations, convert the execution trace into an insert statement running against the `sync_tombstones` tracking schema to preserve delete tracking across synchronized devices.
-* [x] **Verification:** Open the newly created infinite canvas view. Draw several basic shapes on the board view area. Query the database directly via terminal console and check that rows matching `aspect_type = 'canvas_shape'` are populated.
+* [ ] **Step 3.1:** Create `apps/desktop/src/modules/analytics/manifest.json`. Configure the registry file metadata with id `"analytics"`, name `"Analytics Suite"`, icon key `"analytics"`, and define layout permissions.
+* [ ] **Step 3.2:** In `apps/desktop/src/registry/ToolRegistry.tsx`, create and export an inline SVG renderer called `IconAnalytics`. Map the key `"analytics"` to this custom asset inside the global configuration block.
+* [ ] **Step 3.3:** Create `apps/desktop/src/modules/analytics/index.ts` to register the main tool view reference components, linking it directly into the system auto-discovery lookup cycle.
+* [ ] **Step 3.4:** Create `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx` to handle the primary view architecture, rendering a stateful framework structure using local workspace contexts.
+* [ ] **Verification:** Launch the environment suite via `npm run tauri dev`. Navigate onto the workspace dashboard view shell and check if the layout responds with correct routing headers.
 
-#### Phase 4: Offline Content-Addressable Asset Layer
+#### Phase 4: Stream Ingestion UI Component Interface
 
-* [x] **Step 4.1:** Create `apps/desktop/src/modules/canvas/hooks/useCanvasAssets.ts`. Build an on-disk binary interception routine targeting the canvas resource management pipeline (`onAssetUpload`).
-* [x] **Step 4.2:** When an image drop event is captured on the active viewport area, intercept the raw stream bytes, hash the signature via SHA-256, and duplicate the file asset cleanly into the secure workspace folder using `tauri-plugin-fs`.
-* [x] **Step 4.3:** If the calculated file signature match is missing from the local layout registry, execute an insert statement against `local_files` with `reference_count = 1`. Otherwise, execute an entry increment against the reference column.
-* [x] **Step 4.4:** Replace the canvas resource asset locator reference directly inside the tldraw state context with a safe local address protocol mapping pointer (`tauri://localhost/media/[HASH]`), guaranteeing complete offline file lookups.
-* [x] **Verification:** Turn off the active internet connection network links entirely. Drop a local image file onto the infinite canvas workspace area. Confirm that the image loads and is stored successfully within the active workspace.
+* [ ] **Step 4.1:** Create `apps/desktop/src/modules/analytics/components/CSVImportZone.tsx`. Integrate Tauri's system-level file picker dialog component (`@tauri-apps/plugin-dialog`).
+* [ ] **Step 4.2:** On file resolution path selection, generate a deterministic UUID string tracking parameter to identify the newly created tracking asset collection.
+* [ ] **Step 4.3:** Fetch the absolute file location path strings and invoke the native Rust back-end operation handler via `invoke('stream_csv_to_sqlite', { ... })`, feeding execution updates through custom application tracking states.
+* [ ] **Verification:** Trigger the file select action dialog box from the front-end interface dashboard. Confirm it correctly identifies standard desktop files and prints path updates to your browser console logs.
+
+#### Phase 5: Dynamic Aggregation Query Generation Setup
+
+* [ ] **Step 5.1:** Create `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`. Render dropdown fields allowing interactive column selector states mapping parameters into coordinate axis references.
+* [ ] **Step 5.2:** Create `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`. Implement a dynamic SQL string compiler utility method that generates native SQLite query definitions.
+* [ ] **Step 5.3:** Leverage raw `json_extract()` operators inside your generated queries to extract arrays stored in the `cells` text property, computing statistical fields (`AVG`, `SUM`, `COUNT`) grouped exactly by the selected coordinate values.
+* [ ] **Step 5.4:** Map raw query execution datasets from the local database proxy layer into separate left and right Recharts Y-axis plotting collections (`yAxisId="primary"`, `yAxisId="secondary"`).
+* [ ] **Verification:** Run a project-wide type compilation verification step via `npm run build` or `npx tsc --noEmit` and confirm all module integrations complete with zero interface warnings.
 
 ---
 
 ## 3. Global Testing Strategy
 
-* **Granular Shape Delta Sync Verification:**
-* *Action:* Construct a canvas workspace populated with 50 distinct vector drawing layers. Modify a single vector item's outline path or positioning coordinates on the view panel surface.
-* *Expected:* Check the background update pipeline log. Confirm that the system submits only the single modified shape row chunk during the sync synchronization pass rather than the entire canvas document block.
+* **UI Thread UI Un-lock Verification:**
+* *Action:* Provision a flat mock data file container holding 150,000 dense accounting records. Initiate ingestion via `CSVImportZone.tsx` while clicking high-frequency UI interactions across unrelated sidebar modules.
+* *Expected:* Front-end animation framing stays lock-free at 60fps throughout ingestion execution phases. No scripting timeouts may occur.
 
 
-* **Airgapped Protocol Resolution Verification:**
-* *Action:* Restart the Tauri compilation client with an airgapped internet link configuration. Launch a network traffic inspector alongside the application instance process.
-* *Expected:* Navigate into the notebook module workspace. Ensure the trace logs capture absolutely zero requests targeting unlisted remote subdomains or external tracking services.
+* **Dynamic Extracted Mapping Correctness:**
+* *Action:* Change visual chart configuration selectors to map an integer dataset row to X, a revenue calculation row to Y1 (average compilation), and volume weights to Y2 (sum calculation).
+* *Expected:* Ensure the raw query compiles with correct database dialect filters and the dual-axis graph renders without errors.
 
 
-* **Concurrent Local Storage Write Serialization Verification:**
-* *Action:* Generate complex drawing paths across multiple visual boundaries to produce high-frequency parallel write events directed at the workspace database.
-* *Expected:* Ensure the local SQLite database file handles concurrent transaction entries gracefully without throwing database lock exceptions or dropping asset items.
+* **Airgapped Storage Sandbox Check:**
+* *Action:* Block outgoing interfaces completely. Load large records containing metric metrics and look up local data directory trace paths.
+* *Expected:* The dataset processes flawlessly, writing variables exclusively to the local tracking structures without external network requirements.
+
