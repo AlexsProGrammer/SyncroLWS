@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
-import { loadProfileDB, isProfileDBLoaded } from '@/core/db';
+import { loadProfileDB, isProfileDBLoaded, setProfileSetting, executeWriteAtomic } from '@/core/db';
 import { eventBus } from '@/core/events';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -162,6 +162,13 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
       },
 
       renameProfile: (id: string, name: string) => {
+        // Write-through to the profile SQLite DB so the rename persists across
+        // kill-9 restarts, independently of the Zustand/localStorage snapshot.
+        if (isProfileDBLoaded(id)) {
+          void executeWriteAtomic(async () => {
+            await setProfileSetting('profile_display_name', name);
+          });
+        }
         set((state) => ({
           profiles: state.profiles.map((p) =>
             p.id === id ? { ...p, name } : p,
@@ -170,6 +177,19 @@ export const useProfileStore = create<ProfileState & ProfileActions>()(
       },
 
       updateProfile: (id: string, data: Partial<Pick<Profile, 'name' | 'color' | 'avatar_url' | 'mode' | 'useEnterprisePwAtLogin'>>) => {
+        // Write display-level attributes to SQLite so they survive kill-9 for
+        // the currently active profile (other profiles' DBs are not open).
+        if (isProfileDBLoaded(id)) {
+          const current = get().profiles.find((p) => p.id === id);
+          if (current) {
+            const merged = { ...current, ...data };
+            void executeWriteAtomic(async () => {
+              await setProfileSetting('profile_display_name', merged.name);
+              if (merged.color) await setProfileSetting('profile_display_color', merged.color);
+              if (merged.mode) await setProfileSetting('profile_mode', merged.mode);
+            });
+          }
+        }
         set((state) => ({
           profiles: state.profiles.map((p) =>
             p.id === id ? { ...p, ...data } : p,

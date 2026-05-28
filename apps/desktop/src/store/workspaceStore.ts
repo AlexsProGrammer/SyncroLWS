@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { getDB, loadWorkspaceDB, closeWorkspaceDB, getWorkspaceDB, setProfileSetting, getProfileSetting } from '@/core/db';
+import { getDB, loadWorkspaceDB, closeWorkspaceDB, getWorkspaceDB, setProfileSetting, getProfileSetting, executeWriteAtomic } from '@/core/db';
 import { eventBus } from '@/core/events';
 import { getAllTools } from '@/registry/ToolRegistry';
 import {
@@ -118,21 +118,23 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         deleted_at: null,
       };
 
-      await db.execute(
-        `INSERT INTO workspaces (id, name, description, icon, color, parent_id, sort_order, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          workspace.id,
-          workspace.name,
-          workspace.description,
-          workspace.icon,
-          workspace.color,
-          workspace.parent_id,
-          workspace.sort_order,
-          workspace.created_at,
-          workspace.updated_at,
-        ],
-      );
+      await executeWriteAtomic(async () => {
+        await db.execute(
+          `INSERT INTO workspaces (id, name, description, icon, color, parent_id, sort_order, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            workspace.id,
+            workspace.name,
+            workspace.description,
+            workspace.icon,
+            workspace.color,
+            workspace.parent_id,
+            workspace.sort_order,
+            workspace.created_at,
+            workspace.updated_at,
+          ],
+        );
+      });
 
       set((state) => ({
         workspaces: [...state.workspaces, workspace],
@@ -147,16 +149,18 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           const wsDb = getWorkspaceDB();
           const tools = getAllTools();
           let firstInstanceId = '';
-          for (let i = 0; i < tools.length; i++) {
-            const tool = tools[i]!;
-            const toolInstanceId = crypto.randomUUID();
-            if (i === 0) firstInstanceId = toolInstanceId;
-            await wsDb.execute(
-              `INSERT INTO workspace_tools (id, tool_id, name, description, config, sort_order, created_at)
-               VALUES (?, ?, ?, ?, '{}', ?, ?)`,
-              [toolInstanceId, tool.id, tool.name, tool.manifest?.description ?? '', i, now],
-            );
-          }
+          await executeWriteAtomic(async () => {
+            for (let i = 0; i < tools.length; i++) {
+              const tool = tools[i]!;
+              const toolInstanceId = crypto.randomUUID();
+              if (i === 0) firstInstanceId = toolInstanceId;
+              await wsDb.execute(
+                `INSERT INTO workspace_tools (id, tool_id, name, description, config, sort_order, created_at)
+                 VALUES (?, ?, ?, ?, '{}', ?, ?)`,
+                [toolInstanceId, tool.id, tool.name, tool.manifest?.description ?? '', i, now],
+              );
+            }
+          });
           // Reload into store so App.tsx's instance map is fresh
           await get().loadWorkspaceTools();
           eventBus.emit('workspace:tool-added', { workspaceId: id, toolInstanceId: '', toolId: '' });
@@ -216,7 +220,9 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       if (data.sort_order !== undefined) { sets.push('sort_order = ?'); values.push(data.sort_order); }
 
       values.push(id);
-      await db.execute(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = ?`, values);
+      await executeWriteAtomic(async () => {
+        await db.execute(`UPDATE workspaces SET ${sets.join(', ')} WHERE id = ?`, values);
+      });
 
       set((state) => ({
         workspaces: state.workspaces.map((w) =>
@@ -231,7 +237,9 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       const db = getDB();
       const now = new Date().toISOString();
 
-      await db.execute(`UPDATE workspaces SET deleted_at = ? WHERE id = ?`, [now, id]);
+      await executeWriteAtomic(async () => {
+        await db.execute(`UPDATE workspaces SET deleted_at = ? WHERE id = ?`, [now, id]);
+      });
 
       // If this was the active workspace, close and switch away
       if (get().activeWorkspaceId === id) {
@@ -258,13 +266,15 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       const db = getDB();
       const now = new Date().toISOString();
 
-      // Update sort_order in DB for each workspace
-      for (let i = 0; i < orderedIds.length; i++) {
-        await db.execute(
-          `UPDATE workspaces SET sort_order = ?, updated_at = ? WHERE id = ?`,
-          [i, now, orderedIds[i]],
-        );
-      }
+      // Update sort_order in DB for each workspace (serialised through the write mutex)
+      await executeWriteAtomic(async () => {
+        for (let i = 0; i < orderedIds.length; i++) {
+          await db.execute(
+            `UPDATE workspaces SET sort_order = ?, updated_at = ? WHERE id = ?`,
+            [i, now, orderedIds[i]],
+          );
+        }
+      });
 
       // Update local state
       set((state) => ({

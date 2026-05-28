@@ -53,10 +53,10 @@
 
 #### Phase 3: Zustand-to-SQLite Write-Through Enforcement
 
-* [ ] **Step 3.1:** In `apps/desktop/src/core/db.ts`, import `Mutex` from `async-mutex`. Initialize a global write mutational mutex handle: `const writeMutex = new Mutex();`.
-* [ ] **Step 3.2:** Add a wrapped execution helper method `export async function executeWriteAtomic(callback: () => Promise<void>)` that runs the underlying query block safely within a `writeMutex.runExclusive` handler.
-* [ ] **Step 3.3:** In `apps/desktop/src/store/workspaceStore.ts` and `apps/desktop/src/store/profileStore.ts`, identify state actions that modify task, profile, or folder attributes. Force these functions to execute a write through directly into the local SQLite file via `executeWriteAtomic` before committing state updates to active memory.
-* [ ] **Verification:** Launch the Tauri compilation suite via `npm run tauri dev` and verify that parallel store modifications execute without throwing SQLite file access errors.
+* [x] **Step 3.1:** In `apps/desktop/src/core/db.ts`, import `Mutex` from `async-mutex`. Initialize a global write mutational mutex handle: `const writeMutex = new Mutex();`.
+* [x] **Step 3.2:** Add a wrapped execution helper method `export async function executeWriteAtomic(callback: () => Promise<void>)` that runs the underlying query block safely within a `writeMutex.runExclusive` handler.
+* [x] **Step 3.3:** In `apps/desktop/src/store/workspaceStore.ts` and `apps/desktop/src/store/profileStore.ts`, identify state actions that modify task, profile, or folder attributes. Force these functions to execute a write through directly into the local SQLite file via `executeWriteAtomic` before committing state updates to active memory.
+* [x] **Verification:** Launch the Tauri compilation suite via `npm run tauri dev` and verify that parallel store modifications execute without throwing SQLite file access errors.
 
 #### Phase 4: Backend Chunked File Storage API
 

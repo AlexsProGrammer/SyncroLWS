@@ -1,5 +1,6 @@
 import Database from '@tauri-apps/plugin-sql';
 import { invoke } from '@tauri-apps/api/core';
+import { Mutex } from 'async-mutex';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Two-level database architecture:
@@ -23,6 +24,21 @@ let _currentWorkspaceId: string | null = null;
 // guards against any in-flight queries that may still be draining.
 function dbSettle(): Promise<void> {
   return new Promise<void>((resolve) => setTimeout(resolve, 80));
+}
+
+// ── Write serialisation (Step 3.1 / 3.2) ────────────────────────────────────
+// A single module-level mutex ensures that only one SQLite write callback runs
+// at a time, preventing "database is locked" errors caused by concurrent store
+// mutations from different Zustand slices.
+const writeMutex = new Mutex();
+
+/**
+ * Serialises concurrent SQLite write operations behind a single Mutex.
+ * Wrap every db.execute() block that mutates local state in this helper so
+ * that parallel store actions cannot race on the same SQLite file.
+ */
+export async function executeWriteAtomic(callback: () => Promise<void>): Promise<void> {
+  await writeMutex.runExclusive(callback);
 }
 
 // ── Profile DB ────────────────────────────────────────────────────────────────
