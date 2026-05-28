@@ -52,10 +52,10 @@
 
 #### Phase 2: Canvas Workspace Core View Integration
 
-* [ ] **Step 2.1:** Create `apps/desktop/src/modules/canvas/CanvasView.tsx`. Import the primary canvas framework components from `@tldraw/tldraw`. Build a view component that initializes the tldraw rendering envelope.
-* [ ] **Step 2.2:** Create `apps/desktop/src/modules/canvas/index.ts`. Implement an entrypoint file that exports an `init()` method to add initialization entries to the `ToolRegistry` pipeline. Expose methods for search filtering and command palette results.
-* [ ] **Step 2.3:** In `apps/desktop/src/modules/canvas/CanvasView.tsx`, configure the viewport element wrapper to leverage a standard full-size layout (`w-full h-full`) styled completely using local Tailwind configuration declarations.
-* [ ] **Verification:** Launch the system build via `npm run tauri dev`. Confirm the new "Canvas" tool appears within the dynamic workspace layout and the component initializes.
+* [x] **Step 2.1:** Create `apps/desktop/src/modules/canvas/CanvasView.tsx`. Import the primary canvas framework components from `@tldraw/tldraw`. Build a view component that initializes the tldraw rendering envelope.
+* [x] **Step 2.2:** Create `apps/desktop/src/modules/canvas/index.ts`. Implement an entrypoint file that exports an `init()` method to add initialization entries to the `ToolRegistry` pipeline. Expose methods for search filtering and command palette results.
+* [x] **Step 2.3:** In `apps/desktop/src/modules/canvas/CanvasView.tsx`, configure the viewport element wrapper to leverage a standard full-size layout (`w-full h-full`) styled completely using local Tailwind configuration declarations.
+* [x] **Verification:** Launch the system build via `npm run tauri dev`. Confirm the new "Canvas" tool appears within the dynamic workspace layout and the component initializes.
 
 #### Phase 3: Shape-Level Granular Event Interception
 
