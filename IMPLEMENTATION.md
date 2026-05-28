@@ -42,14 +42,14 @@
 * [x] **Step 1.1:** In `apps/backend/src/routes/sync.ts`, locate the `pushProcedure` mutation block. Wrap the entire internal loop logic (handling cores, aspects, relations, and deletes) inside a Drizzle PostgreSQL transaction block using `await db.transaction(async (tx) => { ... })`.
 * [x] **Step 1.2:** Update all query expressions inside the `pushProcedure` loops (such as `db.select`, `db.insert`, `db.delete`) to evaluate exclusively using the transaction context handle `tx`.
 * [x] **Step 1.3:** Implement a termination check within the transaction context. If an uncaught application error or constraint validation failure occurs during execution, explicitly throw a `TRPCError` with code `INTERNAL_SERVER_ERROR` to force an immediate transaction rollback on the Postgres engine.
-* [ ] **Verification:** Execute `cd apps/backend && npx tsc --noEmit` and confirm that the project compiles with no type verification anomalies.
+* [x] **Verification:** Execute `cd apps/backend && npx tsc --noEmit` and confirm that the project compiles with no type verification anomalies.
 
 #### Phase 2: Client-Side Push Robustness & Sync Fallback
 
-* [ ] **Step 2.1:** In `apps/desktop/src/core/sync.ts`, modify `runSyncCycle()` where `trpcMutation` calls `sync.push`. Wrap the execution call inside an active `try/catch` statement block.
-* [ ] **Step 2.2:** Update the error handling handler inside `runSyncCycle()`. If the remote endpoint sends an explicit error frame or a network exception occurs, interrupt processing immediately, bypass `applyPushResult`, and preserve the local table rows with their `dirty = 1` status flags intact.
-* [ ] **Step 2.3:** Add a sliding debounce delay interval to the tracking queue if an explicit synchronization push rejection occurs to avoid continuous request hammering loops.
-* [ ] **Verification:** Run `cd apps/desktop && npx tsc --noEmit` and confirm that the frontend files compile without type conflicts.
+* [x] **Step 2.1:** In `apps/desktop/src/core/sync.ts`, modify `runSyncCycle()` where `trpcMutation` calls `sync.push`. Wrap the execution call inside an active `try/catch` statement block.
+* [x] **Step 2.2:** Update the error handling handler inside `runSyncCycle()`. If the remote endpoint sends an explicit error frame or a network exception occurs, interrupt processing immediately, bypass `applyPushResult`, and preserve the local table rows with their `dirty = 1` status flags intact.
+* [x] **Step 2.3:** Add a sliding debounce delay interval to the tracking queue if an explicit synchronization push rejection occurs to avoid continuous request hammering loops.
+* [x] **Verification:** Run `cd apps/desktop && npx tsc --noEmit` and confirm that the frontend files compile without type conflicts.
 
 #### Phase 3: Zustand-to-SQLite Write-Through Enforcement
 

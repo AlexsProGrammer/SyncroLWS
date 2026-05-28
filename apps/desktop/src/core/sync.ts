@@ -539,6 +539,7 @@ async function runSyncCycle(): Promise<void> {
     // remaining dirty rows are picked up next time — they keep `dirty = 1`
     // so nothing is lost.
     let totalPushed = 0;
+    let pushFailed = false;
     for (let i = 0; i < 10; i += 1) {
       const batch = await collectPushBatch();
       const totalDirty =
@@ -547,14 +548,36 @@ async function runSyncCycle(): Promise<void> {
         batch.relations.length +
         batch.deletes.length;
       if (totalDirty === 0) break;
-      const push = await trpcMutation<SyncPushResult>(
-        state.syncUrl,
-        token,
-        'sync.push',
-        { workspace_id: workspaceId, ...batch },
-      );
+
+      // Step 2.1 / 2.2: wrap the mutation so any network or server error
+      // aborts the loop immediately. applyPushResult is never reached, so
+      // every row in this batch keeps dirty = 1 and will be retried later.
+      let push: SyncPushResult;
+      try {
+        push = await trpcMutation<SyncPushResult>(
+          state.syncUrl,
+          token,
+          'sync.push',
+          { workspace_id: workspaceId, ...batch },
+        );
+      } catch (pushErr) {
+        // Let AuthRejectedError bubble to the outer handler (token expiry).
+        if (pushErr instanceof AuthRejectedError) throw pushErr;
+        // Step 2.3: double the debounce delay on each failure (cap at 60 s)
+        // so the dirty-queue doesn't hammer the server while it's unhealthy.
+        pushBackoffMs = Math.min(
+          Math.max(pushBackoffMs * 2, DIRTY_DEBOUNCE_MS * 2),
+          60_000,
+        );
+        pushFailed = true;
+        break;
+      }
+
       await applyPushResult(push);
       totalPushed += push.accepted.length;
+      // Reset sliding backoff after any successful push batch.
+      pushBackoffMs = 0;
+
       // If everything in this batch was rejected as conflicts, stop —
       // looping again would resend the same rows. They'll be retried
       // after the conflict UI resolves them.
@@ -562,6 +585,11 @@ async function runSyncCycle(): Promise<void> {
     }
     if (totalPushed > 0) {
       await writeCursor(state.syncUrl, { last_pushed_at: new Date().toISOString() });
+    }
+    // Step 2.2: surface the push failure so the outer catch records the error
+    // state and emits sync:error. Pull results are already applied above.
+    if (pushFailed) {
+      throw new Error('sync.push failed — dirty rows preserved for next cycle.');
     }
 
     const pending = await countPending();
@@ -600,6 +628,9 @@ let onlineHandler: (() => void) | null = null;
 let offlineHandler: (() => void) | null = null;
 let visibilityHandler: (() => void) | null = null;
 let started = false;
+/** Step 2.3: sliding backoff applied to the dirty-debounce timer after push
+ *  failures. Doubles on each consecutive failure; resets to 0 on success. */
+let pushBackoffMs = 0;
 
 /** Pick the right interval for the current visibility/online state. */
 function currentInterval(): number {
@@ -638,7 +669,10 @@ export const syncEngine = {
     // ── Wake the engine on local mutations ───────────────────────────────
     dirtyHandler = (): void => {
       if (dirtyTimer) clearTimeout(dirtyTimer);
-      dirtyTimer = setTimeout(() => { void runSyncCycle(); }, DIRTY_DEBOUNCE_MS);
+      // Step 2.3: honour the sliding backoff delay when the server is rejecting
+      // pushes so the queue doesn't hammer a struggling endpoint.
+      const delay = Math.max(DIRTY_DEBOUNCE_MS, pushBackoffMs);
+      dirtyTimer = setTimeout(() => { void runSyncCycle(); }, delay);
       // Refresh pending count immediately for UI.
       void (async () => {
         try {
