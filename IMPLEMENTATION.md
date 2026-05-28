@@ -67,11 +67,11 @@
 
 #### Phase 4: Offline Content-Addressable Asset Layer
 
-* [ ] **Step 4.1:** Create `apps/desktop/src/modules/canvas/hooks/useCanvasAssets.ts`. Build an on-disk binary interception routine targeting the canvas resource management pipeline (`onAssetUpload`).
-* [ ] **Step 4.2:** When an image drop event is captured on the active viewport area, intercept the raw stream bytes, hash the signature via SHA-256, and duplicate the file asset cleanly into the secure workspace folder using `tauri-plugin-fs`.
-* [ ] **Step 4.3:** If the calculated file signature match is missing from the local layout registry, execute an insert statement against `local_files` with `reference_count = 1`. Otherwise, execute an entry increment against the reference column.
-* [ ] **Step 4.4:** Replace the canvas resource asset locator reference directly inside the tldraw state context with a safe local address protocol mapping pointer (`tauri://localhost/media/[HASH]`), guaranteeing complete offline file lookups.
-* [ ] **Verification:** Turn off the active internet connection network links entirely. Drop a local image file onto the infinite canvas workspace area. Confirm that the image loads and is stored successfully within the active workspace.
+* [x] **Step 4.1:** Create `apps/desktop/src/modules/canvas/hooks/useCanvasAssets.ts`. Build an on-disk binary interception routine targeting the canvas resource management pipeline (`onAssetUpload`).
+* [x] **Step 4.2:** When an image drop event is captured on the active viewport area, intercept the raw stream bytes, hash the signature via SHA-256, and duplicate the file asset cleanly into the secure workspace folder using `tauri-plugin-fs`.
+* [x] **Step 4.3:** If the calculated file signature match is missing from the local layout registry, execute an insert statement against `local_files` with `reference_count = 1`. Otherwise, execute an entry increment against the reference column.
+* [x] **Step 4.4:** Replace the canvas resource asset locator reference directly inside the tldraw state context with a safe local address protocol mapping pointer (`tauri://localhost/media/[HASH]`), guaranteeing complete offline file lookups.
+* [x] **Verification:** Turn off the active internet connection network links entirely. Drop a local image file onto the infinite canvas workspace area. Confirm that the image loads and is stored successfully within the active workspace.
 
 ---
 

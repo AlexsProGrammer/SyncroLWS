@@ -14,6 +14,7 @@ import { Tldraw } from '@tldraw/tldraw';
 import type { Editor } from '@tldraw/tldraw';
 import '@tldraw/tldraw/tldraw.css';
 import { useTldrawStore } from './hooks/useTldrawStore';
+import { useCanvasAssets } from './hooks/useCanvasAssets';
 
 interface CanvasViewProps {
   /** Tool-instance id — scopes this canvas to a specific board. */
@@ -35,11 +36,15 @@ export function CanvasView({ toolInstanceId }: CanvasViewProps): React.ReactElem
   // Wire the granular shape persistence hook (Phase 3).
   useTldrawStore(editor, toolInstanceId);
 
+  // Phase 4: offline content-addressable asset store.
+  const assets = useCanvasAssets();
+
   return (
     <div className="w-full h-full">
       <Tldraw
         persistenceKey={toolInstanceId ? `canvas-${toolInstanceId}` : 'canvas-default'}
         onMount={handleMount}
+        assets={assets}
       />
     </div>
   );
