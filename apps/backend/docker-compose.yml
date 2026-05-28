@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: syncrohws
       POSTGRES_DB: syncrohws
     ports:
-      - "5434:5432"
+      - "127.0.0.1:5434:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -27,8 +27,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-syncrohws}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-syncrohws_secret}
     ports:
-      - "9000:9000"   # API
-      - "9001:9001"   # Web console
+      - "127.0.0.1:9000:9000"   # API
+      - "127.0.0.1:9001:9001"   # Web console
     volumes:
       - minio_data:/data
     healthcheck:
@@ -44,7 +44,7 @@ services:
     container_name: syncrohws_backend
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     env_file: .env
     environment:
       NODE_ENV: development
@@ -67,7 +67,7 @@ services:
   #   container_name: syncrohws_powersync
   #   restart: unless-stopped
   #   ports:
-  #     - "8080:8080"
+  #     - "127.0.0.1:8080:8080"
   #   environment:
   #     PS_DATABASE_URL: postgresql://syncrohws:syncrohws@postgres:5432/syncrohws
   #   depends_on:
