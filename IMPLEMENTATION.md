@@ -60,11 +60,11 @@
 
 #### Phase 4: Backend Chunked File Storage API
 
-* [ ] **Step 4.1:** In `apps/backend/src/routes/upload.ts`, declare three new tRPC procedures: `upload.initChunked`, `upload.pushChunk`, and `upload.finalizeChunked`.
-* [ ] **Step 4.2:** Implement `initChunked` to accept file hashes and sizes, then provision a tracking record inside a local temporary file metadata store.
-* [ ] **Step 4.3:** Implement `pushChunk` to receive zero-indexed payload chunks and append incoming binary data blocks onto a temporary staging file located inside `/tmp/syncro_staging/[HASH]`.
-* [ ] **Step 4.4:** Implement `finalizeChunked` to verify the complete staging file signature using Node's native `crypto` module. If the SHA-256 validation matches, push the binary artifact into the MinIO container bucket, increment the `reference_count` field inside the `files` table, and delete the temporary disk staging file.
-* [ ] **Verification:** Send an explicit mock execution sequence payload via `curl` to `upload.initChunked` followed by chunk pushes, and verify the compiled file outputs into the active object store.
+* [x] **Step 4.1:** In `apps/backend/src/routes/upload.ts`, declare three new tRPC procedures: `upload.initChunked`, `upload.pushChunk`, and `upload.finalizeChunked`.
+* [x] **Step 4.2:** Implement `initChunked` to accept file hashes and sizes, then provision a tracking record inside a local temporary file metadata store.
+* [x] **Step 4.3:** Implement `pushChunk` to receive zero-indexed payload chunks and append incoming binary data blocks onto a temporary staging file located inside `/tmp/syncro_staging/[HASH]`.
+* [x] **Step 4.4:** Implement `finalizeChunked` to verify the complete staging file signature using Node's native `crypto` module. If the SHA-256 validation matches, push the binary artifact into the MinIO container bucket, increment the `reference_count` field inside the `files` table, and delete the temporary disk staging file.
+* [x] **Verification:** Send an explicit mock execution sequence payload via `curl` to `upload.initChunked` followed by chunk pushes, and verify the compiled file outputs into the active object store.
 
 #### Phase 5: Client-Side File Chunking Engine
 

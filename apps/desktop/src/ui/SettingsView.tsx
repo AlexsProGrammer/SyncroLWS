@@ -692,7 +692,7 @@ export function SettingsView(): React.ReactElement {
               <Input
                 id="sync-url"
                 type="url"
-                placeholder="http://localhost:3000"
+                placeholder="http://localhost:3033"
                 value={syncUrl}
                 onChange={(e) => setSyncUrl(e.target.value)}
               />

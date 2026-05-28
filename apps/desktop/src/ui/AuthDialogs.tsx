@@ -28,7 +28,7 @@ export function EnterpriseLoginDialog({ open, onClose }: EnterpriseLoginDialogPr
   const syncUrl = useSyncStore((s) => s.syncUrl);
   // NOTE: setSyncUrl removed — login() calls setUserSession({ serverUrl }) which sets it atomically.
 
-  const [serverUrl, setServerUrl] = useState(syncUrl || 'http://localhost:3000');
+  const [serverUrl, setServerUrl] = useState(syncUrl || 'http://localhost:3033');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -38,7 +38,7 @@ export function EnterpriseLoginDialog({ open, onClose }: EnterpriseLoginDialogPr
   // (which would clear email/password mid-request).
   useEffect(() => {
     if (open) {
-      setServerUrl(useSyncStore.getState().syncUrl || 'http://localhost:3000');
+      setServerUrl(useSyncStore.getState().syncUrl || 'http://localhost:3033');
       setEmail('');
       setPassword('');
       setError(null);

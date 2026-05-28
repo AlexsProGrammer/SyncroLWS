@@ -35,6 +35,6 @@ WORKDIR /app/apps/backend
 # Make scripts executable
 RUN chmod +x entrypoint.sh && chmod +x run-migrations.sh
 
-EXPOSE 3000
+EXPOSE 3033
 
 ENTRYPOINT ["./entrypoint.sh"]
