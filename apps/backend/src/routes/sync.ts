@@ -267,182 +267,204 @@ const pushProcedure = protectedProcedure
 
     const profileId = scope.mode === 'device' ? scope.profileId : ENTERPRISE_PROFILE_TAG;
     const deviceId = scope.deviceId;
-    const accepted: { kind: 'core' | 'aspect' | 'relation' | 'delete'; id: string; revision: number }[] = [];
-    const conflicts: { kind: 'core' | 'aspect' | 'relation' | 'delete'; id: string; server_revision: number }[] = [];
 
-    // Cores
-    for (const row of input.cores) {
-      const existing = await db
-        .select({ revision: baseEntities.revision })
-        .from(baseEntities)
-        .where(eq(baseEntities.id, row.id))
-        .limit(1);
+    // ── Step 1.1 / 1.2 / 1.3 — Atomic push transaction ───────────────────────
+    // All writes are bound to a single Drizzle/Postgres transaction so that a
+    // partial push is impossible. Every query inside uses the `tx` handle.
+    // Step 1.3: any unhandled error re-throws as INTERNAL_SERVER_ERROR which
+    // causes Drizzle to issue ROLLBACK before the exception propagates.
+    const { accepted, conflicts } = await db
+      .transaction(async (tx) => {
+        const accepted: { kind: 'core' | 'aspect' | 'relation' | 'delete'; id: string; revision: number }[] = [];
+        const conflicts: { kind: 'core' | 'aspect' | 'relation' | 'delete'; id: string; server_revision: number }[] = [];
 
-      if (existing[0] && existing[0].revision > row.base_revision) {
-        conflicts.push({ kind: 'core', id: row.id, server_revision: existing[0].revision });
-        continue;
-      }
+        // Cores
+        for (const row of input.cores) {
+          const existing = await tx
+            .select({ revision: baseEntities.revision })
+            .from(baseEntities)
+            .where(eq(baseEntities.id, row.id))
+            .limit(1);
 
-      const [out] = await db
-        .insert(baseEntities)
-        .values({
-          id: row.id,
-          profile_id: profileId,
-          workspace_id: input.workspace_id,
-          title: row.title,
-          description: row.description,
-          description_json: row.description_json ?? null,
-          color: row.color,
-          icon: row.icon,
-          tags: row.tags,
-          parent_id: row.parent_id,
-          created_at: new Date(row.created_at),
-          updated_at: new Date(row.updated_at),
-          deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
-          revision: NEXT_REV,
-          last_modified_by_device: deviceId,
-        })
-        .onConflictDoUpdate({
-          target: baseEntities.id,
-          set: {
-            title: row.title,
-            description: row.description,
-            description_json: row.description_json ?? null,
-            color: row.color,
-            icon: row.icon,
-            tags: row.tags,
-            parent_id: row.parent_id,
-            updated_at: new Date(row.updated_at),
-            deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
-            revision: NEXT_REV,
-            last_modified_by_device: deviceId,
-          },
-        })
-        .returning({ revision: baseEntities.revision });
-      accepted.push({ kind: 'core', id: row.id, revision: out!.revision });
-    }
+          if (existing[0] && existing[0].revision > row.base_revision) {
+            conflicts.push({ kind: 'core', id: row.id, server_revision: existing[0].revision });
+            continue;
+          }
 
-    // Aspects
-    for (const row of input.aspects) {
-      const existing = await db
-        .select({ revision: entityAspects.revision })
-        .from(entityAspects)
-        .where(eq(entityAspects.id, row.id))
-        .limit(1);
-      if (existing[0] && existing[0].revision > row.base_revision) {
-        conflicts.push({ kind: 'aspect', id: row.id, server_revision: existing[0].revision });
-        continue;
-      }
-      const [out] = await db
-        .insert(entityAspects)
-        .values({
-          id: row.id,
-          entity_id: row.entity_id,
-          profile_id: profileId,
-          workspace_id: input.workspace_id,
-          aspect_type: row.aspect_type,
-          data: row.data,
-          tool_instance_id: row.tool_instance_id,
-          sort_order: row.sort_order,
-          created_at: new Date(row.created_at),
-          updated_at: new Date(row.updated_at),
-          deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
-          revision: NEXT_REV,
-          last_modified_by_device: deviceId,
-        })
-        .onConflictDoUpdate({
-          target: entityAspects.id,
-          set: {
-            data: row.data,
-            tool_instance_id: row.tool_instance_id,
-            sort_order: row.sort_order,
-            updated_at: new Date(row.updated_at),
-            deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
-            revision: NEXT_REV,
-            last_modified_by_device: deviceId,
-          },
-        })
-        .returning({ revision: entityAspects.revision });
-      accepted.push({ kind: 'aspect', id: row.id, revision: out!.revision });
-    }
+          const [out] = await tx
+            .insert(baseEntities)
+            .values({
+              id: row.id,
+              profile_id: profileId,
+              workspace_id: input.workspace_id,
+              title: row.title,
+              description: row.description,
+              description_json: row.description_json ?? null,
+              color: row.color,
+              icon: row.icon,
+              tags: row.tags,
+              parent_id: row.parent_id,
+              created_at: new Date(row.created_at),
+              updated_at: new Date(row.updated_at),
+              deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+              revision: NEXT_REV,
+              last_modified_by_device: deviceId,
+            })
+            .onConflictDoUpdate({
+              target: baseEntities.id,
+              set: {
+                title: row.title,
+                description: row.description,
+                description_json: row.description_json ?? null,
+                color: row.color,
+                icon: row.icon,
+                tags: row.tags,
+                parent_id: row.parent_id,
+                updated_at: new Date(row.updated_at),
+                deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+                revision: NEXT_REV,
+                last_modified_by_device: deviceId,
+              },
+            })
+            .returning({ revision: baseEntities.revision });
+          accepted.push({ kind: 'core', id: row.id, revision: out!.revision });
+        }
 
-    // Relations
-    for (const row of input.relations) {
-      const existing = await db
-        .select({ revision: entityRelations.revision })
-        .from(entityRelations)
-        .where(eq(entityRelations.id, row.id))
-        .limit(1);
-      if (existing[0] && existing[0].revision > row.base_revision) {
-        conflicts.push({ kind: 'relation', id: row.id, server_revision: existing[0].revision });
-        continue;
-      }
-      const [out] = await db
-        .insert(entityRelations)
-        .values({
-          id: row.id,
-          profile_id: profileId,
-          workspace_id: input.workspace_id,
-          from_entity_id: row.from_entity_id,
-          to_entity_id: row.to_entity_id,
-          kind: row.kind,
-          metadata: row.metadata,
-          created_at: new Date(row.created_at),
-          revision: NEXT_REV,
-          last_modified_by_device: deviceId,
-        })
-        .onConflictDoUpdate({
-          target: entityRelations.id,
-          set: {
-            metadata: row.metadata,
-            revision: NEXT_REV,
-            last_modified_by_device: deviceId,
-          },
-        })
-        .returning({ revision: entityRelations.revision });
-      accepted.push({ kind: 'relation', id: row.id, revision: out!.revision });
-    }
+        // Aspects
+        for (const row of input.aspects) {
+          const existing = await tx
+            .select({ revision: entityAspects.revision })
+            .from(entityAspects)
+            .where(eq(entityAspects.id, row.id))
+            .limit(1);
+          if (existing[0] && existing[0].revision > row.base_revision) {
+            conflicts.push({ kind: 'aspect', id: row.id, server_revision: existing[0].revision });
+            continue;
+          }
+          const [out] = await tx
+            .insert(entityAspects)
+            .values({
+              id: row.id,
+              entity_id: row.entity_id,
+              profile_id: profileId,
+              workspace_id: input.workspace_id,
+              aspect_type: row.aspect_type,
+              data: row.data,
+              tool_instance_id: row.tool_instance_id,
+              sort_order: row.sort_order,
+              created_at: new Date(row.created_at),
+              updated_at: new Date(row.updated_at),
+              deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+              revision: NEXT_REV,
+              last_modified_by_device: deviceId,
+            })
+            .onConflictDoUpdate({
+              target: entityAspects.id,
+              set: {
+                data: row.data,
+                tool_instance_id: row.tool_instance_id,
+                sort_order: row.sort_order,
+                updated_at: new Date(row.updated_at),
+                deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+                revision: NEXT_REV,
+                last_modified_by_device: deviceId,
+              },
+            })
+            .returning({ revision: entityAspects.revision });
+          accepted.push({ kind: 'aspect', id: row.id, revision: out!.revision });
+        }
 
-    // Hard deletes → tombstone + remove the original row
-    for (const row of input.deletes) {
-      const tableMap = {
-        core: baseEntities,
-        aspect: entityAspects,
-        relation: entityRelations,
-      } as const;
-      const tbl = tableMap[row.kind];
-      const existing = await db
-        .select({ revision: tbl.revision })
-        .from(tbl)
-        .where(eq(tbl.id, row.id))
-        .limit(1);
-      if (existing[0] && existing[0].revision > row.base_revision) {
-        conflicts.push({ kind: 'delete', id: row.id, server_revision: existing[0].revision });
-        continue;
-      }
-      await db.delete(tbl).where(eq(tbl.id, row.id));
-      const [tomb] = await db
-        .insert(tombstones)
-        .values({
-          kind: row.kind,
-          id: row.id,
-          profile_id: profileId,
-          workspace_id: input.workspace_id,
-          revision: NEXT_REV,
-          deleted_at: new Date(),
-          last_modified_by_device: deviceId,
-        })
-        .onConflictDoUpdate({
-          target: [tombstones.kind, tombstones.id],
-          set: {
-            revision: NEXT_REV,
-            deleted_at: new Date(),
-            last_modified_by_device: deviceId,
-          },
-        })
-        .returning({ revision: tombstones.revision });
-      accepted.push({ kind: 'delete', id: row.id, revision: tomb!.revision });
-    }
+        // Relations
+        for (const row of input.relations) {
+          const existing = await tx
+            .select({ revision: entityRelations.revision })
+            .from(entityRelations)
+            .where(eq(entityRelations.id, row.id))
+            .limit(1);
+          if (existing[0] && existing[0].revision > row.base_revision) {
+            conflicts.push({ kind: 'relation', id: row.id, server_revision: existing[0].revision });
+            continue;
+          }
+          const [out] = await tx
+            .insert(entityRelations)
+            .values({
+              id: row.id,
+              profile_id: profileId,
+              workspace_id: input.workspace_id,
+              from_entity_id: row.from_entity_id,
+              to_entity_id: row.to_entity_id,
+              kind: row.kind,
+              metadata: row.metadata,
+              created_at: new Date(row.created_at),
+              revision: NEXT_REV,
+              last_modified_by_device: deviceId,
+            })
+            .onConflictDoUpdate({
+              target: entityRelations.id,
+              set: {
+                metadata: row.metadata,
+                revision: NEXT_REV,
+                last_modified_by_device: deviceId,
+              },
+            })
+            .returning({ revision: entityRelations.revision });
+          accepted.push({ kind: 'relation', id: row.id, revision: out!.revision });
+        }
+
+        // Hard deletes → tombstone + remove the original row
+        for (const row of input.deletes) {
+          const tableMap = {
+            core: baseEntities,
+            aspect: entityAspects,
+            relation: entityRelations,
+          } as const;
+          const tbl = tableMap[row.kind];
+          const existing = await tx
+            .select({ revision: tbl.revision })
+            .from(tbl)
+            .where(eq(tbl.id, row.id))
+            .limit(1);
+          if (existing[0] && existing[0].revision > row.base_revision) {
+            conflicts.push({ kind: 'delete', id: row.id, server_revision: existing[0].revision });
+            continue;
+          }
+          await tx.delete(tbl).where(eq(tbl.id, row.id));
+          const [tomb] = await tx
+            .insert(tombstones)
+            .values({
+              kind: row.kind,
+              id: row.id,
+              profile_id: profileId,
+              workspace_id: input.workspace_id,
+              revision: NEXT_REV,
+              deleted_at: new Date(),
+              last_modified_by_device: deviceId,
+            })
+            .onConflictDoUpdate({
+              target: [tombstones.kind, tombstones.id],
+              set: {
+                revision: NEXT_REV,
+                deleted_at: new Date(),
+                last_modified_by_device: deviceId,
+              },
+            })
+            .returning({ revision: tombstones.revision });
+          accepted.push({ kind: 'delete', id: row.id, revision: tomb!.revision });
+        }
+
+        return { accepted, conflicts };
+      })
+      .catch((err: unknown) => {
+        // Step 1.3: surface constraint/runtime failures as a typed tRPC error
+        // so the Postgres engine rolls back the transaction before the error
+        // reaches the client.
+        if (err instanceof TRPCError) throw err;
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Sync push transaction failed and was rolled back.',
+          cause: err,
+        });
+      });
 
     // Phase R — record one aggregate audit row per enterprise push so the
     // log doesn't get flooded with per-row entries. Personal-mode (device

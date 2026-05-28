@@ -1,210 +1,93 @@
-## Plan: SyncroLWS Enterprise Upgrade
+# IMPLEMENTATION.md
 
-Transform the working prototype into an enterprise-grade productivity platform by restructuring around workspaces (each with its own SQLite DB), building a manifest-based plugin architecture, upgrading all modules to professional-grade feature sets, and adding a configurable client portal with granular per-tool permissions.
+## 1. Project Context & Architecture
+- **Goal:** Harden the core replication engine of SyncroLWS by introducing atomic server-side sync push transactions, enforcing strict transaction-safe write-through policies between Zustand memory stores and local SQLite files, and deploying a resilient chunk-based file upload pipeline for deduplicated content-addressed files.
+- **Tech Stack & Dependencies:**
+  - **Core Ecosystem:** Tauri 2.0, React, TypeScript, Node.js, Express, tRPC.
+  - **Database Management:** PostgreSQL (Backend Engine), SQLite (Local via `tauri-plugin-sql`), Drizzle ORM.
+  - **Commands:** - `cd apps/backend && npm install fs-extra crypto`
+    - `cd apps/desktop && npm install async-mutex`
+- **File Structure:**
+  ```text
+  ├── apps/
+  │   ├── backend/
+  │   │   └── src/
+  │   │       └── routes/
+  │   │           ├── sync.ts       # Modified: Atomic push transactions
+  │   │           └── upload.ts     # Modified: Chunked file receiver endpoints
+  │   └── desktop/
+  │       └── src/
+  │           ├── core/
+  │           │   ├── db.ts         # Modified: Write-lock Mutex mechanism
+  │           │   ├── sync.ts       # Modified: Rollback-resilient loop handlers
+  │           │   └── upload.ts     # Created: Binary chunk file slicing engine
+  │           └── store/
+  │               ├── profileStore.ts # Modified: Direct SQLite write-throughs
+  │               └── workspaceStore.ts # Modified: Direct SQLite write-throughs
 
----
+```
 
-### Phase 1 — Core Architecture Refactor (Foundation)
+* **Attention Points:** - All database queries executed within a loop during a sync synchronization round must be bound to the identical database transaction lifecycle context.
+* Simultaneous operations on the local SQLite file must be serialized to prevent file access lock violations.
 
-*All subsequent phases depend on this.*
 
-**1.1 Workspace System (Data Layer)**
-- Add `workspaces` table to the profile-level SQLite (`data.sqlite`) with `id`, `name`, `description`, `icon`, `parent_id` (for nested folder structure), `sort_order`
-- Each workspace gets its **own SQLite database** at `profiles/<profile_uuid>/workspaces/<workspace_uuid>/data.sqlite` + `files/` directory
-- New Rust command `create_workspace_folder` in commands.rs
-- Extend db.ts with `loadWorkspaceDB(profileId, workspaceId)` and `getWorkspaceDB()` — replaces all current `getDB()` calls in modules
-- New `workspaceStore.ts` (zustand + persist): tracks `activeWorkspaceId`, workspace CRUD, tree structure
-- All module DB queries switch from `getDB()` → `getWorkspaceDB()`
-
-**1.2 Profile System Enhancement**
-- Extend `Profile` in profileStore.ts: add `avatar_url`, `color` fields
-- New profile switcher UI component in sidebar bottom: icon + name, dropdown with all profiles + "Add Profile"
-- Profile switch triggers DB close → reload → workspace list refresh
-
-**1.3 Plugin/Tool Architecture**
-- Add `manifest.json` to each module folder (`src/modules/<tool-id>/manifest.json`) defining `id`, `name`, `entityTypes[]`, `shortcut`, `hasPortalView`, `portalPermissions[]`, `configSchema`
-- Refactor ToolRegistry.tsx to auto-discover manifests via `import.meta.glob()` at build time, merge with code exports (`component`, `init`, `portalComponent`)
-- Standardized inter-tool interface: `getData(query)` / `setData(data)` methods + declared event bus contracts
-
-**1.4 Workspace-Scoped Tool Instances**
-- New `workspace_tools` table in workspace SQLite: users can add **multiple instances** of the same tool per workspace (e.g., two Kanban boards, each with custom name/description)
-- Entity `parent_id` links entities to their tool instance
-- Sidebar shows workspace tools as expandable tree
-
----
-
-### Phase 2 — UI/UX Overhaul
-
-*Parallel with Phase 3 after Phase 1 is complete.*
-
-**2.1 Sidebar Redesign**
-- Top: Workspace tree navigator (collapsible folders, drag-and-drop reorder via `@dnd-kit`)
-- Middle: Active workspace's tool instance list
-- Bottom: Profile switcher (avatar + name), Settings, Collapse toggle
-
-**2.2 shadcn/ui Component Expansion**
-- Add ~15 components: `Tabs`, `DropdownMenu`, `ContextMenu`, `Popover`, `DatePicker`, `Select`, `Textarea`, `Tooltip`, `Sheet`, `Table`, `Avatar`, `Separator`, `ScrollArea`, `Progress`, `Skeleton` — all local, zero CDN
-
-**2.3 Theme & Layout**
-- Dark/light theme toggle, persisted in profile settings
-- Breadcrumb navigation in header: Profile → Workspace → Tool Instance
-- Responsive layout for different window sizes
-
-**2.4 Toast/Notification System**
-- Toast component (bottom-right stack) wired to existing `notification:show` event bus event
-- Auto-dismiss with info/warning/error variants
+* **DSGVO:** No payload, tracking parameter, block data, or hashing information may be transmitted to external telemetry endpoints or third-party cloud hosting providers. Staging files must be swept cleanly upon network lifecycle termination.
 
 ---
 
-### Phase 3 — Module Upgrades
+## 2. Execution Phases
 
-*3.1–3.4 can run in parallel after Phase 1.*
+#### Phase 1: Server-Side Atomic Push Transactions
 
-**3.1 Notes → Obsidian-like Editor**
-- Extend TipTap in NoteEditor.tsx with: task lists, code blocks (syntax highlighted), tables, inline images, typography
-- **Live preview mode**: cursor on a line → raw markdown; unfocused lines → rendered. Via custom TipTap NodeView decorations toggling on selection state
-- Backlinks panel (new `BacklinksPanel.tsx`): shows all notes linking TO current note
-- Inline `#tag` syntax highlighting + tag-based filtering in note list
-- Note templates (meeting notes, daily log)
+* [x] **Step 1.1:** In `apps/backend/src/routes/sync.ts`, locate the `pushProcedure` mutation block. Wrap the entire internal loop logic (handling cores, aspects, relations, and deletes) inside a Drizzle PostgreSQL transaction block using `await db.transaction(async (tx) => { ... })`.
+* [x] **Step 1.2:** Update all query expressions inside the `pushProcedure` loops (such as `db.select`, `db.insert`, `db.delete`) to evaluate exclusively using the transaction context handle `tx`.
+* [x] **Step 1.3:** Implement a termination check within the transaction context. If an uncaught application error or constraint validation failure occurs during execution, explicitly throw a `TRPCError` with code `INTERNAL_SERVER_ERROR` to force an immediate transaction rollback on the Postgres engine.
+* [ ] **Verification:** Execute `cd apps/backend && npx tsc --noEmit` and confirm that the project compiles with no type verification anomalies.
 
-**3.2 Tasks → Full Kanban (Trello/Notion-level)**
-- Rewrite TasksView.tsx: custom columns (stored in `workspace_tools.config`), swimlanes (group by assignee/priority/label)
-- Task detail slide-over panel (`Sheet`): rich text description (embedded TipTap), labels with colors, due date+time → auto-creates calendar event, subtasks/checklist, file attachments, activity log/comments, assignee
-- Card preview: labels, due date badge, attachment count, subtask progress bar
-- Filters: by label, assignee, due date range, priority
-- Extend `TaskPayload` in base-entity.ts: add `labels`, `checklist`, `column_id`, `attachments`, `comments`
+#### Phase 2: Client-Side Push Robustness & Sync Fallback
 
-**3.3 Calendar → Full Calendar View**
-- Install `@fullcalendar/react` + plugins (daygrid, timegrid, interaction, list)
-- New `CalendarView.tsx`: Month, Week, Day, Agenda views
-- Event CRUD: click-to-create, drag to reschedule, resize
-- Event detail modal with datetime picker, recurrence (RRULE via `rrule` package), location, color, linked entity
-- **Cross-module**: Task due dates appear as virtual calendar events; time tracker entries as ghost blocks
+* [ ] **Step 2.1:** In `apps/desktop/src/core/sync.ts`, modify `runSyncCycle()` where `trpcMutation` calls `sync.push`. Wrap the execution call inside an active `try/catch` statement block.
+* [ ] **Step 2.2:** Update the error handling handler inside `runSyncCycle()`. If the remote endpoint sends an explicit error frame or a network exception occurs, interrupt processing immediately, bypass `applyPushResult`, and preserve the local table rows with their `dirty = 1` status flags intact.
+* [ ] **Step 2.3:** Add a sliding debounce delay interval to the tracking queue if an explicit synchronization push rejection occurs to avoid continuous request hammering loops.
+* [ ] **Verification:** Run `cd apps/desktop && npx tsc --noEmit` and confirm that the frontend files compile without type conflicts.
 
-**3.4 Time Tracker → Full Tracker with Billing**
-- Extend TimeTrackerView.tsx: prominent start/stop button, active window detection on interval (uses existing `get_active_window` Rust command)
-- Manual time entry form
-- Billable flag per entry + configurable hourly rate per workspace
-- Reports view (new `TimeTrackerReports.tsx`): daily/weekly/monthly bar charts via `recharts`
-- CSV/PDF export (via `jspdf` for PDF — all local)
+#### Phase 3: Zustand-to-SQLite Write-Through Enforcement
 
----
+* [ ] **Step 3.1:** In `apps/desktop/src/core/db.ts`, import `Mutex` from `async-mutex`. Initialize a global write mutational mutex handle: `const writeMutex = new Mutex();`.
+* [ ] **Step 3.2:** Add a wrapped execution helper method `export async function executeWriteAtomic(callback: () => Promise<void>)` that runs the underlying query block safely within a `writeMutex.runExclusive` handler.
+* [ ] **Step 3.3:** In `apps/desktop/src/store/workspaceStore.ts` and `apps/desktop/src/store/profileStore.ts`, identify state actions that modify task, profile, or folder attributes. Force these functions to execute a write through directly into the local SQLite file via `executeWriteAtomic` before committing state updates to active memory.
+* [ ] **Verification:** Launch the Tauri compilation suite via `npm run tauri dev` and verify that parallel store modifications execute without throwing SQLite file access errors.
 
-### Phase 4 — New Tools
+#### Phase 4: Backend Chunked File Storage API
 
-*Each tool is independent, after Phase 1.*
+* [ ] **Step 4.1:** In `apps/backend/src/routes/upload.ts`, declare three new tRPC procedures: `upload.initChunked`, `upload.pushChunk`, and `upload.finalizeChunked`.
+* [ ] **Step 4.2:** Implement `initChunked` to accept file hashes and sizes, then provision a tracking record inside a local temporary file metadata store.
+* [ ] **Step 4.3:** Implement `pushChunk` to receive zero-indexed payload chunks and append incoming binary data blocks onto a temporary staging file located inside `/tmp/syncro_staging/[HASH]`.
+* [ ] **Step 4.4:** Implement `finalizeChunked` to verify the complete staging file signature using Node's native `crypto` module. If the SHA-256 validation matches, push the binary artifact into the MinIO container bucket, increment the `reference_count` field inside the `files` table, and delete the temporary disk staging file.
+* [ ] **Verification:** Send an explicit mock execution sequence payload via `curl` to `upload.initChunked` followed by chunk pushes, and verify the compiled file outputs into the active object store.
 
-- **4.1 File Manager**: Browse/upload workspace files, hash-based dedup, preview (images, PDFs, markdown), drag-and-drop
-- **4.2 Pomodoro/Focus Timer**: Configurable intervals, integrates with time tracker, desktop notifications
-- **4.3 Habit Tracker**: Daily/weekly habits, streak tracking, contribution-graph style grid
-- **4.4 Bookmarks/Links**: Save URLs with tags, optional local preview
+#### Phase 5: Client-Side File Chunking Engine
+
+* [ ] **Step 5.1:** Create `apps/desktop/src/core/uploadEngine.ts`. Implement a file parsing loop that reads on-disk storage structures via Tauri's `tauri-plugin-fs` system binary file reading interface.
+* [ ] **Step 5.2:** Build an extraction routine that breaks files down into consecutive binary blocks of ` Uint8Array` allocations matching a uniform chunk size configuration value.
+* [ ] **Step 5.3:** Connect the output stream of the file picking interfaces to the `uploadEngine.ts` workflow module. Ensure file assets use chunked streaming uploads rather than single-shot HTTP POST requests.
+* [ ] **Verification:** Trigger a file upload trace path from the desktop UI layout and ensure large attachments are uploaded successfully as tracked chunks.
 
 ---
 
-### Phase 5 — Sync & Backend Hardening
+## 3. Global Testing Strategy
 
-*Depends on Phase 1.*
+* **Server Crash Mid-Push Recovery:**
+* *Action:* Initialize a push synchronization payload sequence. Introduce an explicit execution fault loop inside `apps/backend/src/routes/sync.ts` halfway through processing.
+* *Expected:* The backend database logs an absolute transaction rollback. Validate that no partial database attributes or broken relational tables exist on the Postgres server instance.
 
-**5.1 Authentication**
-- JWT middleware on tRPC context in trpc.ts
-- API key generation/revocation endpoints; keys stored hashed in PostgreSQL
-- `express-rate-limit` on all routes
 
-**5.2 PowerSync Integration**
-- Activate PowerSync in docker-compose.yml
-- Replace stub powersync.ts with real `@powersync/web` SDK
-- Per-workspace sync filtering
+* **Sudden Window Termination Preservation:**
+* *Action:* Trigger a sequence of intense rapid state modifications across task items inside the UI view, then kill the Tauri window thread immediately using a system signal (`kill -9`).
+* *Expected:* Reopen the application shell and ensure the local SQLite database file state aligns with the last memory layout changes, verifying the write-through architecture.
 
-**5.3 Workspace Sync**
-- Independent sync toggle per workspace
-- Selective sync: choose which tool instances to sync
 
-**5.4 Backup System**
-- ZIP export: package workspace SQLite + `files/` into `.syncrohws` archive using JSZip
-- ZIP import: restore workspace from archive
-- Scheduled backups with configurable interval + rotation (keep last N)
+* **Network Interruption Chunk Resilience:**
+* *Action:* Initiate a file upload, then disconnect the internet network interface card during chunk transmission. Reconnect the network link shortly after.
+* *Expected:* The streaming client engine recovers gracefully without restarting the entire file upload workflow from scratch.
 
----
-
-### Phase 6 — Client Portal
-
-*Depends on Phase 5 (auth) and Phase 3 (module upgrades).*
-
-**6.1 Portal Link System**
-- New `portal_links` PostgreSQL table with `token`, `workspace_id`, `expires_at`, `permissions` (JSONB)
-- Permissions are **per-tool-instance**: each tool instance can be set to hidden / read-only / full edit
-- Additional toggles: `canUploadFiles`, `canAddNotes`, `canEditCalendar`, `canEditKanban`
-- Links expire after configured duration, revocable
-- Access via `https://server/portal/<token>`
-
-**6.2 Portal Frontend**
-- Extend web React app
-- Reuse tool components with `readOnly` / `portalMode` props, or simplified portal-specific views
-- File upload form (if permitted), note submission, calendar editing — all gated by link permissions
-- Link generation UI in desktop app Settings per workspace
-
-**6.3 Portal Security**
-- Separate token validation middleware for portal routes
-- CSRF protection on POST requests
-- Portal tokens scoped to specific workspace + permissions only — no admin access
-
----
-
-### Phase 7 — Polish & Enterprise Features
-
-- **7.1 Search**: FTS5 search per workspace, results grouped by type, enhanced command palette with recent items + workspace switcher
-- **7.2 Deep Linking**: `syncrohws://workspace/<id>`, `syncrohws://workspace/<id>/tool/<instance-id>`
-- **7.3 Global Tags**: Cross-entity-type tag system, autocomplete, tag-based filtering, optional backlink graph visualization
-- **7.4 Keyboard Shortcuts**: Full keyboard navigation, customizable shortcuts in profile settings
-- **7.5 Performance**: Virtual scrolling via `@tanstack/react-virtual`, `React.lazy()` + `Suspense` for tool components, SQLite WAL mode
-
----
-
-### Relevant Files
-
-| Area | File | What to change |
-|------|------|----------------|
-| Core | db.ts | Add workspace DB management |
-| Core | profileStore.ts | Extend Profile type |
-| Core | ToolRegistry.tsx | Manifest-based auto-discovery |
-| Core | commands.rs | Add `create_workspace_folder` |
-| Core | schema.ts | Add `workspaces`, `workspace_tools` tables |
-| Core | base-entity.ts | Extend entity types + payloads |
-| Core | events.ts | Add workspace/portal events |
-| UI | Sidebar.tsx | Complete redesign |
-| UI | App.tsx | Workspace context, breadcrumbs |
-| Notes | NoteEditor.tsx | TipTap extension overhaul |
-| Tasks | TasksView.tsx | Full Kanban rewrite |
-| Calendar | calendar | New CalendarView with FullCalendar |
-| Timer | TimeTrackerView.tsx | Reports, billing |
-| Backend | trpc.ts | Auth middleware |
-| Backend | schema.ts | Portal + auth tables |
-| Portal | web | Portal frontend |
-
----
-
-### Verification
-
-1. **Phase 1**: Create workspace → separate SQLite exists at expected path. Switch workspace → data is isolated. Profile switch → reloads workspace list. Rust commands work via `invoke()`.
-2. **Phase 2**: Sidebar renders workspace tree. Profile switcher works. All shadcn components render. Theme persists.
-3. **Phase 3**: Note with wikilinks/code/tables renders. Kanban custom columns + task detail panel + auto-calendar integration. FullCalendar month/week/day views. Timer start/stop + CSV export.
-4. **Phase 5**: API key auth flow works. PowerSync syncs entities. ZIP backup export → import on clean install restores data.
-5. **Phase 6**: Portal link with kanban=read-only, calendar=editable → browser shows kanban (no edit), calendar (edit works). Expired link → 403.
-6. **Phase 7**: FTS search returns grouped results across entity types. `syncrohws://workspace/<id>` opens correct workspace. 10k items → virtual scrolling smooth.
-
----
-
-### Decisions
-
-- **Separate SQLite per workspace** for clean isolation, easier backup/sync per workspace
-- **TipTap extended** — leverages existing integration, ProseMirror ecosystem
-- **FullCalendar.js** — most feature-complete, native drag-and-drop
-- **JWT + API key** — matches existing Settings UI setup
-- **Config-based manifest registry** — auto-discovery at build time, no runtime eval
-- **Granular portal permissions** — per-tool-instance visibility + edit control, link-based with expiry
-- **Zero CDN policy maintained** — all libs bundled via npm
-
-### Scope Boundaries
-
-- **Included**: Workspaces, profiles, all module upgrades, plugin system, sync, portal, backup, search, deep linking, performance
-- **Excluded (for now)**: Privacy-first AI integration, automated invoicing engine (beyond CSV/PDF export), mobile app, multi-language i18n
