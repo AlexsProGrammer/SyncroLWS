@@ -1,0 +1,31 @@
+{
+  "id": "canvas",
+  "name": "Canvas",
+  "version": "1.0.0",
+  "description": "Infinite canvas notebook — local-first drawing with tldraw, granular shape-level sync.",
+  "icon": "canvas",
+  "entityTypes": ["canvas_shape"],
+  "shortcut": "9",
+  "hasPortalView": true,
+  "portalPermissions": ["read", "write", "upload"],
+  "configSchema": {
+    "defaultPageName": { "type": "string", "default": "Page 1" },
+    "snapToGrid": { "type": "boolean", "default": false },
+    "gridSize": { "type": "number", "default": 8 }
+  },
+  "aspect": {
+    "type": "canvas_shape",
+    "label": "Canvas Shape",
+    "defaultData": {
+      "id": "",
+      "type": "geo",
+      "x": 0,
+      "y": 0,
+      "rotation": 0,
+      "index": "a1",
+      "props": {},
+      "parentId": "page:page"
+    },
+    "requiresToolInstance": true
+  }
+}

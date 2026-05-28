@@ -272,6 +272,7 @@ export const ASPECT_TYPES = [
   'bookmark',
   'file_attachment',
   'project',
+  'canvas_shape',
 ] as const;
 
 export type AspectType = (typeof ASPECT_TYPES)[number];
@@ -461,6 +462,30 @@ export const ProjectAspectDataSchema = z.object({
 });
 export type ProjectAspectData = z.infer<typeof ProjectAspectDataSchema>;
 
+// ── Canvas Shape ─────────────────────────────────────────────────────────────
+// Stores a single tldraw shape record as a granular entity_aspects row.
+// Individual shapes map 1-to-1 with rows — no full-document snapshots.
+
+export const CanvasShapeAspectDataSchema = z.object({
+  /** tldraw shape id (e.g. "shape:abc123"). */
+  id: z.string(),
+  /** Shape type identifier ("geo", "text", "draw", "image", …). */
+  type: z.string(),
+  /** X coordinate on the canvas. */
+  x: z.number().default(0),
+  /** Y coordinate on the canvas. */
+  y: z.number().default(0),
+  /** Rotation angle in radians. */
+  rotation: z.number().default(0),
+  /** tldraw fractional index string for z-order. */
+  index: z.string().default('a1'),
+  /** Shape-specific properties (geometry, label, style, …). */
+  props: z.record(z.unknown()).default({}),
+  /** Parent shape or page id (e.g. "page:page"). */
+  parentId: z.string().default('page:page'),
+});
+export type CanvasShapeAspectData = z.infer<typeof CanvasShapeAspectDataSchema>;
+
 // (TRPCContext used to live here — moved to ./trpc.ts in Phase I.)
 
 /** Map aspect_type → data schema. Used by entityStore + aspect plugin registry. */
@@ -474,4 +499,5 @@ export const ASPECT_DATA_SCHEMAS = {
   bookmark: BookmarkAspectDataSchema,
   file_attachment: FileAttachmentAspectDataSchema,
   project: ProjectAspectDataSchema,
+  canvas_shape: CanvasShapeAspectDataSchema,
 } as const satisfies Record<AspectType, z.ZodType>;

@@ -1,93 +1,92 @@
 # IMPLEMENTATION.md
 
 ## 1. Project Context & Architecture
-- **Goal:** Harden the core replication engine of SyncroLWS by introducing atomic server-side sync push transactions, enforcing strict transaction-safe write-through policies between Zustand memory stores and local SQLite files, and deploying a resilient chunk-based file upload pipeline for deduplicated content-addressed files.
-- **Tech Stack & Dependencies:**
-  - **Core Ecosystem:** Tauri 2.0, React, TypeScript, Node.js, Express, tRPC.
-  - **Database Management:** PostgreSQL (Backend Engine), SQLite (Local via `tauri-plugin-sql`), Drizzle ORM.
-  - **Commands:** - `cd apps/backend && npm install fs-extra crypto`
-    - `cd apps/desktop && npm install async-mutex`
-- **File Structure:**
-  ```text
-  ├── apps/
-  │   ├── backend/
-  │   │   └── src/
-  │   │       └── routes/
-  │   │           ├── sync.ts       # Modified: Atomic push transactions
-  │   │           └── upload.ts     # Modified: Chunked file receiver endpoints
-  │   └── desktop/
-  │       └── src/
-  │           ├── core/
-  │           │   ├── db.ts         # Modified: Write-lock Mutex mechanism
-  │           │   ├── sync.ts       # Modified: Rollback-resilient loop handlers
-  │           │   └── upload.ts     # Created: Binary chunk file slicing engine
-  │           └── store/
-  │               ├── profileStore.ts # Modified: Direct SQLite write-throughs
-  │               └── workspaceStore.ts # Modified: Direct SQLite write-throughs
+
+* **Goal:** Integrate a fully local-first, infinite canvas notebook system using `tldraw` into the polymorphic architecture of SyncroLWS. This maps drawing coordinates, vectors, and nodes cleanly to shape-level database assets under a granular `canvas_shape` aspect layout, bypassing massive document snapshots and enabling real-time delta sync handling.
+* **Tech Stack & Dependencies:**
+* **Core Frameworks:** Tauri 2.0, React, Vite, Drizzle ORM, Zod.
+* **Libraries:** `@tldraw/tldraw` (Infinite canvas logic).
+* **Package Command:** `cd apps/desktop && npm install @tldraw/tldraw`
+
+
+* **File Structure:**
+```text
+├── packages/
+│   └── shared-types/
+│       └── src/
+│           └── base-entity.ts    # Modified: Add canvas_shape aspect types and schemas
+└── apps/
+    └── desktop/
+        └── src/
+            ├── registry/
+            │   └── ToolRegistry.tsx # Modified: Auto-discover canvas tool and icons
+            └── modules/
+                └── canvas/       # Created: New module package root
+                    ├── manifest.json # Created: Tool capability specifications
+                    ├── index.ts      # Created: Registry initialization endpoints
+                    ├── CanvasView.tsx # Created: Infinite canvas workspace layout
+                    └── hooks/
+                        ├── useTldrawStore.ts # Created: Granular event listener hook
+                        └── useCanvasAssets.ts # Created: Content-addressable file receiver
 
 ```
 
-* **Attention Points:** - All database queries executed within a loop during a sync synchronization round must be bound to the identical database transaction lifecycle context.
-* Simultaneous operations on the local SQLite file must be serialized to prevent file access lock violations.
+
+* **Attention Points:** - Do not store the entire canvas state as a single JSON text stream inside a `base_entities` row. Individual shapes must map directly to rows in the `entity_aspects` layout.
+* Use Tauri's native filesystem capability to persist local image elements.
 
 
-* **DSGVO:** No payload, tracking parameter, block data, or hashing information may be transmitted to external telemetry endpoints or third-party cloud hosting providers. Staging files must be swept cleanly upon network lifecycle termination.
+* **DSGVO:** The infinite canvas tool must function under a complete network airgap with zero external requests. External CDN resource calls for tldraw canvas assets, standard subcomponents, or rendering utilities are completely forbidden. All assets are managed locally using an offline protocol handler mapping (`tauri://localhost/media/[HASH]`).
 
 ---
 
 ## 2. Execution Phases
 
-#### Phase 1: Server-Side Atomic Push Transactions
+#### Phase 1: Shared Schema Modification & Tool Registry Discovery
 
-* [x] **Step 1.1:** In `apps/backend/src/routes/sync.ts`, locate the `pushProcedure` mutation block. Wrap the entire internal loop logic (handling cores, aspects, relations, and deletes) inside a Drizzle PostgreSQL transaction block using `await db.transaction(async (tx) => { ... })`.
-* [x] **Step 1.2:** Update all query expressions inside the `pushProcedure` loops (such as `db.select`, `db.insert`, `db.delete`) to evaluate exclusively using the transaction context handle `tx`.
-* [x] **Step 1.3:** Implement a termination check within the transaction context. If an uncaught application error or constraint validation failure occurs during execution, explicitly throw a `TRPCError` with code `INTERNAL_SERVER_ERROR` to force an immediate transaction rollback on the Postgres engine.
-* [x] **Verification:** Execute `cd apps/backend && npx tsc --noEmit` and confirm that the project compiles with no type verification anomalies.
+* [x] **Step 1.1:** In `packages/shared-types/src/base-entity.ts`, add `'canvas_shape'` to the `ASPECT_TYPES` string array and add it to `AspectTypeSchema`.
+* [x] **Step 1.2:** In `packages/shared-types/src/base-entity.ts`, create and export a validated `CanvasShapeAspectDataSchema` using Zod that structures tldraw element definitions (id, type, x, y, rotation, index, props, and parentId). Register this layout within `ASPECT_DATA_SCHEMAS`.
+* [x] **Step 1.3:** Create `apps/desktop/src/modules/canvas/manifest.json`. Define the tool identifier (`"canvas"`), associate it with the `canvas_shape` type, add shortcut keys, flag `hasPortalView: true`, and define default schema config structures.
+* [x] **Step 1.4:** In `apps/desktop/src/registry/ToolRegistry.tsx`, implement a custom `IconCanvas` inline SVG renderer component. Map the string key `"canvas"` to this custom SVG icon inside the global `iconMap`.
+* [x] **Verification:** Run `cd packages/shared-types && npm run build` and ensure the shared models compile. Confirm the layout outputs no type verification anomalies.
 
-#### Phase 2: Client-Side Push Robustness & Sync Fallback
+#### Phase 2: Canvas Workspace Core View Integration
 
-* [x] **Step 2.1:** In `apps/desktop/src/core/sync.ts`, modify `runSyncCycle()` where `trpcMutation` calls `sync.push`. Wrap the execution call inside an active `try/catch` statement block.
-* [x] **Step 2.2:** Update the error handling handler inside `runSyncCycle()`. If the remote endpoint sends an explicit error frame or a network exception occurs, interrupt processing immediately, bypass `applyPushResult`, and preserve the local table rows with their `dirty = 1` status flags intact.
-* [x] **Step 2.3:** Add a sliding debounce delay interval to the tracking queue if an explicit synchronization push rejection occurs to avoid continuous request hammering loops.
-* [x] **Verification:** Run `cd apps/desktop && npx tsc --noEmit` and confirm that the frontend files compile without type conflicts.
+* [ ] **Step 2.1:** Create `apps/desktop/src/modules/canvas/CanvasView.tsx`. Import the primary canvas framework components from `@tldraw/tldraw`. Build a view component that initializes the tldraw rendering envelope.
+* [ ] **Step 2.2:** Create `apps/desktop/src/modules/canvas/index.ts`. Implement an entrypoint file that exports an `init()` method to add initialization entries to the `ToolRegistry` pipeline. Expose methods for search filtering and command palette results.
+* [ ] **Step 2.3:** In `apps/desktop/src/modules/canvas/CanvasView.tsx`, configure the viewport element wrapper to leverage a standard full-size layout (`w-full h-full`) styled completely using local Tailwind configuration declarations.
+* [ ] **Verification:** Launch the system build via `npm run tauri dev`. Confirm the new "Canvas" tool appears within the dynamic workspace layout and the component initializes.
 
-#### Phase 3: Zustand-to-SQLite Write-Through Enforcement
+#### Phase 3: Shape-Level Granular Event Interception
 
-* [x] **Step 3.1:** In `apps/desktop/src/core/db.ts`, import `Mutex` from `async-mutex`. Initialize a global write mutational mutex handle: `const writeMutex = new Mutex();`.
-* [x] **Step 3.2:** Add a wrapped execution helper method `export async function executeWriteAtomic(callback: () => Promise<void>)` that runs the underlying query block safely within a `writeMutex.runExclusive` handler.
-* [x] **Step 3.3:** In `apps/desktop/src/store/workspaceStore.ts` and `apps/desktop/src/store/profileStore.ts`, identify state actions that modify task, profile, or folder attributes. Force these functions to execute a write through directly into the local SQLite file via `executeWriteAtomic` before committing state updates to active memory.
-* [x] **Verification:** Launch the Tauri compilation suite via `npm run tauri dev` and verify that parallel store modifications execute without throwing SQLite file access errors.
+* [ ] **Step 3.1:** Create `apps/desktop/src/modules/canvas/hooks/useTldrawStore.ts`. Implement a custom React hook that accepts the active canvas session context handle.
+* [ ] **Step 3.2:** Wire a tldraw change notification handler using `store.listen()`. Intercept individual node changes and break the payload mutations down into discrete operation classes (`added`, `updated`, `removed`).
+* [ ] **Step 3.3:** Map canvas mutations directly into local storage statements using Drizzle ORM. Writes must run queries against the local `entity_aspects` workspace structure, mapping shape payloads into the `data` json column and toggling database state flags to `dirty = 1`.
+* [ ] **Step 3.4:** For node deletion operations, convert the execution trace into an insert statement running against the `sync_tombstones` tracking schema to preserve delete tracking across synchronized devices.
+* [ ] **Verification:** Open the newly created infinite canvas view. Draw several basic shapes on the board view area. Query the database directly via terminal console and check that rows matching `aspect_type = 'canvas_shape'` are populated.
 
-#### Phase 4: Backend Chunked File Storage API
+#### Phase 4: Offline Content-Addressable Asset Layer
 
-* [x] **Step 4.1:** In `apps/backend/src/routes/upload.ts`, declare three new tRPC procedures: `upload.initChunked`, `upload.pushChunk`, and `upload.finalizeChunked`.
-* [x] **Step 4.2:** Implement `initChunked` to accept file hashes and sizes, then provision a tracking record inside a local temporary file metadata store.
-* [x] **Step 4.3:** Implement `pushChunk` to receive zero-indexed payload chunks and append incoming binary data blocks onto a temporary staging file located inside `/tmp/syncro_staging/[HASH]`.
-* [x] **Step 4.4:** Implement `finalizeChunked` to verify the complete staging file signature using Node's native `crypto` module. If the SHA-256 validation matches, push the binary artifact into the MinIO container bucket, increment the `reference_count` field inside the `files` table, and delete the temporary disk staging file.
-* [x] **Verification:** Send an explicit mock execution sequence payload via `curl` to `upload.initChunked` followed by chunk pushes, and verify the compiled file outputs into the active object store.
-
-#### Phase 5: Client-Side File Chunking Engine
-
-* [x] **Step 5.1:** Create `apps/desktop/src/core/uploadEngine.ts`. Implement a file parsing loop that reads on-disk storage structures via Tauri's `tauri-plugin-fs` system binary file reading interface.
-* [x] **Step 5.2:** Build an extraction routine that breaks files down into consecutive binary blocks of ` Uint8Array` allocations matching a uniform chunk size configuration value.
-* [x] **Step 5.3:** Connect the output stream of the file picking interfaces to the `uploadEngine.ts` workflow module. Ensure file assets use chunked streaming uploads rather than single-shot HTTP POST requests.
-* [x] **Verification:** Trigger a file upload trace path from the desktop UI layout and ensure large attachments are uploaded successfully as tracked chunks.
+* [ ] **Step 4.1:** Create `apps/desktop/src/modules/canvas/hooks/useCanvasAssets.ts`. Build an on-disk binary interception routine targeting the canvas resource management pipeline (`onAssetUpload`).
+* [ ] **Step 4.2:** When an image drop event is captured on the active viewport area, intercept the raw stream bytes, hash the signature via SHA-256, and duplicate the file asset cleanly into the secure workspace folder using `tauri-plugin-fs`.
+* [ ] **Step 4.3:** If the calculated file signature match is missing from the local layout registry, execute an insert statement against `local_files` with `reference_count = 1`. Otherwise, execute an entry increment against the reference column.
+* [ ] **Step 4.4:** Replace the canvas resource asset locator reference directly inside the tldraw state context with a safe local address protocol mapping pointer (`tauri://localhost/media/[HASH]`), guaranteeing complete offline file lookups.
+* [ ] **Verification:** Turn off the active internet connection network links entirely. Drop a local image file onto the infinite canvas workspace area. Confirm that the image loads and is stored successfully within the active workspace.
 
 ---
 
 ## 3. Global Testing Strategy
 
-* **Server Crash Mid-Push Recovery:**
-* *Action:* Initialize a push synchronization payload sequence. Introduce an explicit execution fault loop inside `apps/backend/src/routes/sync.ts` halfway through processing.
-* *Expected:* The backend database logs an absolute transaction rollback. Validate that no partial database attributes or broken relational tables exist on the Postgres server instance.
+* **Granular Shape Delta Sync Verification:**
+* *Action:* Construct a canvas workspace populated with 50 distinct vector drawing layers. Modify a single vector item's outline path or positioning coordinates on the view panel surface.
+* *Expected:* Check the background update pipeline log. Confirm that the system submits only the single modified shape row chunk during the sync synchronization pass rather than the entire canvas document block.
 
 
-* **Sudden Window Termination Preservation:**
-* *Action:* Trigger a sequence of intense rapid state modifications across task items inside the UI view, then kill the Tauri window thread immediately using a system signal (`kill -9`).
-* *Expected:* Reopen the application shell and ensure the local SQLite database file state aligns with the last memory layout changes, verifying the write-through architecture.
+* **Airgapped Protocol Resolution Verification:**
+* *Action:* Restart the Tauri compilation client with an airgapped internet link configuration. Launch a network traffic inspector alongside the application instance process.
+* *Expected:* Navigate into the notebook module workspace. Ensure the trace logs capture absolutely zero requests targeting unlisted remote subdomains or external tracking services.
 
 
-* **Network Interruption Chunk Resilience:**
-* *Action:* Initiate a file upload, then disconnect the internet network interface card during chunk transmission. Reconnect the network link shortly after.
-* *Expected:* The streaming client engine recovers gracefully without restarting the entire file upload workflow from scratch.
-
+* **Concurrent Local Storage Write Serialization Verification:**
+* *Action:* Generate complex drawing paths across multiple visual boundaries to produce high-frequency parallel write events directed at the workspace database.
+* *Expected:* Ensure the local SQLite database file handles concurrent transaction entries gracefully without throwing database lock exceptions or dropping asset items.

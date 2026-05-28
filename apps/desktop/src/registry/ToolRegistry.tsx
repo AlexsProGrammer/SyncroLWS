@@ -92,6 +92,16 @@ function IconProject({ className }: { className?: string }): React.ReactElement 
   );
 }
 
+function IconCanvas({ className }: { className?: string }): React.ReactElement {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M7 17 L10 12 L13 15 L15 11 L17 14" />
+      <circle cx="7.5" cy="8.5" r="1.5" />
+    </svg>
+  );
+}
+
 // ── Icon registry ─────────────────────────────────────────────────────────────
 
 const iconMap: Record<string, React.FC<{ className?: string }>> = {
@@ -104,6 +114,7 @@ const iconMap: Record<string, React.FC<{ className?: string }>> = {
   habit: IconHabit,
   bookmark: IconBookmark,
   project: IconProject,
+  canvas: IconCanvas,
 };
 
 // ── Manifest type ─────────────────────────────────────────────────────────────
