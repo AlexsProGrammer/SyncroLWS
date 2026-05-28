@@ -304,3 +304,138 @@ pub fn clear_profile_data(app: tauri::AppHandle, uuid: String) -> Result<(), Str
     println!("[profile] cleared all data for: {uuid}");
     Ok(())
 }
+
+// ── Analytics: CSV Stream Importer ───────────────────────────────────────────
+
+/// Streams a CSV file row-by-row into the analytics sandbox tables inside the
+/// workspace SQLite database at `db_path`, using the native Rust `csv` crate
+/// so the entire operation runs off the JS/UI thread.
+///
+/// * Headers are extracted from the CSV first row.
+/// * Data rows are collected into chunks of 5 000 and flushed inside explicit
+///   `BEGIN` / `COMMIT` transactions to keep I/O efficient.
+/// * Cells are stored as JSON arrays (e.g. `["val1","val2",…]`) in the `cells`
+///   TEXT column — matching the schema defined in Phase 1.
+/// * On stream exhaustion the `analytics_datasets` row is upserted with the
+///   total row count and serialised header list.
+///
+/// Returns the total number of data rows written (header row excluded).
+///
+/// Frontend: `invoke('stream_csv_to_sqlite', { filePath, datasetId, dbPath })`
+#[tauri::command]
+pub async fn stream_csv_to_sqlite(
+    file_path: String,
+    dataset_id: String,
+    db_path: String,
+) -> Result<u64, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        // ── Validate file path ─────────────────────────────────────────────
+        let csv_path = std::path::Path::new(&file_path);
+        if !csv_path.exists() {
+            return Err(format!("[analytics] CSV file not found: {file_path}"));
+        }
+
+        // Derive a human-readable dataset name from the file stem
+        let dataset_name = csv_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Dataset")
+            .to_string();
+
+        // ── Open streaming CSV reader ──────────────────────────────────────
+        let mut rdr = csv::Reader::from_path(csv_path)
+            .map_err(|e| format!("[analytics] Failed to open CSV: {e}"))?;
+
+        // Extract and serialise headers from the first row
+        let headers: Vec<String> = rdr
+            .headers()
+            .map_err(|e| format!("[analytics] Failed to read CSV headers: {e}"))?
+            .iter()
+            .map(|h| h.to_string())
+            .collect();
+
+        let headers_json = serde_json::to_string(&headers)
+            .map_err(|e| format!("[analytics] Failed to serialise headers: {e}"))?;
+
+        // ── Open direct SQLite connection to the workspace database ────────
+        // WAL mode allows the sqlx pool (tauri-plugin-sql) to keep reading
+        // while this writer is active. busy_timeout avoids SQLITE_BUSY when
+        // sqlx momentarily holds a write lock.
+        let conn = rusqlite::Connection::open(&db_path)
+            .map_err(|e| format!("[analytics] Failed to open workspace DB ({db_path}): {e}"))?;
+
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+            .map_err(|e| format!("[analytics] Failed to set PRAGMA: {e}"))?;
+
+        // ── Streaming batch-insert loop ────────────────────────────────────
+        const BATCH_SIZE: usize = 5_000;
+        let mut total_rows: u64 = 0;
+        // Each entry is (row_index, cells_json)
+        let mut pending: Vec<(u64, String)> = Vec::with_capacity(BATCH_SIZE);
+
+        // Helper: flush pending rows inside a single transaction
+        let flush_batch = |conn: &rusqlite::Connection,
+                           pending: &mut Vec<(u64, String)>,
+                           dataset_id: &str|
+         -> Result<(), String> {
+            if pending.is_empty() {
+                return Ok(());
+            }
+            conn.execute_batch("BEGIN;")
+                .map_err(|e| format!("[analytics] BEGIN failed: {e}"))?;
+            {
+                let mut stmt = conn
+                    .prepare_cached(
+                        "INSERT INTO analytics_raw_records \
+                         (dataset_id, row_index, cells) VALUES (?1, ?2, ?3)",
+                    )
+                    .map_err(|e| format!("[analytics] Failed to prepare INSERT: {e}"))?;
+                for (row_index, cells_json) in pending.iter() {
+                    stmt.execute(rusqlite::params![dataset_id, row_index, cells_json])
+                        .map_err(|e| {
+                            format!("[analytics] Failed to insert row {row_index}: {e}")
+                        })?;
+                }
+            }
+            conn.execute_batch("COMMIT;")
+                .map_err(|e| format!("[analytics] COMMIT failed: {e}"))?;
+            pending.clear();
+            Ok(())
+        };
+
+        for result in rdr.records() {
+            let record = result.map_err(|e| {
+                format!("[analytics] CSV parse error at row {total_rows}: {e}")
+            })?;
+
+            // Serialise the cell slice as a compact JSON array string
+            let cells: Vec<&str> = record.iter().collect();
+            let cells_json = serde_json::to_string(&cells)
+                .map_err(|e| format!("[analytics] Failed to serialise row {total_rows}: {e}"))?;
+
+            total_rows += 1;
+            pending.push((total_rows, cells_json));
+
+            if pending.len() >= BATCH_SIZE {
+                flush_batch(&conn, &mut pending, &dataset_id)?;
+            }
+        }
+
+        // Flush the final partial batch
+        flush_batch(&conn, &mut pending, &dataset_id)?;
+
+        // ── Upsert the dataset metadata row ───────────────────────────────
+        conn.execute(
+            "INSERT OR REPLACE INTO analytics_datasets \
+             (id, name, row_count, headers, created_at) \
+             VALUES (?1, ?2, ?3, ?4, datetime('now'))",
+            rusqlite::params![dataset_id, dataset_name, total_rows as i64, headers_json],
+        )
+        .map_err(|e| format!("[analytics] Failed to upsert analytics_datasets: {e}"))?;
+
+        println!("[analytics] imported {total_rows} rows → dataset {dataset_id}");
+        Ok(total_rows)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking failed: {e}"))?
+}

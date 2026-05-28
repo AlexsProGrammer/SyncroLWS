@@ -54,12 +54,12 @@
 
 #### Phase 2: Rust-Powered Background CSV Stream Importer
 
-* [ ] **Step 2.1:** In `apps/desktop/src-tauri/src/commands.rs`, introduce a new cross-platform command function `stream_csv_to_sqlite(file_path: String, dataset_id: String, db_path: String) -> Result<u64, String>`.
-* [ ] **Step 2.2:** Inside this function, open a streaming reader pointing to `file_path` using the native Rust `csv::Reader` crate interface. Extract the first row automatically to map collection headers.
-* [ ] **Step 2.3:** Open a connection directly to the profile workspace database matching `db_path`. Build a chunk collection loop that aggregates parsed entries into discrete vectorized record slots.
-* [ ] **Step 2.4:** Every 5,000 row intervals, wrap database writes inside an explicit transaction execution block (`BEGIN TRANSACTION` / `COMMIT`). Format individual cell blocks as clean stringified arrays before pushing them to the SQLite statement engine. Update `analytics_datasets` upon stream exhaustion to reflect total rows and headers.
-* [ ] **Step 2.5:** Ensure the command is correctly bound to the execution harness setup within `apps/desktop/src-tauri/src/main.rs`.
-* [ ] **Verification:** Run `cd apps/desktop/src-tauri && cargo check` to confirm compiling integrity of your native background workers.
+* [x] **Step 2.1:** In `apps/desktop/src-tauri/src/commands.rs`, introduce a new cross-platform command function `stream_csv_to_sqlite(file_path: String, dataset_id: String, db_path: String) -> Result<u64, String>`.
+* [x] **Step 2.2:** Inside this function, open a streaming reader pointing to `file_path` using the native Rust `csv::Reader` crate interface. Extract the first row automatically to map collection headers.
+* [x] **Step 2.3:** Open a connection directly to the profile workspace database matching `db_path`. Build a chunk collection loop that aggregates parsed entries into discrete vectorized record slots.
+* [x] **Step 2.4:** Every 5,000 row intervals, wrap database writes inside an explicit transaction execution block (`BEGIN TRANSACTION` / `COMMIT`). Format individual cell blocks as clean stringified arrays before pushing them to the SQLite statement engine. Update `analytics_datasets` upon stream exhaustion to reflect total rows and headers.
+* [x] **Step 2.5:** Ensure the command is correctly bound to the execution harness setup within `apps/desktop/src-tauri/src/main.rs`.
+* [x] **Verification:** Run `cd apps/desktop/src-tauri && cargo check` to confirm compiling integrity of your native background workers.
 
 #### Phase 3: Module Assembly & Dynamic Tool Registration
 
