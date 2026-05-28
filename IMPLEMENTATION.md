@@ -59,11 +59,11 @@
 
 #### Phase 3: Shape-Level Granular Event Interception
 
-* [ ] **Step 3.1:** Create `apps/desktop/src/modules/canvas/hooks/useTldrawStore.ts`. Implement a custom React hook that accepts the active canvas session context handle.
-* [ ] **Step 3.2:** Wire a tldraw change notification handler using `store.listen()`. Intercept individual node changes and break the payload mutations down into discrete operation classes (`added`, `updated`, `removed`).
-* [ ] **Step 3.3:** Map canvas mutations directly into local storage statements using Drizzle ORM. Writes must run queries against the local `entity_aspects` workspace structure, mapping shape payloads into the `data` json column and toggling database state flags to `dirty = 1`.
-* [ ] **Step 3.4:** For node deletion operations, convert the execution trace into an insert statement running against the `sync_tombstones` tracking schema to preserve delete tracking across synchronized devices.
-* [ ] **Verification:** Open the newly created infinite canvas view. Draw several basic shapes on the board view area. Query the database directly via terminal console and check that rows matching `aspect_type = 'canvas_shape'` are populated.
+* [x] **Step 3.1:** Create `apps/desktop/src/modules/canvas/hooks/useTldrawStore.ts`. Implement a custom React hook that accepts the active canvas session context handle.
+* [x] **Step 3.2:** Wire a tldraw change notification handler using `store.listen()`. Intercept individual node changes and break the payload mutations down into discrete operation classes (`added`, `updated`, `removed`).
+* [x] **Step 3.3:** Map canvas mutations directly into local storage statements using Drizzle ORM. Writes must run queries against the local `entity_aspects` workspace structure, mapping shape payloads into the `data` json column and toggling database state flags to `dirty = 1`.
+* [x] **Step 3.4:** For node deletion operations, convert the execution trace into an insert statement running against the `sync_tombstones` tracking schema to preserve delete tracking across synchronized devices.
+* [x] **Verification:** Open the newly created infinite canvas view. Draw several basic shapes on the board view area. Query the database directly via terminal console and check that rows matching `aspect_type = 'canvas_shape'` are populated.
 
 #### Phase 4: Offline Content-Addressable Asset Layer
 
