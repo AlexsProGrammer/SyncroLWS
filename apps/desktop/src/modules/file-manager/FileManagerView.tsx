@@ -11,6 +11,7 @@ import { getWorkspaceDB, getCurrentProfileId, getCurrentWorkspaceId } from '@/co
 import { eventBus } from '@/core/events';
 import { useEntityEvents } from '@/ui/hooks/useEntityEvents';
 import { createEntity, softDeleteEntity, listByAspect } from '@/core/entityStore';
+import { uploadFileChunked } from '@/core/uploadEngine';
 import type { FileAttachmentAspectData } from '@syncrohws/shared-types';
 import { Button } from '@/ui/components/button';
 import { Badge } from '@/ui/components/badge';
@@ -201,6 +202,11 @@ export function FileManagerView({ toolInstanceId: _toolInstanceId }: { toolInsta
                  VALUES (?, ?, ?, ?, 1, ?)`,
               [hash, filePath, mime, file.size, now],
             );
+
+            // Step 5.3: Stream to backend via chunked upload pipeline (best-effort).
+            // Failures here do not abort the local write — sync will retry later.
+            void uploadFileChunked({ path: filePath, hash, mimeType: mime, totalSize: file.size })
+              .catch((err) => console.warn('[file-manager] chunked upload failed:', err));
           }
 
           // Create the file_attachment entity via the hybrid API so events fire.

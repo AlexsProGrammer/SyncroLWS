@@ -68,10 +68,10 @@
 
 #### Phase 5: Client-Side File Chunking Engine
 
-* [ ] **Step 5.1:** Create `apps/desktop/src/core/uploadEngine.ts`. Implement a file parsing loop that reads on-disk storage structures via Tauri's `tauri-plugin-fs` system binary file reading interface.
-* [ ] **Step 5.2:** Build an extraction routine that breaks files down into consecutive binary blocks of ` Uint8Array` allocations matching a uniform chunk size configuration value.
-* [ ] **Step 5.3:** Connect the output stream of the file picking interfaces to the `uploadEngine.ts` workflow module. Ensure file assets use chunked streaming uploads rather than single-shot HTTP POST requests.
-* [ ] **Verification:** Trigger a file upload trace path from the desktop UI layout and ensure large attachments are uploaded successfully as tracked chunks.
+* [x] **Step 5.1:** Create `apps/desktop/src/core/uploadEngine.ts`. Implement a file parsing loop that reads on-disk storage structures via Tauri's `tauri-plugin-fs` system binary file reading interface.
+* [x] **Step 5.2:** Build an extraction routine that breaks files down into consecutive binary blocks of ` Uint8Array` allocations matching a uniform chunk size configuration value.
+* [x] **Step 5.3:** Connect the output stream of the file picking interfaces to the `uploadEngine.ts` workflow module. Ensure file assets use chunked streaming uploads rather than single-shot HTTP POST requests.
+* [x] **Verification:** Trigger a file upload trace path from the desktop UI layout and ensure large attachments are uploaded successfully as tracked chunks.
 
 ---
 
