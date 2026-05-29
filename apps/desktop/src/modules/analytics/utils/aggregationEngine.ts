@@ -1,4 +1,4 @@
-import type { AggFn, AxisConfig, PreprocessConfig } from '../components/AxisConfigurator';
+import type { AggFn, AxisConfig, CategoryMapping, PreprocessConfig, YSeriesItem } from '../components/AxisConfigurator';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -38,18 +38,43 @@ export interface ChartPoint {
 // ── SQL builder ────────────────────────────────────────────────────────────────
 
 /**
+ * Generates a SQLite CASE expression that maps categorical string values to
+ * their configured numeric weights.
+ *
+ * Keys are sanitised by escaping single-quote characters (SQL standard) to
+ * prevent injection risk in CASE WHEN literals. Weights are serialised via
+ * `Number().toFixed(1)` — always a safe float string, never user input.
+ */
+function compileCategoricalExpr(colIndex: number, mapping: CategoryMapping): string {
+  const whenClauses = Object.entries(mapping)
+    .map(([key, weight]) => {
+      const safeKey = key.replace(/'/g, "''");
+      const safeWeight = Number(weight).toFixed(1);
+      return `WHEN '${safeKey}' THEN ${safeWeight}`;
+    })
+    .join(' ');
+  return `CASE json_extract(cells, '$[${colIndex}]') ${whenClauses} ELSE 0.0 END`;
+}
+
+/**
  * Produces the SQLite aggregate expression for a single Y column.
  *
- * `json_extract(cells, '$[N]')` dereferences the Nth element of the JSON
- * array stored in the `cells` TEXT column. For AVG and SUM the extracted
- * string is cast to REAL; COUNT needs no cast because it counts non-NULL
- * occurrences rather than summing raw values.
+ * For numeric mode: `json_extract(cells, '$[N]')` dereferences the Nth element
+ * of the JSON array stored in the `cells` TEXT column. For AVG and SUM the
+ * extracted string is cast to REAL; COUNT counts non-NULL occurrences.
+ *
+ * For categorical mode: delegates to `compileCategoricalExpr` to build a
+ * polymorphic CASE expression that translates string codes to numeric weights
+ * before aggregation. Keys are SQL-escaped; weights are always safe floats.
  */
-function aggExpr(fn: AggFn, colIndex: number): string {
-  if (fn === 'COUNT') {
+function aggExpr(s: YSeriesItem, colIndex: number): string {
+  if (s.mode === 'categorical') {
+    return `${s.agg}(${compileCategoricalExpr(colIndex, s.mappingRules)})`;
+  }
+  if (s.agg === 'COUNT') {
     return `CAST(COUNT(json_extract(cells, '$[${colIndex}]')) AS REAL)`;
   }
-  return `CAST(${fn}(CAST(json_extract(cells, '$[${colIndex}]') AS REAL)) AS REAL)`;
+  return `CAST(${s.agg}(CAST(json_extract(cells, '$[${colIndex}]') AS REAL)) AS REAL)`;
 }
 
 /**
@@ -119,7 +144,7 @@ export function buildAggregationQuery(
   const yAggEntries = config.ySeries
     .map((s, i) =>
       s.colId !== null
-        ? `  ${aggExpr(s.agg, s.colId)} AS y_val_${i}`
+        ? `  ${aggExpr(s, s.colId)} AS y_val_${i}`
         : null,
     )
     .filter((e): e is string => e !== null);

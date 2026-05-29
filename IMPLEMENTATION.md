@@ -49,11 +49,11 @@
 
 #### Phase 3: Polymorphic CASE-Statement SQL Compiler
 
-* [ ] **Step 3.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, write a dedicated macro generator helper method named `compileCategoricalExpr(colIndex: number, mapping: CategoryMapping): string`.
-* [ ] **Step 3.2:** Inside `compileCategoricalExpr`, map across user-defined dictionary pairs. Convert individual properties cleanly into sequential text condition parameters formatting string outputs using explicit query matching constraints: `WHEN '${key}' THEN ${weight}`.
-* [ ] **Step 3.3:** Construct the final inline conditional block string architecture, closing statements with explicit defaults: `CASE json_extract(cells, '$[${colIndex}]') [WHEN CLUSTER] ELSE 0.0 END`.
-* [ ] **Step 3.4:** Rework the core method `aggExpr` inside the aggregation engine file. Check if the series item configuration parameter `mode === 'categorical'` evaluates to true. If active, wrap the generated conditional block string container inside the designated mathematical function parameter wrapper (`AVG`, `SUM`, `COUNT`), casting variables directly to `REAL`.
-* [ ] **Verification:** Open a local test file context. Pass configuration parameters containing mapping definitions `{ 'H': 1, 'W': 0 }` into `buildAggregationQuery` and ensure the generated statement matches: `AVG(CASE json_extract(cells, '$[1]') WHEN 'H' THEN 1.0 WHEN 'W' THEN 0.0 ELSE 0.0 END)`.
+* [x] **Step 3.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, write a dedicated macro generator helper method named `compileCategoricalExpr(colIndex: number, mapping: CategoryMapping): string`.
+* [x] **Step 3.2:** Inside `compileCategoricalExpr`, map across user-defined dictionary pairs. Convert individual properties cleanly into sequential text condition parameters formatting string outputs using explicit query matching constraints: `WHEN '${key}' THEN ${weight}`.
+* [x] **Step 3.3:** Construct the final inline conditional block string architecture, closing statements with explicit defaults: `CASE json_extract(cells, '$[${colIndex}]') [WHEN CLUSTER] ELSE 0.0 END`.
+* [x] **Step 3.4:** Rework the core method `aggExpr` inside the aggregation engine file. Check if the series item configuration parameter `mode === 'categorical'` evaluates to true. If active, wrap the generated conditional block string container inside the designated mathematical function parameter wrapper (`AVG`, `SUM`, `COUNT`), casting variables directly to `REAL`.
+* [x] **Verification:** Open a local test file context. Pass configuration parameters containing mapping definitions `{ 'H': 1, 'W': 0 }` into `buildAggregationQuery` and ensure the generated statement matches: `AVG(CASE json_extract(cells, '$[1]') WHEN 'H' THEN 1.0 WHEN 'W' THEN 0.0 ELSE 0.0 END)`.
 
 #### Phase 4: Axis Configurator Integration Panel
 
