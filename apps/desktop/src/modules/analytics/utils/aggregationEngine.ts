@@ -13,9 +13,8 @@ export interface AggRow {
  * Cell values arrive as raw strings so JavaScript can apply regex transforms.
  */
 export interface RawRow {
-  x_val:  string | null;
-  y1_raw: string | null;
-  y2_raw: string | null;
+  x_val: string | null;
+  [key: string]: string | null;
 }
 
 /**
@@ -80,11 +79,43 @@ export function buildAggregationQuery(
   datasetId: string,
   config: AxisConfig,
 ): QueryDescriptor | null {
-  // Step 2.1: guard — nothing to query without an X column or any Y series.
   if (config.xCol === null || config.ySeries.length === 0) return null;
 
-  // Step 2.2: build one aggregated expression per non-null series,
-  // aliased as y_val_${index} so mapToChartPoints can read them by index.
+  const xExpr = `json_extract(cells, '$[${config.xCol}]')`;
+
+  // Switch to the raw JS pipeline when any preprocessing config is enabled.
+  const anyPreprocess =
+    (config.xPreprocess?.enabled ?? false) ||
+    config.ySeries.some((s) => s.preprocess?.enabled ?? false);
+
+  if (anyPreprocess) {
+    // Fetch raw text cells so the JS pipeline can apply regex + formula transforms.
+    const yRawEntries = config.ySeries
+      .map((s, i) =>
+        s.colId !== null
+          ? `  json_extract(cells, '$[${s.colId}]') AS y_raw_${i}`
+          : null,
+      )
+      .filter((e): e is string => e !== null);
+
+    if (yRawEntries.length === 0) return null;
+
+    const sql = [
+      'SELECT',
+      `  ${xExpr} AS x_val,`,
+      yRawEntries.join(',\n'),
+      'FROM analytics_raw_records',
+      'WHERE dataset_id = ?',
+      `  AND ${xExpr} IS NOT NULL`,
+      `  AND ${xExpr} != ''`,
+      `ORDER BY ${xExpr}`,
+      'LIMIT 10000',
+    ].join('\n');
+
+    return { mode: 'raw', sql, params: [datasetId] };
+  }
+
+  // Standard aggregated path — let SQLite handle grouping.
   const yAggEntries = config.ySeries
     .map((s, i) =>
       s.colId !== null
@@ -93,12 +124,8 @@ export function buildAggregationQuery(
     )
     .filter((e): e is string => e !== null);
 
-  // If every series still has colId === null there is nothing to aggregate.
   if (yAggEntries.length === 0) return null;
 
-  const xExpr = `json_extract(cells, '$[${config.xCol}]')`;
-
-  // Step 2.3: inject the dynamic column list into the SELECT statement.
   const sql = [
     'SELECT',
     `  ${xExpr} AS x_val,`,
@@ -260,13 +287,11 @@ export function applyLocalPreprocessing(
   config: AxisConfig,
   _headers: string[],
 ): ChartPoint[] {
-  // Phase 2 will reimplement multi-series JS preprocessing pipeline.
-  // For now, only the X preprocessing path is retained; Y series
-  // aggregation will be wired in Phase 2.
   const sortKeyMap = new Map<string, number>();
-  const xGroups = new Map<string, number>();
+  const xGroups = new Map<string, { sums: number[]; counts: number[] }>();
 
   for (const r of rawRows) {
+    // --- Transform X ---
     let xKey: string;
     if (config.xPreprocess?.enabled) {
       const n = transformCell(r.x_val, config.xPreprocess);
@@ -282,10 +307,34 @@ export function applyLocalPreprocessing(
       if (ts !== null) sortKeyMap.set(xKey, ts);
     }
 
-    xGroups.set(xKey, (xGroups.get(xKey) ?? 0) + 1);
+    if (!xGroups.has(xKey)) {
+      xGroups.set(xKey, {
+        sums: new Array<number>(config.ySeries.length).fill(0),
+        counts: new Array<number>(config.ySeries.length).fill(0),
+      });
+    }
+    const group = xGroups.get(xKey)!;
+
+    // --- Transform each Y series ---
+    config.ySeries.forEach((s, i) => {
+      if (s.colId === null) return;
+      const n = transformCell(r[`y_raw_${i}`], s.preprocess);
+      if (n !== null) {
+        group.sums[i] = (group.sums[i] ?? 0) + n;
+        group.counts[i] = (group.counts[i] ?? 0) + 1;
+      }
+    });
   }
 
-  const points: ChartPoint[] = Array.from(xGroups.keys()).map((x) => ({ x }));
+  const points: ChartPoint[] = Array.from(xGroups.entries()).map(([x, { sums, counts }]) => {
+    const pt: ChartPoint = { x };
+    config.ySeries.forEach((s, i) => {
+      if (s.colId !== null) {
+        pt[`y_${i}`] = aggregateValues(s.agg, sums[i] ?? 0, counts[i] ?? 0);
+      }
+    });
+    return pt;
+  });
 
   points.sort((a, b) => {
     if (config.xTimestampFormat) {

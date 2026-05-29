@@ -57,7 +57,7 @@ export interface AggRow {
 ```
 
 
-* [ ] **Verification:** Run `cd apps/desktop && npx tsc --noEmit` and confirm that type compilation errors are limited strictly to unused references in `AnalyticsDashboard.tsx`.
+* [x] **Verification:** Run `cd apps/desktop && npx tsc --noEmit` and confirm that type compilation errors are limited strictly to unused references in `AnalyticsDashboard.tsx`.
 
 #### Phase 2: Dynamic SQL Generation & Record Mapping
 
@@ -65,7 +65,7 @@ export interface AggRow {
 * [x] **Step 2.2:** Inside `buildAggregationQuery`, replace the static `y1Expr` and `y2Expr` template strings. Map over the `config.ySeries` array where `colId !== null`, passing the individual metrics to `aggExpr()` and mapping them to dynamic projection aliases matching `y_val_${index}`.
 * [x] **Step 2.3:** Update the `SELECT` query statement to inject the dynamic aggregated column array string entries separated by clean comma tokens.
 * [x] **Step 2.4:** In `mapToChartPoints`, rewrite the mapping loop to dynamically scan the fields of `AggRow`. For each array entry found in the series template configuration, read `r[`y_val_${index}`]` and assign the numeric values directly into the result object using the charting index key `y_${index}`.
-* [ ] **Verification:** Execute the type checking command `npx tsc --noEmit` within `apps/desktop` to confirm utility function signature compliance.
+* [x] **Verification:** Execute the type checking command `npx tsc --noEmit` within `apps/desktop` to confirm utility function signature compliance.
 
 #### Phase 3: Dynamic Multi-Series Axis Configurator UI
 
@@ -80,16 +80,16 @@ export interface AggRow {
 
 
 * [x] **Step 3.4:** Add an "Add Series Metric" icon button row component directly at the bottom boundary of the list tracker view. When clicked, append a fresh `YSeriesItem` object to the collection array with default values (`colId: null`, `agg: 'AVG'`, `drawType: 'bar'`, `fillHex: '#6366f1'`).
-* [ ] **Verification:** Open the Analytics module dashboard workspace in the Tauri application window. Click the "Add Series Metric" selector multiple times and check that the configuration rows spawn independently in the control panel space.
+* [x] **Verification:** Open the Analytics module dashboard workspace in the Tauri application window. Click the "Add Series Metric" selector multiple times and check that the configuration rows spawn independently in the control panel space.
 
 #### Phase 4: Polymorphic Visualization Layer Compilation
 
-* [ ] **Step 4.1:** Open `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx`. Update the view validation conditions to ensure a dataset is selected and `axisConfig.ySeries.some(s => s.colId !== null)` evaluates to true before attempting chart compilation.
-* [ ] **Step 4.2:** Import the component token item `Area` from the local `recharts` package workspace at the top header area of the file.
-* [ ] **Step 4.3:** Inside the `<ComposedChart>` node, delete the hardcoded single `<Bar />` and secondary `<Line />` layout components.
-* [ ] **Step 4.4:** Replace them with a runtime loop mapping directly over `axisConfig.ySeries`. For each item where `colId !== null`, inspect the `drawType` property and conditionally mount the corresponding `<Bar />`, `<Line />`, or `<Area />` component dynamically.
-* [ ] **Step 4.5:** Bind the Recharts configuration properties for each mapped element: set `dataKey` to `y_${index}`, set the name attribute to match `${s.agg}(${headers[s.colId]})`, and apply `fill={s.fillHex}` or `stroke={s.fillHex}` fields based on the selected drawing style.
-* [ ] **Verification:** Run a full project-wide code verification trace via `npm run build` or `npx tsc --noEmit` from the desktop repository root to ensure type safety.
+* [x] **Step 4.1:** Open `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx`. Update the view validation conditions to ensure a dataset is selected and `axisConfig.ySeries.some(s => s.colId !== null)` evaluates to true before attempting chart compilation.
+* [x] **Step 4.2:** Import the component token item `Area` from the local `recharts` package workspace at the top header area of the file.
+* [x] **Step 4.3:** Inside the `<ComposedChart>` node, delete the hardcoded single `<Bar />` and secondary `<Line />` layout components.
+* [x] **Step 4.4:** Replace them with a runtime loop mapping directly over `axisConfig.ySeries`. For each item where `colId !== null`, inspect the `drawType` property and conditionally mount the corresponding `<Bar />`, `<Line />`, or `<Area />` component dynamically.
+* [x] **Step 4.5:** Bind the Recharts configuration properties for each mapped element: set `dataKey` to `y_${index}`, set the name attribute to match `${s.agg}(${headers[s.colId]})`, and apply `fill={s.fillHex}` or `stroke={s.fillHex}` fields based on the selected drawing style.
+* [x] **Verification:** Run a full project-wide code verification trace via `npm run build` or `npx tsc --noEmit` from the desktop repository root to ensure type safety.
 
 ---
 

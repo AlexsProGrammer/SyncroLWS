@@ -505,6 +505,9 @@ async function runWorkspaceMigrations(db: Database): Promise<void> {
   // ── Analytics sandbox indexes (Phase 1) ───────────────────────────────────
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_raw_records_dataset ON analytics_raw_records(dataset_id);`);
 
+  // ── Analytics axis config persistence ────────────────────────────────────
+  await ensureColumn(db, 'analytics_datasets', 'axis_config', '`axis_config` TEXT');
+
   console.log('[db] Workspace migrations complete');
 }
 

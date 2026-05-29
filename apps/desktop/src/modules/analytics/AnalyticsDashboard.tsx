@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   ComposedChart,
   Bar,
   Line,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -19,6 +20,7 @@ import type { AxisConfig } from './components/AxisConfigurator';
 import { buildAggregationQuery, mapToChartPoints, applyLocalPreprocessing } from './utils/aggregationEngine';
 import type { AggRow, RawRow, ChartPoint } from './utils/aggregationEngine';
 import type { ToolViewProps } from '@/registry/ToolRegistry';
+import { eventBus } from '@/core/events';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -40,7 +42,7 @@ function parseHeaders(raw: string): string[] {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function AnalyticsDashboardView({ toolInstanceId: _toolInstanceId }: ToolViewProps): React.ReactElement {
+export function AnalyticsDashboardView({ toolInstanceId }: ToolViewProps): React.ReactElement {
   const [datasets, setDatasets] = useState<DatasetRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -48,6 +50,10 @@ export function AnalyticsDashboardView({ toolInstanceId: _toolInstanceId }: Tool
   const [chartPoints, setChartPoints] = useState<ChartPoint[]>([]);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [isQuerying, setIsQuerying] = useState(false);
+
+  // null = currently loading (block saves); string = JSON of last persisted config
+  const lastSavedConfigRef = useRef<string | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
 
@@ -105,7 +111,7 @@ export function AnalyticsDashboardView({ toolInstanceId: _toolInstanceId }: Tool
       } else {
         // Standard aggregated path: let SQLite handle grouping.
         const rows = await db.select<AggRow[]>(built.sql, [...built.params]);
-        setChartPoints(mapToChartPoints(rows));
+        setChartPoints(mapToChartPoints(rows, axisConfig));
       }
     } catch (err) {
       console.error('[module:analytics] Aggregation query failed:', err);
@@ -117,12 +123,111 @@ export function AnalyticsDashboardView({ toolInstanceId: _toolInstanceId }: Tool
     }
   }, [selectedId, axisConfig, datasets]);
 
-  // Reset axis state when the active dataset changes
+  // Load the persisted axis config from SQLite whenever the selected dataset changes.
+  const loadConfig = useCallback(async (datasetId: string) => {
+    try {
+      const db = getWorkspaceDB();
+      // Prefer the entity_aspect row — it may have been synced from another device.
+      if (toolInstanceId) {
+        const aspects = await db.select<{ data: string }[]>(
+          `SELECT data FROM entity_aspects
+            WHERE entity_id = ? AND aspect_type = 'analytics_config'
+              AND IFNULL(tool_instance_id, '') = ?
+              AND deleted_at IS NULL
+            LIMIT 1`,
+          [datasetId, toolInstanceId],
+        );
+        if (aspects.length > 0 && aspects[0]) {
+          const config = JSON.parse(aspects[0].data) as AxisConfig;
+          lastSavedConfigRef.current = JSON.stringify(config);
+          setAxisConfig(config);
+          return;
+        }
+      }
+      // Fall back to the inline axis_config column.
+      const rows = await db.select<{ axis_config: string | null }[]>(
+        `SELECT axis_config FROM analytics_datasets WHERE id = ? LIMIT 1`,
+        [datasetId],
+      );
+      const raw = rows[0]?.axis_config ?? null;
+      const config = raw ? (JSON.parse(raw) as AxisConfig) : DEFAULT_AXIS_CONFIG;
+      lastSavedConfigRef.current = JSON.stringify(config);
+      setAxisConfig(config);
+    } catch (err) {
+      console.error('[module:analytics] Failed to load axis config:', err);
+      lastSavedConfigRef.current = JSON.stringify(DEFAULT_AXIS_CONFIG);
+      setAxisConfig(DEFAULT_AXIS_CONFIG);
+    }
+  }, [toolInstanceId]);
+
+  // Persist axis config to SQLite (and queue a server sync) on every change.
+  const saveConfig = useCallback(async (datasetId: string, config: AxisConfig) => {
+    try {
+      const db = getWorkspaceDB();
+      const now = new Date().toISOString();
+      const configJson = JSON.stringify(config);
+
+      // 1. Fast local cache — analytics_datasets.axis_config
+      await db.execute(
+        `UPDATE analytics_datasets SET axis_config = ? WHERE id = ?`,
+        [configJson, datasetId],
+      );
+
+      // 2. entity_aspects row — dirty=1 so the sync engine pushes it to the server
+      if (toolInstanceId) {
+        const existing = await db.select<{ id: string }[]>(
+          `SELECT id FROM entity_aspects
+            WHERE entity_id = ? AND aspect_type = 'analytics_config'
+              AND IFNULL(tool_instance_id, '') = ?
+            LIMIT 1`,
+          [datasetId, toolInstanceId],
+        );
+        if (existing.length > 0 && existing[0]) {
+          await db.execute(
+            `UPDATE entity_aspects SET data = ?, updated_at = ?, dirty = 1 WHERE id = ?`,
+            [configJson, now, existing[0].id],
+          );
+        } else {
+          await db.execute(
+            `INSERT INTO entity_aspects
+               (id, entity_id, aspect_type, data, tool_instance_id, sort_order,
+                created_at, updated_at, deleted_at, dirty, revision)
+             VALUES (?, ?, 'analytics_config', ?, ?, 0, ?, ?, NULL, 1, 0)`,
+            [crypto.randomUUID(), datasetId, configJson, toolInstanceId, now, now],
+          );
+        }
+        eventBus.emit('sync:dirty', undefined);
+      }
+    } catch (err) {
+      console.error('[module:analytics] Failed to persist axis config:', err);
+    }
+  }, [toolInstanceId]);
+
+  // Reset chart state and load the saved config when the selected dataset changes.
   useEffect(() => {
     setAxisConfig(DEFAULT_AXIS_CONFIG);
     setChartPoints([]);
     setQueryError(null);
-  }, [selectedId]);
+    lastSavedConfigRef.current = null; // block saves until loadConfig resolves
+    if (selectedId) {
+      void loadConfig(selectedId);
+    }
+  }, [selectedId, loadConfig]);
+
+  // Debounce-save the axis config whenever the user changes it.
+  useEffect(() => {
+    if (!selectedId || lastSavedConfigRef.current === null) return;
+    const configJson = JSON.stringify(axisConfig);
+    if (configJson === lastSavedConfigRef.current) return; // no real change
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      lastSavedConfigRef.current = configJson;
+      void saveConfig(selectedId, axisConfig);
+    }, 500);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [axisConfig, selectedId, saveConfig]);
 
   // Fire aggregation whenever runQuery reference updates (dataset or config changed)
   useEffect(() => {
@@ -133,7 +238,7 @@ export function AnalyticsDashboardView({ toolInstanceId: _toolInstanceId }: Tool
   const selectedHeaders = selected ? parseHeaders(selected.headers) : [];
 
   return (
-    <div className="flex h-full overflow-hidden bg-background">
+    <div className="flex flex-1 min-h-0 overflow-hidden bg-background">
       {/* ── Sidebar: dataset list ─────────────────────────────────────────── */}
       <aside className="w-60 flex-shrink-0 border-r border-border flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -233,10 +338,10 @@ export function AnalyticsDashboardView({ toolInstanceId: _toolInstanceId }: Tool
                 <div className="h-full flex items-center justify-center px-8">
                   <p className="text-sm text-destructive text-center">{queryError}</p>
                 </div>
-              ) : axisConfig.xCol === null || axisConfig.y1Col === null ? (
+              ) : axisConfig.xCol === null || !axisConfig.ySeries.some((s) => s.colId !== null) ? (
                 <div className="h-full flex items-center justify-center">
                   <p className="text-sm text-muted-foreground">
-                    Select X and Y1 columns above to render a chart.
+                    Select at least one Y series metric above to render a chart.
                   </p>
                 </div>
               ) : chartPoints.length === 0 ? (
@@ -249,12 +354,7 @@ export function AnalyticsDashboardView({ toolInstanceId: _toolInstanceId }: Tool
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart
                     data={chartPoints}
-                    margin={{
-                      top: 20,
-                      right: axisConfig.y2Col !== null ? 60 : 24,
-                      bottom: 28,
-                      left: 8,
-                    }}
+                    margin={{ top: 20, right: 24, bottom: 28, left: 8 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.2)" />
                     <XAxis dataKey="x" tick={{ fontSize: 11 }} />
@@ -263,33 +363,52 @@ export function AnalyticsDashboardView({ toolInstanceId: _toolInstanceId }: Tool
                       orientation="left"
                       tick={{ fontSize: 11 }}
                     />
-                    {axisConfig.y2Col !== null && (
-                      <YAxis
-                        yAxisId="secondary"
-                        orientation="right"
-                        tick={{ fontSize: 11 }}
-                      />
-                    )}
                     <Tooltip />
                     <Legend />
-                    <Bar
-                      yAxisId="primary"
-                      dataKey="y1"
-                      name={`${axisConfig.y1Agg}(${selectedHeaders[axisConfig.y1Col] ?? 'Y1'})`}
-                      fill="#6366f1"
-                      maxBarSize={60}
-                    />
-                    {axisConfig.y2Col !== null && (
-                      <Line
-                        yAxisId="secondary"
-                        type="monotone"
-                        dataKey="y2"
-                        name={`${axisConfig.y2Agg}(${selectedHeaders[axisConfig.y2Col] ?? 'Y2'})`}
-                        stroke="#f59e0b"
-                        strokeWidth={2}
-                        dot={false}
-                      />
-                    )}
+                    {/* Step 4.4 & 4.5 — polymorphic series loop */}
+                    {axisConfig.ySeries.map((s, i) => {
+                      if (s.colId === null) return null;
+                      const dataKey = `y_${i}`;
+                      const name = `${s.agg}(${selectedHeaders[s.colId] ?? String(s.colId)})`;
+                      if (s.drawType === 'bar') {
+                        return (
+                          <Bar
+                            key={i}
+                            yAxisId="primary"
+                            dataKey={dataKey}
+                            name={name}
+                            fill={s.fillHex}
+                            maxBarSize={60}
+                          />
+                        );
+                      }
+                      if (s.drawType === 'area') {
+                        return (
+                          <Area
+                            key={i}
+                            yAxisId="primary"
+                            type="monotone"
+                            dataKey={dataKey}
+                            name={name}
+                            fill={s.fillHex}
+                            stroke={s.fillHex}
+                            strokeWidth={2}
+                          />
+                        );
+                      }
+                      return (
+                        <Line
+                          key={i}
+                          yAxisId="primary"
+                          type="monotone"
+                          dataKey={dataKey}
+                          name={name}
+                          stroke={s.fillHex}
+                          strokeWidth={2}
+                          dot={false}
+                        />
+                      );
+                    })}
                   </ComposedChart>
                 </ResponsiveContainer>
               )}

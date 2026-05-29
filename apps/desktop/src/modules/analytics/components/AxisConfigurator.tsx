@@ -11,6 +11,7 @@ export interface YSeriesItem {
   agg: AggFn;
   drawType: 'line' | 'bar' | 'area';
   fillHex: string;
+  preprocess?: PreprocessConfig;
 }
 
 export interface PreprocessConfig {
@@ -325,12 +326,12 @@ export function AxisConfigurator({
   value,
   onChange,
 }: AxisConfiguratorProps): React.ReactElement {
-  const [openPanel, setOpenPanel] = React.useState<'x' | 'xdate' | null>(null);
+  const [openPanel, setOpenPanel] = React.useState<string | null>(null);
 
   const set = <K extends keyof AxisConfig>(key: K, v: AxisConfig[K]) =>
     onChange({ ...value, [key]: v });
 
-  const togglePanel = (panel: 'x' | 'xdate') =>
+  const togglePanel = (panel: string) =>
     setOpenPanel((prev) => (prev === panel ? null : panel));
 
   const xCfg = value.xPreprocess ?? { ...DEFAULT_PREPROCESS_CONFIG };
@@ -346,7 +347,7 @@ export function AxisConfigurator({
   const addSeries = () => {
     set('ySeries', [
       ...value.ySeries,
-      { colId: null, agg: 'AVG', drawType: 'bar', fillHex: '#6366f1' },
+      { colId: null, agg: 'AVG', drawType: 'bar', fillHex: '#6366f1', preprocess: { ...DEFAULT_PREPROCESS_CONFIG } },
     ]);
   };
 
@@ -399,57 +400,68 @@ export function AxisConfigurator({
 
         {/* Step 3.2 — dynamic list mapped over value.ySeries */}
         {value.ySeries.map((s, i) => (
-          // Step 3.3 — one row per series
-          <div key={i} className="flex gap-1 items-center">
-            {/* Column picker */}
-            <div className="flex-1 min-w-0">
-              <ColSelect
-                headers={headers}
-                value={s.colId}
-                onChange={(v) => updateSeries(i, { colId: v })}
-                placeholder="Select column…"
+          <div key={i} className="flex flex-col gap-0.5">
+            {/* Step 3.3 — one row per series */}
+            <div className="flex gap-1 items-center">
+              {/* Column picker */}
+              <div className="flex-1 min-w-0">
+                <ColSelect
+                  headers={headers}
+                  value={s.colId}
+                  onChange={(v) => updateSeries(i, { colId: v })}
+                  placeholder="Select column…"
+                />
+              </div>
+
+              {/* Draw-type selector */}
+              <DrawTypeSelect
+                value={s.drawType}
+                onChange={(v) => updateSeries(i, { drawType: v })}
               />
+
+              {/* Preprocessing toggle */}
+              <PreprocessButton
+                active={!!(s.preprocess?.enabled)}
+                open={openPanel === `y-${i}`}
+                onToggle={() => togglePanel(`y-${i}`)}
+              />
+
+              {/* Hex colour picker */}
+              <div className="shrink-0 rounded border border-border overflow-hidden">
+                <input
+                  type="color"
+                  value={s.fillHex}
+                  onChange={(e) => updateSeries(i, { fillHex: e.target.value })}
+                  className="block w-7 h-[26px] cursor-pointer bg-transparent p-0.5"
+                  title="Series colour"
+                />
+              </div>
+
+              {/* Remove button */}
+              <button
+                type="button"
+                onClick={() => removeSeries(i)}
+                title="Remove series"
+                className={
+                  'shrink-0 flex items-center justify-center w-6 h-6 rounded border ' +
+                  'border-border bg-muted/50 text-muted-foreground transition-colors ' +
+                  'hover:text-destructive hover:border-destructive/60 hover:bg-destructive/10 ' +
+                  'focus:outline-none focus:ring-1 focus:ring-ring'
+                }
+              >
+                <svg viewBox="0 0 16 16" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+                </svg>
+              </button>
             </div>
 
-            {/* Aggregation selector */}
-            <AggSelect
-              value={s.agg}
-              onChange={(v) => updateSeries(i, { agg: v })}
-            />
-
-            {/* Draw-type selector */}
-            <DrawTypeSelect
-              value={s.drawType}
-              onChange={(v) => updateSeries(i, { drawType: v })}
-            />
-
-            {/* Hex colour picker */}
-            <div className="shrink-0 rounded border border-border overflow-hidden">
-              <input
-                type="color"
-                value={s.fillHex}
-                onChange={(e) => updateSeries(i, { fillHex: e.target.value })}
-                className="block w-7 h-[26px] cursor-pointer bg-transparent p-0.5"
-                title="Series colour"
+            {/* Preprocess panel for this Y series */}
+            {openPanel === `y-${i}` && (
+              <PreprocessPanel
+                config={s.preprocess ?? { enabled: false, regexPattern: '', formulaExpression: '' }}
+                onChange={(cfg) => updateSeries(i, { preprocess: cfg })}
               />
-            </div>
-
-            {/* Remove button */}
-            <button
-              type="button"
-              onClick={() => removeSeries(i)}
-              title="Remove series"
-              className={
-                'shrink-0 flex items-center justify-center w-6 h-6 rounded border ' +
-                'border-border bg-muted/50 text-muted-foreground transition-colors ' +
-                'hover:text-destructive hover:border-destructive/60 hover:bg-destructive/10 ' +
-                'focus:outline-none focus:ring-1 focus:ring-ring'
-              }
-            >
-              <svg viewBox="0 0 16 16" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
-              </svg>
-            </button>
+            )}
           </div>
         ))}
 

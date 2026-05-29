@@ -273,6 +273,7 @@ export const ASPECT_TYPES = [
   'file_attachment',
   'project',
   'canvas_shape',
+  'analytics_config',
 ] as const;
 
 export type AspectType = (typeof ASPECT_TYPES)[number];
