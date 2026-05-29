@@ -1,0 +1,11 @@
+{
+  "id": "analytics",
+  "name": "Analytics Suite",
+  "version": "1.0.0",
+  "description": "Import and visualise large CSV datasets with native-speed Rust batch processing. All data stays strictly local — DSGVO compliant.",
+  "icon": "analytics",
+  "entityTypes": [],
+  "hasPortalView": false,
+  "portalPermissions": [],
+  "configSchema": {}
+}

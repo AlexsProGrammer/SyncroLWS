@@ -63,11 +63,11 @@
 
 #### Phase 3: Module Assembly & Dynamic Tool Registration
 
-* [ ] **Step 3.1:** Create `apps/desktop/src/modules/analytics/manifest.json`. Configure the registry file metadata with id `"analytics"`, name `"Analytics Suite"`, icon key `"analytics"`, and define layout permissions.
-* [ ] **Step 3.2:** In `apps/desktop/src/registry/ToolRegistry.tsx`, create and export an inline SVG renderer called `IconAnalytics`. Map the key `"analytics"` to this custom asset inside the global configuration block.
-* [ ] **Step 3.3:** Create `apps/desktop/src/modules/analytics/index.ts` to register the main tool view reference components, linking it directly into the system auto-discovery lookup cycle.
-* [ ] **Step 3.4:** Create `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx` to handle the primary view architecture, rendering a stateful framework structure using local workspace contexts.
-* [ ] **Verification:** Launch the environment suite via `npm run tauri dev`. Navigate onto the workspace dashboard view shell and check if the layout responds with correct routing headers.
+* [x] **Step 3.1:** Create `apps/desktop/src/modules/analytics/manifest.json`. Configure the registry file metadata with id `"analytics"`, name `"Analytics Suite"`, icon key `"analytics"`, and define layout permissions.
+* [x] **Step 3.2:** In `apps/desktop/src/registry/ToolRegistry.tsx`, create and export an inline SVG renderer called `IconAnalytics`. Map the key `"analytics"` to this custom asset inside the global configuration block.
+* [x] **Step 3.3:** Create `apps/desktop/src/modules/analytics/index.ts` to register the main tool view reference components, linking it directly into the system auto-discovery lookup cycle.
+* [x] **Step 3.4:** Create `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx` to handle the primary view architecture, rendering a stateful framework structure using local workspace contexts.
+* [x] **Verification:** Launch the environment suite via `npm run tauri dev`. Navigate onto the workspace dashboard view shell and check if the layout responds with correct routing headers.
 
 #### Phase 4: Stream Ingestion UI Component Interface
 
