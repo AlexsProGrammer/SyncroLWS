@@ -64,10 +64,10 @@
 
 #### Phase 5: Dashboard Chart Aggregation Verification
 
-* [ ] **Step 5.1:** Open `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx`. Locate the background execution callback routine `runQuery`.
-* [ ] **Step 5.2:** Ensure that when a column configuration features dynamic data enum configurations, queries run cleanly through the updated `buildAggregationQuery` flow to pass matching query statement string builders onto the SQLite execution pipeline proxy.
-* [ ] **Step 5.3:** Validate that if the returned dataset contains non-numeric inputs originally, the runtime query maps strings smoothly into quantitative points to populate chart timelines without breaking layout layers or generating chart errors.
-* [ ] **Verification:** Run a final full workspace compilation step using `npm run build` or `npx tsc --noEmit` from the root repository workspace directories to confirm complete integration type compliance.
+* [x] **Step 5.1:** Open `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx`. Locate the background execution callback routine `runQuery`.
+* [x] **Step 5.2:** Ensure that when a column configuration features dynamic data enum configurations, queries run cleanly through the updated `buildAggregationQuery` flow to pass matching query statement string builders onto the SQLite execution pipeline proxy.
+* [x] **Step 5.3:** Validate that if the returned dataset contains non-numeric inputs originally, the runtime query maps strings smoothly into quantitative points to populate chart timelines without breaking layout layers or generating chart errors.
+* [x] **Verification:** Run a final full workspace compilation step using `npm run build` or `npx tsc --noEmit` from the root repository workspace directories to confirm complete integration type compliance.
 
 ---
 

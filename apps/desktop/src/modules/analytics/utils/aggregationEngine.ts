@@ -46,7 +46,11 @@ export interface ChartPoint {
  * `Number().toFixed(1)` — always a safe float string, never user input.
  */
 function compileCategoricalExpr(colIndex: number, mapping: CategoryMapping): string {
-  const whenClauses = Object.entries(mapping)
+  const entries = Object.entries(mapping);
+  // SQLite requires at least one WHEN clause; return a safe literal when the
+  // mapping dictionary is empty (no rules configured yet).
+  if (entries.length === 0) return '0.0';
+  const whenClauses = entries
     .map(([key, weight]) => {
       const safeKey = key.replace(/'/g, "''");
       const safeWeight = Number(weight).toFixed(1);

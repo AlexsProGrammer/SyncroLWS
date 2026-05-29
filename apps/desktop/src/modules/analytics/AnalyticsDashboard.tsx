@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { CSVImportZone } from './components/CSVImportZone';
 import { AxisConfigurator, DEFAULT_AXIS_CONFIG } from './components/AxisConfigurator';
-import type { AxisConfig } from './components/AxisConfigurator';
+import type { AxisConfig, YSeriesItem } from './components/AxisConfigurator';
 import { buildAggregationQuery, mapToChartPoints, applyLocalPreprocessing } from './utils/aggregationEngine';
 import type { AggRow, RawRow, ChartPoint } from './utils/aggregationEngine';
 import type { ToolViewProps } from '@/registry/ToolRegistry';
@@ -38,6 +38,26 @@ function parseHeaders(raw: string): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * Ensures configs persisted before the categorical-encoder feature was added
+ * always carry the required `mode` and `mappingRules` fields on every series
+ * item. Uses runtime-nullable casts so TypeScript does not complain about
+ * properties that are guaranteed by the type but may be absent in old JSON.
+ */
+function normalizeAxisConfig(config: AxisConfig): AxisConfig {
+  return {
+    ...config,
+    ySeries: config.ySeries.map((s): YSeriesItem => {
+      const raw = s as Record<string, unknown>;
+      return {
+        ...s,
+        mode: (raw['mode'] as YSeriesItem['mode'] | undefined) ?? 'numeric',
+        mappingRules: (raw['mappingRules'] as YSeriesItem['mappingRules'] | undefined) ?? {},
+      };
+    }),
+  };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -116,7 +136,7 @@ export function AnalyticsDashboardView({ toolInstanceId }: ToolViewProps): React
     } catch (err) {
       console.error('[module:analytics] Aggregation query failed:', err);
       setQueryError(
-        'Query failed — ensure Y columns contain numeric values for AVG / SUM.',
+        'Query failed — check your column selection and mapping configuration.',
       );
     } finally {
       setIsQuerying(false);
@@ -138,7 +158,7 @@ export function AnalyticsDashboardView({ toolInstanceId }: ToolViewProps): React
           [datasetId, toolInstanceId],
         );
         if (aspects.length > 0 && aspects[0]) {
-          const config = JSON.parse(aspects[0].data) as AxisConfig;
+          const config = normalizeAxisConfig(JSON.parse(aspects[0].data) as AxisConfig);
           lastSavedConfigRef.current = JSON.stringify(config);
           setAxisConfig(config);
           return;
@@ -150,7 +170,7 @@ export function AnalyticsDashboardView({ toolInstanceId }: ToolViewProps): React
         [datasetId],
       );
       const raw = rows[0]?.axis_config ?? null;
-      const config = raw ? (JSON.parse(raw) as AxisConfig) : DEFAULT_AXIS_CONFIG;
+      const config = raw ? normalizeAxisConfig(JSON.parse(raw) as AxisConfig) : DEFAULT_AXIS_CONFIG;
       lastSavedConfigRef.current = JSON.stringify(config);
       setAxisConfig(config);
     } catch (err) {

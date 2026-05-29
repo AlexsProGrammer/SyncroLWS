@@ -71,10 +71,11 @@ export function CategoryMappingEditor({
   const [rows, setRows] = React.useState<DraftRow[]>(() => toDraftRows(value));
 
   // Keep local draft rows in sync if the parent resets the value externally
-  // (e.g. when the user switches columns).
+  // (e.g. when the user switches columns). Use JSON comparison so a new-but-equal
+  // {} reference from the parent does not wipe locally-added blank rows.
   const prevValueRef = React.useRef(value);
   React.useEffect(() => {
-    if (prevValueRef.current !== value) {
+    if (JSON.stringify(prevValueRef.current) !== JSON.stringify(value)) {
       prevValueRef.current = value;
       setRows(toDraftRows(value));
     }
@@ -99,7 +100,9 @@ export function CategoryMappingEditor({
   };
 
   const handleAdd = () => {
-    commit([...rows, { id: nextId(), key: '', weight: '' }]);
+    // Only update local draft state — blank rows produce no mapping output so
+    // there is nothing meaningful to bubble up via onChange yet.
+    setRows((prev) => [...prev, { id: nextId(), key: '', weight: '' }]);
   };
 
   return (

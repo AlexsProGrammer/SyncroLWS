@@ -1,6 +1,15 @@
 # Changelog
 
-## [0.2.0] — 2026-05-29
+## [0.3.0] — 2026-05-29
+
+### Added — Categorical Encoder & String Enum Mapping Engine
+
+- **`CategoryMapping` type & `YSeriesItem` extensions** (`AxisConfigurator.tsx`) — exported `CategoryMapping = Record<string, number>` type; `YSeriesItem` extended with required `mode: 'numeric' | 'categorical'` and `mappingRules: CategoryMapping`; new series defaults initialised with `mode: 'numeric'` and `mappingRules: {}`.
+- **`CategoryMappingEditor` component** (`CategoryMappingEditor.tsx`) — new fully-controlled inline dictionary editor; renders paired string-key / numeric-weight input rows; "Add Dynamic Key Value Pair" button appends blank draft rows without triggering parent resets; JSON-equality sync guard prevents spurious row wipes on reference-identical parent re-renders; all processing is local — no network calls (DSGVO compliant).
+- **Polymorphic CASE-statement SQL compiler** (`aggregationEngine.ts`) — `compileCategoricalExpr(colIndex, mapping)` builds a parameterised SQLite `CASE json_extract(cells, '$[N]') WHEN ... ELSE 0.0 END` expression; keys are SQL-escaped (`'` → `''`); weights are always safe `.toFixed(1)` floats; empty mapping safely returns `0.0` literal to avoid invalid SQL; `aggExpr` updated to branch on `mode === 'categorical'` and wrap the CASE expression inside the configured aggregate function.
+- **Mode selector dropdown** (`AxisConfigurator.tsx`) — compact inline `<select>` per Y-series row toggling between "Numeric Data" and "Categorical Data Encoders"; `<CategoryMappingEditor />` rendered conditionally below each row when mode is categorical; header label resolves to the selected column name.
+- **Dashboard normalization & error messaging** (`AnalyticsDashboard.tsx`) — `normalizeAxisConfig` helper back-fills `mode` and `mappingRules` defaults on configs persisted before this feature; generic error message updated to not mislead users in categorical mode.
+
 
 ### Added — Tokenized Preprocessing Engine & Dynamic Expression Formula Parser
 
