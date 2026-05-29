@@ -5,8 +5,7 @@ import type { AggFn, AxisConfig, PreprocessConfig } from '../components/AxisConf
 /** Raw row returned by the aggregation SQL query. */
 export interface AggRow {
   x_val: string;
-  y1_val: number | null;
-  y2_val: number | null;
+  [key: string]: string | number | null;
 }
 
 /**
@@ -30,12 +29,11 @@ export type QueryDescriptor =
 
 /**
  * Unified data point consumed by recharts `ComposedChart`.
- * `y2` is absent when no secondary axis column is configured.
+ * Dynamic y fields are indexed as `y_0`, `y_1`, etc.
  */
 export interface ChartPoint {
   x: string;
-  y1: number;
-  y2?: number;
+  [key: string]: string | number;
 }
 
 // ── SQL builder ────────────────────────────────────────────────────────────────
@@ -70,63 +68,16 @@ function aggExpr(fn: AggFn, colIndex: number): string {
  * Results are capped at 500 groups (aggregated) or 10 000 rows (raw) to keep
  * chart rendering snappy.
  *
- * Returns `null` when X or Y1 have not been selected yet.
+ * Returns `null` when X is unset or all Y series have no column selected.
+ * Full dynamic SQL generation is implemented in Phase 2.
  */
 export function buildAggregationQuery(
-  datasetId: string,
+  _datasetId: string,
   config: AxisConfig,
 ): QueryDescriptor | null {
-  if (config.xCol === null || config.y1Col === null) return null;
-
-  const needsPreprocess =
-    config.xPreprocess?.enabled ||
-    config.y1Preprocess?.enabled ||
-    config.y2Preprocess?.enabled ||
-    !!config.xTimestampFormat;
-
-  if (needsPreprocess) {
-    // Raw path: fetch unaggregated text cells for JS-side preprocessing.
-    const xRaw  = `json_extract(cells, '$[${config.xCol}]')`;
-    const y1Raw = `json_extract(cells, '$[${config.y1Col}]')`;
-    const y2Raw = config.y2Col !== null
-      ? `json_extract(cells, '$[${config.y2Col}]')`
-      : 'NULL';
-
-    const sql = [
-      'SELECT',
-      `  ${xRaw}  AS x_val,`,
-      `  ${y1Raw} AS y1_raw,`,
-      `  ${y2Raw} AS y2_raw`,
-      'FROM analytics_raw_records',
-      'WHERE dataset_id = ?',
-      `  AND ${xRaw} IS NOT NULL`,
-      `  AND ${xRaw} != ''`,
-      'LIMIT 10000',
-    ].join('\n');
-
-    return { mode: 'raw', sql, params: [datasetId] };
-  }
-
-  // Aggregated path: let SQLite do the heavy lifting.
-  const xExpr  = `json_extract(cells, '$[${config.xCol}]')`;
-  const y1Expr = aggExpr(config.y1Agg, config.y1Col);
-  const y2Expr = config.y2Col !== null ? aggExpr(config.y2Agg, config.y2Col) : 'NULL';
-
-  const sql = [
-    'SELECT',
-    `  ${xExpr}  AS x_val,`,
-    `  ${y1Expr} AS y1_val,`,
-    `  ${y2Expr} AS y2_val`,
-    'FROM analytics_raw_records',
-    'WHERE dataset_id = ?',
-    `  AND ${xExpr} IS NOT NULL`,
-    `  AND ${xExpr} != ''`,
-    `GROUP BY ${xExpr}`,
-    `ORDER BY ${xExpr}`,
-    'LIMIT 500',
-  ].join('\n');
-
-  return { mode: 'aggregated', sql, params: [datasetId] };
+  if (config.xCol === null || config.ySeries.length === 0) return null;
+  // Phase 2 will implement multi-series SQL generation.
+  return null;
 }
 
 // ── Data mapping ───────────────────────────────────────────────────────────────
@@ -135,10 +86,13 @@ export function buildAggregationQuery(
  * Maps raw DB rows returned by `buildAggregationQuery` (aggregated mode) into
  * the unified data point format expected by recharts `ComposedChart`.
  */
-export function mapToChartPoints(rows: AggRow[]): ChartPoint[] {
+export function mapToChartPoints(rows: AggRow[], config: AxisConfig): ChartPoint[] {
   return rows.map((r) => {
-    const pt: ChartPoint = { x: r.x_val, y1: r.y1_val ?? 0 };
-    if (r.y2_val !== null) pt.y2 = r.y2_val;
+    const pt: ChartPoint = { x: r.x_val };
+    config.ySeries.forEach((_, i) => {
+      const raw = r[`y_val_${i}`];
+      pt[`y_${i}`] = typeof raw === 'number' ? raw : 0;
+    });
     return pt;
   });
 }
@@ -271,16 +225,13 @@ export function applyLocalPreprocessing(
   config: AxisConfig,
   _headers: string[],
 ): ChartPoint[] {
-  // ── Step 1: transform each raw row ────────────────────────────────────────
-
-  interface ProcessedRow { x: string; y1: number; y2: number | null; }
-  const processed: ProcessedRow[] = [];
-
-  // When xTimestampFormat is set, map each unique X key to its parsed sort key.
+  // Phase 2 will reimplement multi-series JS preprocessing pipeline.
+  // For now, only the X preprocessing path is retained; Y series
+  // aggregation will be wired in Phase 2.
   const sortKeyMap = new Map<string, number>();
+  const xGroups = new Map<string, number>();
 
   for (const r of rawRows) {
-    // X: if xPreprocess is active, derive numeric key; otherwise use raw string.
     let xKey: string;
     if (config.xPreprocess?.enabled) {
       const n = transformCell(r.x_val, config.xPreprocess);
@@ -291,59 +242,23 @@ export function applyLocalPreprocessing(
       if (xKey === '') continue;
     }
 
-    // Record timestamp sort key on first occurrence of this X value.
     if (config.xTimestampFormat && !sortKeyMap.has(xKey)) {
       const ts = parseTimestamp(r.x_val ?? '', config.xTimestampFormat);
       if (ts !== null) sortKeyMap.set(xKey, ts);
     }
 
-    // Y1 is required.
-    const y1 = transformCell(r.y1_raw, config.y1Preprocess);
-    if (y1 === null) continue;
-
-    // Y2 is optional.
-    const y2 = config.y2Col !== null
-      ? transformCell(r.y2_raw, config.y2Preprocess)
-      : null;
-
-    processed.push({ x: xKey, y1, y2 });
+    xGroups.set(xKey, (xGroups.get(xKey) ?? 0) + 1);
   }
 
-  // ── Step 2: group by X and accumulate sums / counts ───────────────────────
-
-  interface Acc { y1Sum: number; y1Count: number; y2Sum: number; y2Count: number; hasY2: boolean; }
-  const groups = new Map<string, Acc>();
-
-  for (const row of processed) {
-    const acc: Acc = groups.get(row.x) ?? { y1Sum: 0, y1Count: 0, y2Sum: 0, y2Count: 0, hasY2: false };
-    acc.y1Sum   += row.y1;
-    acc.y1Count += 1;
-    if (row.y2 !== null) { acc.y2Sum += row.y2; acc.y2Count += 1; acc.hasY2 = true; }
-    groups.set(row.x, acc);
-  }
-
-  // ── Step 3: reduce to ChartPoints, sort by X ──────────────────────────────
-
-  const points: ChartPoint[] = [];
-
-  for (const [x, acc] of groups) {
-    const pt: ChartPoint = {
-      x,
-      y1: aggregateValues(config.y1Agg, acc.y1Sum, acc.y1Count),
-    };
-    if (acc.hasY2) {
-      pt.y2 = aggregateValues(config.y2Agg, acc.y2Sum, acc.y2Count);
-    }
-    points.push(pt);
-  }
+  const points: ChartPoint[] = Array.from(xGroups.keys()).map((x) => ({ x }));
 
   points.sort((a, b) => {
     if (config.xTimestampFormat) {
-      const ta = sortKeyMap.get(a.x);
-      const tb = sortKeyMap.get(b.x);
+      const ta = sortKeyMap.get(a.x as string);
+      const tb = sortKeyMap.get(b.x as string);
       if (ta !== undefined && tb !== undefined) return ta - tb;
     }
-    return a.x.localeCompare(b.x);
+    return (a.x as string).localeCompare(b.x as string);
   });
 
   return points;

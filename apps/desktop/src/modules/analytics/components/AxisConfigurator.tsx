@@ -6,6 +6,13 @@ import { Switch } from '@/ui/components/switch';
 
 export type AggFn = 'AVG' | 'SUM' | 'COUNT';
 
+export interface YSeriesItem {
+  colId: number | null;
+  agg: AggFn;
+  drawType: 'line' | 'bar' | 'area';
+  fillHex: string;
+}
+
 export interface PreprocessConfig {
   enabled: boolean;
   regexPattern: string;      // e.g. "(?<hour>\\d+)h\\s*(?<minutes>\\d+)min"
@@ -20,13 +27,8 @@ const DEFAULT_PREPROCESS_CONFIG: PreprocessConfig = {
 
 export interface AxisConfig {
   xCol: number | null;
-  y1Col: number | null;
-  y1Agg: AggFn;
-  y2Col: number | null;
-  y2Agg: AggFn;
+  ySeries: YSeriesItem[];
   xPreprocess?: PreprocessConfig;
-  y1Preprocess?: PreprocessConfig;
-  y2Preprocess?: PreprocessConfig;
   /** Date/time format string for chronological X-axis sorting (e.g. "DD.MM.YY").
    *  Tokens: DD MM YY YYYY HH mm SS. Leave empty for lexicographic sort. */
   xTimestampFormat?: string;
@@ -34,13 +36,8 @@ export interface AxisConfig {
 
 export const DEFAULT_AXIS_CONFIG: AxisConfig = {
   xCol: null,
-  y1Col: null,
-  y1Agg: 'AVG',
-  y2Col: null,
-  y2Agg: 'SUM',
+  ySeries: [],
   xPreprocess: { ...DEFAULT_PREPROCESS_CONFIG },
-  y1Preprocess: { ...DEFAULT_PREPROCESS_CONFIG },
-  y2Preprocess: { ...DEFAULT_PREPROCESS_CONFIG },
   xTimestampFormat: '',
 };
 
@@ -296,22 +293,15 @@ export function AxisConfigurator({
   value,
   onChange,
 }: AxisConfiguratorProps): React.ReactElement {
-  const [openPanel, setOpenPanel] = React.useState<'x' | 'y1' | 'y2' | 'xdate' | null>(null);
+  const [openPanel, setOpenPanel] = React.useState<'x' | 'xdate' | null>(null);
 
   const set = <K extends keyof AxisConfig>(key: K, v: AxisConfig[K]) =>
     onChange({ ...value, [key]: v });
 
-  const togglePanel = (panel: 'x' | 'y1' | 'y2' | 'xdate') =>
+  const togglePanel = (panel: 'x' | 'xdate') =>
     setOpenPanel((prev) => (prev === panel ? null : panel));
 
-  const setPreprocess = (
-    key: 'xPreprocess' | 'y1Preprocess' | 'y2Preprocess',
-    cfg: PreprocessConfig,
-  ) => set(key, cfg);
-
   const xCfg = value.xPreprocess ?? { ...DEFAULT_PREPROCESS_CONFIG };
-  const y1Cfg = value.y1Preprocess ?? { ...DEFAULT_PREPROCESS_CONFIG };
-  const y2Cfg = value.y2Preprocess ?? { ...DEFAULT_PREPROCESS_CONFIG };
 
   return (
     <div className="flex flex-col gap-2 px-6 py-3 border-b border-border bg-muted/30">
@@ -319,98 +309,44 @@ export function AxisConfigurator({
         Axis Configuration
       </p>
 
-      <div className="grid grid-cols-3 gap-3">
-        {/* X Axis */}
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-foreground">X Axis</span>
-          <div className="flex gap-1 items-center">
-            <div className="flex-1 min-w-0">
-              <ColSelect
-                headers={headers}
-                value={value.xCol}
-                onChange={(v) => set('xCol', v)}
-                placeholder="Select column…"
-              />
-            </div>
-            <PreprocessButton
-              active={xCfg.enabled}
-              open={openPanel === 'x'}
-              onToggle={() => togglePanel('x')}
-            />
-            <DateSortButton
-              active={!!(value.xTimestampFormat)}
-              open={openPanel === 'xdate'}
-              onToggle={() => togglePanel('xdate')}
+      {/* X Axis */}
+      <div className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-foreground">X Axis</span>
+        <div className="flex gap-1 items-center">
+          <div className="flex-1 min-w-0">
+            <ColSelect
+              headers={headers}
+              value={value.xCol}
+              onChange={(v) => set('xCol', v)}
+              placeholder="Select column…"
             />
           </div>
-          {openPanel === 'x' && (
-            <PreprocessPanel
-              config={xCfg}
-              onChange={(cfg) => setPreprocess('xPreprocess', cfg)}
-            />
-          )}
-          {openPanel === 'xdate' && (
-            <DateSortPanel
-              format={value.xTimestampFormat ?? ''}
-              onChange={(fmt) => set('xTimestampFormat', fmt)}
-            />
-          )}
+          <PreprocessButton
+            active={xCfg.enabled}
+            open={openPanel === 'x'}
+            onToggle={() => togglePanel('x')}
+          />
+          <DateSortButton
+            active={!!(value.xTimestampFormat)}
+            open={openPanel === 'xdate'}
+            onToggle={() => togglePanel('xdate')}
+          />
         </div>
-
-        {/* Y1 — Primary */}
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-foreground">Y1 — Primary</span>
-          <div className="flex gap-1 items-center">
-            <div className="flex-1 min-w-0">
-              <ColSelect
-                headers={headers}
-                value={value.y1Col}
-                onChange={(v) => set('y1Col', v)}
-                placeholder="Select column…"
-              />
-            </div>
-            <AggSelect value={value.y1Agg} onChange={(v) => set('y1Agg', v)} />
-            <PreprocessButton
-              active={y1Cfg.enabled}
-              open={openPanel === 'y1'}
-              onToggle={() => togglePanel('y1')}
-            />
-          </div>
-          {openPanel === 'y1' && (
-            <PreprocessPanel
-              config={y1Cfg}
-              onChange={(cfg) => setPreprocess('y1Preprocess', cfg)}
-            />
-          )}
-        </div>
-
-        {/* Y2 — Secondary (optional) */}
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-foreground">Y2 — Secondary</span>
-          <div className="flex gap-1 items-center">
-            <div className="flex-1 min-w-0">
-              <ColSelect
-                headers={headers}
-                value={value.y2Col}
-                onChange={(v) => set('y2Col', v)}
-                placeholder="None"
-              />
-            </div>
-            <AggSelect value={value.y2Agg} onChange={(v) => set('y2Agg', v)} />
-            <PreprocessButton
-              active={y2Cfg.enabled}
-              open={openPanel === 'y2'}
-              onToggle={() => togglePanel('y2')}
-            />
-          </div>
-          {openPanel === 'y2' && (
-            <PreprocessPanel
-              config={y2Cfg}
-              onChange={(cfg) => setPreprocess('y2Preprocess', cfg)}
-            />
-          )}
-        </div>
+        {openPanel === 'x' && (
+          <PreprocessPanel
+            config={xCfg}
+            onChange={(cfg) => set('xPreprocess', cfg)}
+          />
+        )}
+        {openPanel === 'xdate' && (
+          <DateSortPanel
+            format={value.xTimestampFormat ?? ''}
+            onChange={(fmt) => set('xTimestampFormat', fmt)}
+          />
+        )}
       </div>
+
+      {/* Y Series — rebuilt in Phase 3 */}
     </div>
   );
 }

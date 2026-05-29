@@ -1,100 +1,110 @@
 # IMPLEMENTATION.md
 
 ## 1. Project Context & Architecture
-
-* **Goal:** Build a robust, offline-first Tokenized Preprocessing Engine and Dynamic Expression Formula Parser for the Analytics Suite. This system intercepts unstructured data fields (e.g., `"1h 30min"` or `"12v"`) from raw CSV datasets, utilizes capturing regex patterns to extract key variables, and evaluates mathematical formulas (e.g., `hour + (minutes / 60)`) to generate clean numerical charts via local JavaScript pre-aggregation pipelines before rendering.
-* **Tech Stack & Dependencies:**
-* **Core Infrastructure:** Tauri 2.0, React, Vite, TypeScript, Tailwind CSS, Recharts.
-* **Ecosystem Libraries:** Existing workspace dependencies (`lucide-react`, `recharts`, `drizzle-orm`).
-* **Commands:** No new package installations required. Employs native JavaScript `RegExp` engines and sandboxed token arithmetic parsing.
-
-
-* **File Structure:**
-```text
-└── apps/
-    └── desktop/
-        └── src/
-            └── modules/
-                └── analytics/
-                    ├── AnalyticsDashboard.tsx # Modified: Integrated pre-aggregation workflow
-                    ├── components/
-                    │   └── AxisConfigurator.tsx # Modified: Dynamic token extraction setup controls
-                    └── utils/
-                        └── aggregationEngine.ts # Modified: Regex evaluator and JS aggregation reducer
+- **Goal:** Refactor the analytics workspace rendering subsystem from a rigid dual-axis configuration into an open, dynamic multi-series array architecture. This allows users to add an arbitrary number of quantitative metrics to a single chart timeline and overlay different polymorphic visual layout configurations (Bar, Line, Area) simultaneously.
+- **Tech Stack & Dependencies:**
+  - **Core Frameworks:** Tauri 2.0, React, Vite, Drizzle ORM, TypeScript.
+  - **Charting Engine:** `recharts` (utilizing `ComposedChart`, `Bar`, `Line`, `Area`, `XAxis`, `YAxis`, `CartesianGrid`, `Tooltip`, `Legend`).
+  - **Commands:** No new packages are required; uses the existing project-wide Recharts charting installation.
+- **File Structure:**
+  ```text
+  └── apps/
+      └── desktop/
+          └── src/
+              └── modules/
+                  └── analytics/
+                      ├── AnalyticsDashboard.tsx # Modified: Update query execution and render loop
+                      ├── components/
+                      │   └── AxisConfigurator.tsx # Modified: Redesign multi-series configuration panel
+                      └── utils/
+                          └── aggregationEngine.ts # Modified: Dynamic SQL generator and chart point mapper
 
 ```
 
+* **Attention Points:** - Data mapping keys passed into Recharts elements must align exactly with the dynamic fields produced by the query parser to avoid rendering blank frames.
+* Predefined or custom color choices must be tracked safely within individual series objects to prevent index alignment issues when items are removed.
 
-* **Attention Points:** - Because core SQLite lacks standard regular expression capture-group capabilities natively, data transformations must occur inside a highly optimized JavaScript pre-aggregation engine when preprocessing rules are active.
-* The expression evaluator must use a secure mathematical tokenizer to isolate operations, explicitly banning arbitrary string executions (`eval`, `Function`) to preserve application safety.
 
-
-* **DSGVO:** Preprocessing rule strings, custom regular expressions, extracted string tokens, and computed results are completely contained within the local UI thread memory and workspace databases. No telemetry blocks, configuration sync parameters, or payload samples may be logged to cloud analytics nodes.
+* **DSGVO:** Chart configurations, dynamic series matrices, metric color variables, and visualization layouts live strictly in the on-device interface state memory and profile container, entirely free from third-party tracking pixels or telemetry engines.
 
 ---
 
 ## 2. Execution Phases
 
-#### Phase 1: Preprocessing Configuration Schema Expansion
+#### Phase 1: Shared Configuration Interfaces & Type Refactoring
 
-* [x] **Step 1.1:** In `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`, define and export a `PreprocessConfig` TypeScript interface:
+* [x] **Step 1.1:** In `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`, define and export a new `YSeriesItem` TypeScript interface:
 ```typescript
-export interface PreprocessConfig {
-  enabled: boolean;
-  regexPattern: string;      // e.g. "(?<hour>\\d+)h\\s*(?<minutes>\\d+)min"
-  formulaExpression: string; // e.g. "hour + (minutes / 60)"
+export interface YSeriesItem {
+  colId: number | null;
+  agg: AggFn;
+  drawType: 'line' | 'bar' | 'area';
+  fillHex: string;
 }
 
 ```
 
 
-* [x] **Step 1.2:** Update the `AxisConfig` interface to include optional preprocessing configuration properties for all dimensions: `xPreprocess?: PreprocessConfig;`, `y1Preprocess?: PreprocessConfig;`, and `y2Preprocess?: PreprocessConfig;`.
-* [x] **Step 1.3:** Update the `DEFAULT_AXIS_CONFIG` object to populate these fields with default unconfigured values (`enabled: false`, `regexPattern: ""`, `formulaExpression: ""`).
-* [x] **Verification:** Run `npm run tauri dev` inside `apps/desktop` and confirm that type compilation passes with zero configuration interface mismatch exceptions.
+* [x] **Step 1.2:** Refactor the `AxisConfig` interface to remove `y1Col`, `y1Agg`, `y2Col`, and `y2Agg`, replacing them with a strict array container: `ySeries: YSeriesItem[];`.
+* [x] **Step 1.3:** Update `DEFAULT_AXIS_CONFIG` to initialize with an empty `ySeries` array.
+* [x] **Step 1.4:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, update `AggRow` and `ChartPoint` to support indexable data maps:
+```typescript
+export interface AggRow {
+  x_val: string;
+  [key: string]: string | number | null;
+}
 
-#### Phase 2: Axis Configurator Dropdown & UI Controls
+```
 
-* [x] **Step 2.1:** In `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`, build a collapsible subcomponent `<PreprocessModal />` or `<PreprocessPanel />` styled using local `shadcn` and Tailwind container primitives.
-* [x] **Step 2.2:** Add an interactive inline button label (e.g., `"f(x) Clean Data"`) directly adjacent to the X Axis, Y1 Primary, and Y2 Secondary dropdown column selection elements.
-* [x] **Step 2.3:** Map input fields inside this interface to update the `regexPattern` string and `formulaExpression` validation fields on the active column configurations via the existing lifted `onChange` handler. Include clear placeholder help descriptions showing sample regex parameters (`(?<val>\d+)`) and arithmetic examples.
-* [x] **Verification:** Open the Analytics Dashboard in the application UI view. Click the preprocessing toggle links and verify the inputs reveal layout inputs cleanly, updating the configuration states successfully.
 
-#### Phase 3: Sandboxed Mathematical Expression Evaluator
+* [ ] **Verification:** Run `cd apps/desktop && npx tsc --noEmit` and confirm that type compilation errors are limited strictly to unused references in `AnalyticsDashboard.tsx`.
 
-* [x] **Step 3.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, create a secure helper function `evaluateSafeFormula(formula: string, tokens: Record<string, number>): number`.
-* [x] **Step 3.2:** Implement a localized scanning parser within `evaluateSafeFormula`. Replace string match variables corresponding to the extracted token naming definitions with their concrete floating-point numbers.
-* [x] **Step 3.3:** Parse the basic arithmetic string operators strictly by separating inputs sequentially against addition, subtraction, multiplication, and division characters (`+`, `-`, `*`, `/`). Block any script block injection vectors by refusing to route evaluations through runtime string executes (`eval`). Return `0` if fields are invalid or formatting parameters fail.
-* [x] **Verification:** Open a temporary debug log file or add a console check trace. Pass formula statement strings such as `"h + (m / 60)"` paired with values `{ h: 1, m: 30 }` and confirm the calculation engine correctly registers a numeric value output of `1.5`.
+#### Phase 2: Dynamic SQL Generation & Record Mapping
 
-#### Phase 4: JavaScript In-Memory Aggregation Pipeline
+* [ ] **Step 2.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, modify `buildAggregationQuery` to check if `config.xCol` is null or if `config.ySeries` is empty, returning `null` if true.
+* [ ] **Step 2.2:** Inside `buildAggregationQuery`, replace the static `y1Expr` and `y2Expr` template strings. Map over the `config.ySeries` array where `colId !== null`, passing the individual metrics to `aggExpr()` and mapping them to dynamic projection aliases matching `y_val_${index}`.
+* [ ] **Step 2.3:** Update the `SELECT` query statement to inject the dynamic aggregated column array string entries separated by clean comma tokens.
+* [ ] **Step 2.4:** In `mapToChartPoints`, rewrite the mapping loop to dynamically scan the fields of `AggRow`. For each array entry found in the series template configuration, read `r[`y_val_${index}`]` and assign the numeric values directly into the result object using the charting index key `y_${index}`.
+* [ ] **Verification:** Execute the type checking command `npx tsc --noEmit` within `apps/desktop` to confirm utility function signature compliance.
 
-* [x] **Step 4.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, adjust `buildAggregationQuery` behavior. If no preprocessing flags are toggled active, return the existing query format. If any preprocessing configuration is set to true, alter the query compilation to pull the unaggregated text contents (`json_extract(cells, '$[N]')`) directly from the table database blocks up to a strict window limit of 10,000 records.
-* [x] **Step 4.2:** Build an internal row transformation worker function named `applyLocalPreprocessing(rawRows: any[], config: AxisConfig, headers: string[])`.
-* [x] **Step 4.3:** Inside this mapping loop, apply the configured regular expressions using native JavaScript matching routines (`new RegExp()`). Extract capturing group parameters, feed them to `evaluateSafeFormula`, and compute calculated numeric numbers for each coordinate index row.
-* [x] **Step 4.4:** Process the resulting preprocessed arrays using in-memory JavaScript array reductions to perform the active aggregation routines (`AVG`, `SUM`, `COUNT`) grouped uniformly by the computed X value strings, sorting data points to feed directly into the chart display loops.
-* [x] **Verification:** Load a testing file dataset containing raw un-formatted time intervals. Configure preprocessor filters on the active columns. Verify that the application prints properly grouped clean dataset points to the terminal stream.
+#### Phase 3: Dynamic Multi-Series Axis Configurator UI
 
-#### Phase 5: Dashboard Processing Pipeline Integration
+* [ ] **Step 3.1:** Open `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`. Retain the top single-column dropdown panel selector matching the coordinate X Axis structure.
+* [ ] **Step 3.2:** Beneath the X Axis dropdown, build a dynamic vertical form collection panel mapping directly over the `value.ySeries` array list using a `.map()` layout expression.
+* [ ] **Step 3.3:** For each configured item in the row loop, render a layout row containing:
+* A column picker component `<ColSelect />`.
+* An aggregation method selector `<AggSelect />`.
+* A chart visualization type dropdown selector containing options for `Line`, `Bar`, and `Area`.
+* A standard HTML inline hex color picker field `<input type="color" />` styled with a neat border template wrapper.
+* A click-action delete button to remove that specific element row index from the active configuration array.
 
-* [x] **Step 5.1:** Open `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx`. Locate the internal callback trigger function `runQuery`.
-* [x] **Step 5.2:** Intercept the execution path where `db.select` fetches data points. Check if any preprocessing rules are checked active inside the `axisConfig` object.
-* [x] **Step 5.3:** If processing rules apply, map the raw input array records directly through `applyLocalPreprocessing` before passing the computed points to `setChartPoints()`, updating application error display windows gracefully if bad regex boundaries throw syntax errors.
-* [x] **Verification:** Run a workspace-wide type verification sweep using `npx tsc --noEmit` from the workspace root to confirm all layout components connect with type safety.
+
+* [ ] **Step 3.4:** Add an "Add Series Metric" icon button row component directly at the bottom boundary of the list tracker view. When clicked, append a fresh `YSeriesItem` object to the collection array with default values (`colId: null`, `agg: 'AVG'`, `drawType: 'bar'`, `fillHex: '#6366f1'`).
+* [ ] **Verification:** Open the Analytics module dashboard workspace in the Tauri application window. Click the "Add Series Metric" selector multiple times and check that the configuration rows spawn independently in the control panel space.
+
+#### Phase 4: Polymorphic Visualization Layer Compilation
+
+* [ ] **Step 4.1:** Open `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx`. Update the view validation conditions to ensure a dataset is selected and `axisConfig.ySeries.some(s => s.colId !== null)` evaluates to true before attempting chart compilation.
+* [ ] **Step 4.2:** Import the component token item `Area` from the local `recharts` package workspace at the top header area of the file.
+* [ ] **Step 4.3:** Inside the `<ComposedChart>` node, delete the hardcoded single `<Bar />` and secondary `<Line />` layout components.
+* [ ] **Step 4.4:** Replace them with a runtime loop mapping directly over `axisConfig.ySeries`. For each item where `colId !== null`, inspect the `drawType` property and conditionally mount the corresponding `<Bar />`, `<Line />`, or `<Area />` component dynamically.
+* [ ] **Step 4.5:** Bind the Recharts configuration properties for each mapped element: set `dataKey` to `y_${index}`, set the name attribute to match `${s.agg}(${headers[s.colId]})`, and apply `fill={s.fillHex}` or `stroke={s.fillHex}` fields based on the selected drawing style.
+* [ ] **Verification:** Run a full project-wide code verification trace via `npm run build` or `npx tsc --noEmit` from the desktop repository root to ensure type safety.
 
 ---
 
 ## 3. Global Testing Strategy
 
-* **Complex Regex Extraction Verification:**
-* *Action:* Import an operational logs list dataset holding text attributes patterned as `"Duration: 4h 15m"`. Apply a capturing string expression `Duration:\s*(?<hours>\d+)h\s*(?<mins>\d+)m` matched to formula `hours + (mins / 60)`.
-* *Expected:* The rendering container parses text cells cleanly, computing coordinate positions precisely matching float outputs equal to `4.25`.
+* **Polymorphic Layer Overlay Rendering Verification:**
+* *Action:* Import a multi-column numerical dataset. Configure three distinct tracking parameters: add Metric 1 as a `Bar` styled in blue, Metric 2 as a `Line` styled in gold, and Metric 3 as an `Area` chart colored in emerald green.
+* *Expected:* The rendering container displays all three statistical layers on the timeline area simultaneously without clipping data points or dropping visualization dimensions.
 
 
-* **Malicious Formula Injection Rejection:**
-* *Action:* Input a malicious tracking string expression inside the application configuration UI formula input box designed to steal local records or execute arbitrary logic (e.g., `window.alert(1)` or `alert(document.cookie)`).
-* *Expected:* The tokenized formula parsing utility safely catches the invalid parameter layout format, drops processing execution instantly, and reports a clear query format alert to the dashboard notification window.
+* **Dynamic Series Element Deletion Safety:**
+* *Action:* Configure 4 concurrent data series panels on the interface. Click the remove button row component targeting the middle metric item layout index (Index position 1) while a query is computing.
+* *Expected:* The system deletes the selected row, dynamically collapses the tracking index maps smoothly, updates data pointers, and refreshes the chart visualization instantly without throwing layout pointer runtime faults.
 
 
-* **Airgapped Calculation Boundary Check:**
-* *Action:* Completely disconnect all networking options from the desktop testing machine. Enter data cleaning filters across a 5,000 row analytics report layer.
-* *Expected:* In-memory calculations and statistical chart layers render instantly without crashing the interface or attempting external script downloads.
+* **Empty Array State Fallback Verification:**
+* *Action:* Select an active tracking file dataset from the sidebar column, but clear or delete all series rows inside the axis configurator panel layout area.
+* *Expected:* The visualization container transitions into a clean fallback display window showing an informative descriptive prompt message: `"Select at least one Y series metric above to render a chart."`
