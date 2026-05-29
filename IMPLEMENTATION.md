@@ -68,11 +68,11 @@ export interface PreprocessConfig {
 
 #### Phase 4: JavaScript In-Memory Aggregation Pipeline
 
-* [ ] **Step 4.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, adjust `buildAggregationQuery` behavior. If no preprocessing flags are toggled active, return the existing query format. If any preprocessing configuration is set to true, alter the query compilation to pull the unaggregated text contents (`json_extract(cells, '$[N]')`) directly from the table database blocks up to a strict window limit of 10,000 records.
-* [ ] **Step 4.2:** Build an internal row transformation worker function named `applyLocalPreprocessing(rawRows: any[], config: AxisConfig, headers: string[])`.
-* [ ] **Step 4.3:** Inside this mapping loop, apply the configured regular expressions using native JavaScript matching routines (`new RegExp()`). Extract capturing group parameters, feed them to `evaluateSafeFormula`, and compute calculated numeric numbers for each coordinate index row.
-* [ ] **Step 4.4:** Process the resulting preprocessed arrays using in-memory JavaScript array reductions to perform the active aggregation routines (`AVG`, `SUM`, `COUNT`) grouped uniformly by the computed X value strings, sorting data points to feed directly into the chart display loops.
-* [ ] **Verification:** Load a testing file dataset containing raw un-formatted time intervals. Configure preprocessor filters on the active columns. Verify that the application prints properly grouped clean dataset points to the terminal stream.
+* [x] **Step 4.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, adjust `buildAggregationQuery` behavior. If no preprocessing flags are toggled active, return the existing query format. If any preprocessing configuration is set to true, alter the query compilation to pull the unaggregated text contents (`json_extract(cells, '$[N]')`) directly from the table database blocks up to a strict window limit of 10,000 records.
+* [x] **Step 4.2:** Build an internal row transformation worker function named `applyLocalPreprocessing(rawRows: any[], config: AxisConfig, headers: string[])`.
+* [x] **Step 4.3:** Inside this mapping loop, apply the configured regular expressions using native JavaScript matching routines (`new RegExp()`). Extract capturing group parameters, feed them to `evaluateSafeFormula`, and compute calculated numeric numbers for each coordinate index row.
+* [x] **Step 4.4:** Process the resulting preprocessed arrays using in-memory JavaScript array reductions to perform the active aggregation routines (`AVG`, `SUM`, `COUNT`) grouped uniformly by the computed X value strings, sorting data points to feed directly into the chart display loops.
+* [x] **Verification:** Load a testing file dataset containing raw un-formatted time intervals. Configure preprocessor filters on the active columns. Verify that the application prints properly grouped clean dataset points to the terminal stream.
 
 #### Phase 5: Dashboard Processing Pipeline Integration
 
