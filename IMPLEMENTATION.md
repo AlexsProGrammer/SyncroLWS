@@ -69,9 +69,9 @@ export interface AggRow {
 
 #### Phase 3: Dynamic Multi-Series Axis Configurator UI
 
-* [ ] **Step 3.1:** Open `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`. Retain the top single-column dropdown panel selector matching the coordinate X Axis structure.
-* [ ] **Step 3.2:** Beneath the X Axis dropdown, build a dynamic vertical form collection panel mapping directly over the `value.ySeries` array list using a `.map()` layout expression.
-* [ ] **Step 3.3:** For each configured item in the row loop, render a layout row containing:
+* [x] **Step 3.1:** Open `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`. Retain the top single-column dropdown panel selector matching the coordinate X Axis structure.
+* [x] **Step 3.2:** Beneath the X Axis dropdown, build a dynamic vertical form collection panel mapping directly over the `value.ySeries` array list using a `.map()` layout expression.
+* [x] **Step 3.3:** For each configured item in the row loop, render a layout row containing:
 * A column picker component `<ColSelect />`.
 * An aggregation method selector `<AggSelect />`.
 * A chart visualization type dropdown selector containing options for `Line`, `Bar`, and `Area`.
@@ -79,7 +79,7 @@ export interface AggRow {
 * A click-action delete button to remove that specific element row index from the active configuration array.
 
 
-* [ ] **Step 3.4:** Add an "Add Series Metric" icon button row component directly at the bottom boundary of the list tracker view. When clicked, append a fresh `YSeriesItem` object to the collection array with default values (`colId: null`, `agg: 'AVG'`, `drawType: 'bar'`, `fillHex: '#6366f1'`).
+* [x] **Step 3.4:** Add an "Add Series Metric" icon button row component directly at the bottom boundary of the list tracker view. When clicked, append a fresh `YSeriesItem` object to the collection array with default values (`colId: null`, `agg: 'AVG'`, `drawType: 'bar'`, `fillHex: '#6366f1'`).
 * [ ] **Verification:** Open the Analytics module dashboard workspace in the Tauri application window. Click the "Add Series Metric" selector multiple times and check that the configuration rows spawn independently in the control panel space.
 
 #### Phase 4: Polymorphic Visualization Layer Compilation

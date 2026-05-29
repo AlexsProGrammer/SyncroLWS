@@ -278,14 +278,46 @@ function DateSortButton({
   );
 }
 
+// ── DrawTypeSelect ────────────────────────────────────────────────────────────────────
+
+const DRAW_OPTIONS: Array<{ value: YSeriesItem['drawType']; label: string }> = [
+  { value: 'bar',  label: 'Bar'  },
+  { value: 'line', label: 'Line' },
+  { value: 'area', label: 'Area' },
+];
+
+function DrawTypeSelect({
+  value,
+  onChange,
+}: {
+  value: YSeriesItem['drawType'];
+  onChange: (v: YSeriesItem['drawType']) => void;
+}): React.ReactElement {
+  return (
+    <div className="relative">
+      <select
+        className={SELECT_CLS}
+        value={value}
+        onChange={(e) => onChange(e.target.value as YSeriesItem['drawType'])}
+      >
+        {DRAW_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown />
+    </div>
+  );
+}
+
 // ── AxisConfigurator ───────────────────────────────────────────────────────────────────
 
 /**
- * Renders three column-selector strips (X, Y1-primary, Y2-secondary).
- * Each strip has an f(x) button that reveals a collapsible PreprocessPanel
- * for configuring regex token extraction and formula evaluation.
- * The X strip additionally exposes a `date` button for configuring a
- * date/time format string that enables chronological X-axis sorting.
+ * Renders an X-axis column selector (with preprocessing and date-sort options)
+ * followed by a dynamic list of Y series rows. Each row exposes a column
+ * picker, aggregation selector, draw-type selector, colour picker, and a
+ * remove button. An "Add Series Metric" button appends new rows.
  * All state is lifted to the parent via `onChange`.
  */
 export function AxisConfigurator({
@@ -302,6 +334,21 @@ export function AxisConfigurator({
     setOpenPanel((prev) => (prev === panel ? null : panel));
 
   const xCfg = value.xPreprocess ?? { ...DEFAULT_PREPROCESS_CONFIG };
+
+  const updateSeries = (i: number, patch: Partial<YSeriesItem>) => {
+    set('ySeries', value.ySeries.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
+  };
+
+  const removeSeries = (i: number) => {
+    set('ySeries', value.ySeries.filter((_, idx) => idx !== i));
+  };
+
+  const addSeries = () => {
+    set('ySeries', [
+      ...value.ySeries,
+      { colId: null, agg: 'AVG', drawType: 'bar', fillHex: '#6366f1' },
+    ]);
+  };
 
   return (
     <div className="flex flex-col gap-2 px-6 py-3 border-b border-border bg-muted/30">
@@ -346,7 +393,82 @@ export function AxisConfigurator({
         )}
       </div>
 
-      {/* Y Series — rebuilt in Phase 3 */}
+      {/* Y Series */}
+      <div className="flex flex-col gap-1.5">
+        <span className="text-xs font-medium text-foreground">Y Series</span>
+
+        {/* Step 3.2 — dynamic list mapped over value.ySeries */}
+        {value.ySeries.map((s, i) => (
+          // Step 3.3 — one row per series
+          <div key={i} className="flex gap-1 items-center">
+            {/* Column picker */}
+            <div className="flex-1 min-w-0">
+              <ColSelect
+                headers={headers}
+                value={s.colId}
+                onChange={(v) => updateSeries(i, { colId: v })}
+                placeholder="Select column…"
+              />
+            </div>
+
+            {/* Aggregation selector */}
+            <AggSelect
+              value={s.agg}
+              onChange={(v) => updateSeries(i, { agg: v })}
+            />
+
+            {/* Draw-type selector */}
+            <DrawTypeSelect
+              value={s.drawType}
+              onChange={(v) => updateSeries(i, { drawType: v })}
+            />
+
+            {/* Hex colour picker */}
+            <div className="shrink-0 rounded border border-border overflow-hidden">
+              <input
+                type="color"
+                value={s.fillHex}
+                onChange={(e) => updateSeries(i, { fillHex: e.target.value })}
+                className="block w-7 h-[26px] cursor-pointer bg-transparent p-0.5"
+                title="Series colour"
+              />
+            </div>
+
+            {/* Remove button */}
+            <button
+              type="button"
+              onClick={() => removeSeries(i)}
+              title="Remove series"
+              className={
+                'shrink-0 flex items-center justify-center w-6 h-6 rounded border ' +
+                'border-border bg-muted/50 text-muted-foreground transition-colors ' +
+                'hover:text-destructive hover:border-destructive/60 hover:bg-destructive/10 ' +
+                'focus:outline-none focus:ring-1 focus:ring-ring'
+              }
+            >
+              <svg viewBox="0 0 16 16" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        ))}
+
+        {/* Step 3.4 — Add Series Metric button */}
+        <button
+          type="button"
+          onClick={addSeries}
+          className={
+            'mt-0.5 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground ' +
+            'hover:text-foreground border border-dashed border-border rounded px-2 py-1.5 ' +
+            'transition-colors hover:bg-muted/50 focus:outline-none focus:ring-1 focus:ring-ring'
+          }
+        >
+          <svg viewBox="0 0 16 16" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M8 2v12M2 8h12" strokeLinecap="round" />
+          </svg>
+          Add Series Metric
+        </button>
+      </div>
     </div>
   );
 }
