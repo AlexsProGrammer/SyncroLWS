@@ -1,8 +1,23 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import {
+  ComposedChart,
+  Bar,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
 import { getWorkspaceDB } from '@/core/db';
 import { cn } from '@/lib/utils';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { CSVImportZone } from './components/CSVImportZone';
+import { AxisConfigurator, DEFAULT_AXIS_CONFIG } from './components/AxisConfigurator';
+import type { AxisConfig } from './components/AxisConfigurator';
+import { buildAggregationQuery, mapToChartPoints } from './utils/aggregationEngine';
+import type { AggRow, ChartPoint } from './utils/aggregationEngine';
 import type { ToolViewProps } from '@/registry/ToolRegistry';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -29,6 +44,10 @@ export function AnalyticsDashboardView({ toolInstanceId: _toolInstanceId }: Tool
   const [datasets, setDatasets] = useState<DatasetRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [axisConfig, setAxisConfig] = useState<AxisConfig>(DEFAULT_AXIS_CONFIG);
+  const [chartPoints, setChartPoints] = useState<ChartPoint[]>([]);
+  const [queryError, setQueryError] = useState<string | null>(null);
+  const [isQuerying, setIsQuerying] = useState(false);
 
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
 
@@ -53,6 +72,45 @@ export function AnalyticsDashboardView({ toolInstanceId: _toolInstanceId }: Tool
   useEffect(() => {
     void loadDatasets();
   }, [loadDatasets, activeWorkspaceId]);
+
+  // Re-run the aggregation query when the selected dataset or axis config changes
+  const runQuery = useCallback(async () => {
+    if (!selectedId) {
+      setChartPoints([]);
+      return;
+    }
+    const built = buildAggregationQuery(selectedId, axisConfig);
+    if (!built) {
+      setChartPoints([]);
+      return;
+    }
+    setIsQuerying(true);
+    setQueryError(null);
+    try {
+      const db = getWorkspaceDB();
+      const rows = await db.select<AggRow[]>(built.sql, [...built.params]);
+      setChartPoints(mapToChartPoints(rows));
+    } catch (err) {
+      console.error('[module:analytics] Aggregation query failed:', err);
+      setQueryError(
+        'Query failed — ensure Y columns contain numeric values for AVG / SUM.',
+      );
+    } finally {
+      setIsQuerying(false);
+    }
+  }, [selectedId, axisConfig]);
+
+  // Reset axis state when the active dataset changes
+  useEffect(() => {
+    setAxisConfig(DEFAULT_AXIS_CONFIG);
+    setChartPoints([]);
+    setQueryError(null);
+  }, [selectedId]);
+
+  // Fire aggregation whenever runQuery reference updates (dataset or config changed)
+  useEffect(() => {
+    void runQuery();
+  }, [runQuery]);
 
   const selected = datasets.find((d) => d.id === selectedId) ?? null;
   const selectedHeaders = selected ? parseHeaders(selected.headers) : [];
@@ -141,17 +199,83 @@ export function AnalyticsDashboardView({ toolInstanceId: _toolInstanceId }: Tool
               </div>
             </div>
 
-            {/*
-              Chart area — AxisConfigurator + recharts charts are mounted here
-              by Phase 5. The id attr allows Phase 5 to augment this region.
-            */}
-            <div
-              id="analytics-chart-area"
-              className="flex-1 flex items-center justify-center"
-            >
-              <p className="text-sm text-muted-foreground">
-                Configure axes to render a chart (coming in Phase 5).
-              </p>
+            {/* Axis configuration strip */}
+            <AxisConfigurator
+              headers={selectedHeaders}
+              value={axisConfig}
+              onChange={setAxisConfig}
+            />
+
+            {/* Chart area */}
+            <div className="flex-1 overflow-hidden">
+              {isQuerying ? (
+                <div className="h-full flex items-center justify-center">
+                  <p className="text-sm text-muted-foreground">Computing…</p>
+                </div>
+              ) : queryError !== null ? (
+                <div className="h-full flex items-center justify-center px-8">
+                  <p className="text-sm text-destructive text-center">{queryError}</p>
+                </div>
+              ) : axisConfig.xCol === null || axisConfig.y1Col === null ? (
+                <div className="h-full flex items-center justify-center">
+                  <p className="text-sm text-muted-foreground">
+                    Select X and Y1 columns above to render a chart.
+                  </p>
+                </div>
+              ) : chartPoints.length === 0 ? (
+                <div className="h-full flex items-center justify-center">
+                  <p className="text-sm text-muted-foreground">
+                    No data returned for the current selection.
+                  </p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart
+                    data={chartPoints}
+                    margin={{
+                      top: 20,
+                      right: axisConfig.y2Col !== null ? 60 : 24,
+                      bottom: 28,
+                      left: 8,
+                    }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.2)" />
+                    <XAxis dataKey="x" tick={{ fontSize: 11 }} />
+                    <YAxis
+                      yAxisId="primary"
+                      orientation="left"
+                      tick={{ fontSize: 11 }}
+                    />
+                    {axisConfig.y2Col !== null && (
+                      <YAxis
+                        yAxisId="secondary"
+                        orientation="right"
+                        tick={{ fontSize: 11 }}
+                      />
+                    )}
+                    <Tooltip />
+                    <Legend />
+                    <Bar
+                      yAxisId="primary"
+                      dataKey="y1"
+                      name={`${axisConfig.y1Agg}(${selectedHeaders[axisConfig.y1Col] ?? 'Y1'})`}
+                      fill="#6366f1"
+                      maxBarSize={60}
+                    />
+                    {axisConfig.y2Col !== null && (
+                      <Line
+                        yAxisId="secondary"
+                        type="monotone"
+                        dataKey="y2"
+                        name={`${axisConfig.y2Agg}(${selectedHeaders[axisConfig.y2Col] ?? 'Y2'})`}
+                        stroke="#f59e0b"
+                        strokeWidth={2}
+                        dot={false}
+                      />
+                    )}
+                  </ComposedChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </>
         ) : (

@@ -78,10 +78,10 @@
 
 #### Phase 5: Dynamic Aggregation Query Generation Setup
 
-* [ ] **Step 5.1:** Create `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`. Render dropdown fields allowing interactive column selector states mapping parameters into coordinate axis references.
-* [ ] **Step 5.2:** Create `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`. Implement a dynamic SQL string compiler utility method that generates native SQLite query definitions.
-* [ ] **Step 5.3:** Leverage raw `json_extract()` operators inside your generated queries to extract arrays stored in the `cells` text property, computing statistical fields (`AVG`, `SUM`, `COUNT`) grouped exactly by the selected coordinate values.
-* [ ] **Step 5.4:** Map raw query execution datasets from the local database proxy layer into separate left and right Recharts Y-axis plotting collections (`yAxisId="primary"`, `yAxisId="secondary"`).
+* [x] **Step 5.1:** Create `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`. Render dropdown fields allowing interactive column selector states mapping parameters into coordinate axis references.
+* [x] **Step 5.2:** Create `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`. Implement a dynamic SQL string compiler utility method that generates native SQLite query definitions.
+* [x] **Step 5.3:** Leverage raw `json_extract()` operators inside your generated queries to extract arrays stored in the `cells` text property, computing statistical fields (`AVG`, `SUM`, `COUNT`) grouped exactly by the selected coordinate values.
+* [x] **Step 5.4:** Map raw query execution datasets from the local database proxy layer into separate left and right Recharts Y-axis plotting collections (`yAxisId="primary"`, `yAxisId="secondary"`).
 * [ ] **Verification:** Run a project-wide type compilation verification step via `npm run build` or `npx tsc --noEmit` and confirm all module integrations complete with zero interface warnings.
 
 ---
