@@ -1,0 +1,11 @@
+{
+  "id": "time-intelligence",
+  "name": "Time Intelligence Suite",
+  "version": "1.0.0",
+  "description": "Premium life-bucket analytics, statistical window metrics, and predictive time insights. All data stays strictly local — DSGVO compliant.",
+  "icon": "timer",
+  "entityTypes": [],
+  "hasPortalView": false,
+  "portalPermissions": [],
+  "configSchema": {}
+}

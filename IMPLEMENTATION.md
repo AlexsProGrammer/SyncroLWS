@@ -64,9 +64,9 @@
 
 #### Phase 3: Dynamic Module Infrastructure & Premium Interface
 
-* [ ] **Step 3.1:** Create `apps/desktop/src/modules/time-intelligence/manifest.json`. Configure module discovery specifications with structural properties (id: `"time-intelligence"`, name: `"Time Intelligence Suite"`, icon mapping pointer: `"timer"`).
-* [ ] **Step 3.2:** Create `apps/desktop/src/modules/time-intelligence/index.ts` to register tool entrypoints and connect view routers cleanly into the system module lookup loop.
-* [ ] **Step 3.3:** Create `apps/desktop/src/modules/time-intelligence/IntelligenceDashboard.tsx`. Build a modern visual analytics reporting dashboard layout featuring grid metric indicators, split bucket summaries, and interactive chart panels utilizing Recharts components.
+* [x] **Step 3.1:** Create `apps/desktop/src/modules/time-intelligence/manifest.json`. Configure module discovery specifications with structural properties (id: `"time-intelligence"`, name: `"Time Intelligence Suite"`, icon mapping pointer: `"timer"`).
+* [x] **Step 3.2:** Create `apps/desktop/src/modules/time-intelligence/index.ts` to register tool entrypoints and connect view routers cleanly into the system module lookup loop.
+* [x] **Step 3.3:** Create `apps/desktop/src/modules/time-intelligence/IntelligenceDashboard.tsx`. Build a modern visual analytics reporting dashboard layout featuring grid metric indicators, split bucket summaries, and interactive chart panels utilizing Recharts components.
 * [ ] **Verification:** Start the runtime client environment package via `npm run tauri dev`. Confirm the new "Time Intelligence" module acts as a valid sidebar target, routing cleanly to an empty metrics dashboard view.
 
 #### Phase 4: Predictive Inference Engine & Milestone Alerts

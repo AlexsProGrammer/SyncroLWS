@@ -407,10 +407,16 @@ export async function getBucketSummary(fromISO: string, toISO?: string): Promise
       t.value                                                                          AS bucket,
       COUNT(*)                                                                         AS entry_count,
       SUM(CAST(json_extract(ea.data, '$.duration_seconds') AS INTEGER))               AS total_seconds
-    ${TL_JOIN}
+    FROM base_entities be
+    JOIN entity_aspects ea ON ea.entity_id = be.id
+    JOIN json_each(be.tags) t
+    WHERE ea.aspect_type = 'time_log'
+      AND be.deleted_at IS NULL
+      AND ea.deleted_at IS NULL
+      AND json_extract(ea.data, '$.duration_seconds') IS NOT NULL
       AND json_extract(ea.data, '$.start') >= ?
       AND json_extract(ea.data, '$.start') <= ?
-    JOIN json_each(be.tags) t ON t.value LIKE 'bucket:%'
+      AND t.value LIKE 'bucket:%'
     GROUP BY t.value
     ORDER BY total_seconds DESC
   `;
@@ -439,10 +445,16 @@ export async function getTagConcentration(fromISO: string, toISO?: string): Prom
       t.value                                                                          AS tag,
       COUNT(*)                                                                         AS count,
       SUM(CAST(json_extract(ea.data, '$.duration_seconds') AS INTEGER))               AS total_seconds
-    ${TL_JOIN}
+    FROM base_entities be
+    JOIN entity_aspects ea ON ea.entity_id = be.id
+    JOIN json_each(be.tags) t
+    WHERE ea.aspect_type = 'time_log'
+      AND be.deleted_at IS NULL
+      AND ea.deleted_at IS NULL
+      AND json_extract(ea.data, '$.duration_seconds') IS NOT NULL
       AND json_extract(ea.data, '$.start') >= ?
       AND json_extract(ea.data, '$.start') <= ?
-    JOIN json_each(be.tags) t ON t.value NOT LIKE 'bucket:%'
+      AND t.value NOT LIKE 'bucket:%'
     GROUP BY t.value
     ORDER BY total_seconds DESC
     LIMIT 30
