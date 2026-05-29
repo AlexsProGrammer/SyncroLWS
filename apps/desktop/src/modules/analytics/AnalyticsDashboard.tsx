@@ -16,8 +16,8 @@ import { useWorkspaceStore } from '@/store/workspaceStore';
 import { CSVImportZone } from './components/CSVImportZone';
 import { AxisConfigurator, DEFAULT_AXIS_CONFIG } from './components/AxisConfigurator';
 import type { AxisConfig } from './components/AxisConfigurator';
-import { buildAggregationQuery, mapToChartPoints } from './utils/aggregationEngine';
-import type { AggRow, ChartPoint } from './utils/aggregationEngine';
+import { buildAggregationQuery, mapToChartPoints, applyLocalPreprocessing } from './utils/aggregationEngine';
+import type { AggRow, RawRow, ChartPoint } from './utils/aggregationEngine';
 import type { ToolViewProps } from '@/registry/ToolRegistry';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -88,8 +88,25 @@ export function AnalyticsDashboardView({ toolInstanceId: _toolInstanceId }: Tool
     setQueryError(null);
     try {
       const db = getWorkspaceDB();
-      const rows = await db.select<AggRow[]>(built.sql, [...built.params]);
-      setChartPoints(mapToChartPoints(rows));
+
+      if (built.mode === 'raw') {
+        // Preprocessing path: fetch raw text cells and run the JS pipeline.
+        const rawRows = await db.select<RawRow[]>(built.sql, [...built.params]);
+        const ds = datasets.find((d) => d.id === selectedId);
+        const headers = ds ? parseHeaders(ds.headers) : [];
+        try {
+          setChartPoints(applyLocalPreprocessing(rawRows, axisConfig, headers));
+        } catch (preprocessErr) {
+          console.error('[module:analytics] Preprocessing failed:', preprocessErr);
+          setQueryError(
+            'Preprocessing failed — check your regex pattern for syntax errors.',
+          );
+        }
+      } else {
+        // Standard aggregated path: let SQLite handle grouping.
+        const rows = await db.select<AggRow[]>(built.sql, [...built.params]);
+        setChartPoints(mapToChartPoints(rows));
+      }
     } catch (err) {
       console.error('[module:analytics] Aggregation query failed:', err);
       setQueryError(
@@ -98,7 +115,7 @@ export function AnalyticsDashboardView({ toolInstanceId: _toolInstanceId }: Tool
     } finally {
       setIsQuerying(false);
     }
-  }, [selectedId, axisConfig]);
+  }, [selectedId, axisConfig, datasets]);
 
   // Reset axis state when the active dataset changes
   useEffect(() => {

@@ -76,10 +76,10 @@ export interface PreprocessConfig {
 
 #### Phase 5: Dashboard Processing Pipeline Integration
 
-* [ ] **Step 5.1:** Open `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx`. Locate the internal callback trigger function `runQuery`.
-* [ ] **Step 5.2:** Intercept the execution path where `db.select` fetches data points. Check if any preprocessing rules are checked active inside the `axisConfig` object.
-* [ ] **Step 5.3:** If processing rules apply, map the raw input array records directly through `applyLocalPreprocessing` before passing the computed points to `setChartPoints()`, updating application error display windows gracefully if bad regex boundaries throw syntax errors.
-* [ ] **Verification:** Run a workspace-wide type verification sweep using `npx tsc --noEmit` from the workspace root to confirm all layout components connect with type safety.
+* [x] **Step 5.1:** Open `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx`. Locate the internal callback trigger function `runQuery`.
+* [x] **Step 5.2:** Intercept the execution path where `db.select` fetches data points. Check if any preprocessing rules are checked active inside the `axisConfig` object.
+* [x] **Step 5.3:** If processing rules apply, map the raw input array records directly through `applyLocalPreprocessing` before passing the computed points to `setChartPoints()`, updating application error display windows gracefully if bad regex boundaries throw syntax errors.
+* [x] **Verification:** Run a workspace-wide type verification sweep using `npx tsc --noEmit` from the workspace root to confirm all layout components connect with type safety.
 
 ---
 

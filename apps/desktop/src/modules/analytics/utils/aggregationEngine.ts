@@ -81,7 +81,8 @@ export function buildAggregationQuery(
   const needsPreprocess =
     config.xPreprocess?.enabled ||
     config.y1Preprocess?.enabled ||
-    config.y2Preprocess?.enabled;
+    config.y2Preprocess?.enabled ||
+    !!config.xTimestampFormat;
 
   if (needsPreprocess) {
     // Raw path: fetch unaggregated text cells for JS-side preprocessing.
@@ -186,6 +187,74 @@ function aggregateValues(fn: AggFn, sum: number, count: number): number {
 }
 
 /**
+ * Parses a date/time string using a format template and returns a sortable
+ * integer (packed as YYYYMMDDHHmmSS) or `null` on any parse/validation error.
+ *
+ * Supported tokens (resolved longest-first so YYYY wins over YY):
+ *   YYYY  4-digit year         YY   2-digit year (00-49 → 2000s, 50-99 → 1900s)
+ *   MM    month 01-12          DD   day 01-31
+ *   HH    hour 00-23           mm   minute 00-59    SS   second 00-59
+ *
+ * Literal separator characters in the format string (dots, slashes, colons
+ * etc.) are escaped automatically — no manual escaping needed.
+ */
+function parseTimestamp(value: string, format: string): number | null {
+  if (!format) return null;
+
+  // Token → named-capture-group regex fragment (YYYY before YY avoids partial match)
+  const TOKEN_MAP: ReadonlyArray<readonly [string, string]> = [
+    ['YYYY', '(?<YYYY>\\d{4})'],
+    ['YY',   '(?<YY>\\d{2})'],
+    ['MM',   '(?<MM>\\d{1,2})'],
+    ['DD',   '(?<DD>\\d{1,2})'],
+    ['HH',   '(?<HH>\\d{1,2})'],
+    ['mm',   '(?<mm>\\d{1,2})'],
+    ['SS',   '(?<SS>\\d{1,2})'],
+  ] as const;
+
+  const TOKEN_RE = /YYYY|YY|MM|DD|HH|mm|SS/g;
+  let regexStr = '';
+  let cursor = 0;
+  let m: RegExpExecArray | null;
+
+  while ((m = TOKEN_RE.exec(format)) !== null) {
+    regexStr += format.slice(cursor, m.index).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const tok = m[0];
+    const entry = TOKEN_MAP.find(([t]) => t === tok);
+    regexStr += entry != null ? entry[1] : tok;
+    cursor = TOKEN_RE.lastIndex;
+  }
+  regexStr += format.slice(cursor).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  let re: RegExp;
+  try { re = new RegExp(`^${regexStr}$`); } catch { return null; }
+
+  const match = re.exec(value.trim());
+  if (match?.groups == null) return null;
+  const g = match.groups;
+
+  const dd = parseInt(g['DD'] ?? '1',  10);
+  const mo = parseInt(g['MM'] ?? '1',  10);
+  const hh = parseInt(g['HH'] ?? '0',  10);
+  const mi = parseInt(g['mm'] ?? '0',  10);
+  const ss = parseInt(g['SS'] ?? '0',  10);
+
+  const rawYYYY = g['YYYY'];
+  const rawYY   = g['YY'];
+  let yyyy = 0;
+  if (rawYYYY !== undefined) {
+    yyyy = parseInt(rawYYYY, 10);
+  } else if (rawYY !== undefined) {
+    const y2 = parseInt(rawYY, 10);
+    yyyy = y2 < 50 ? 2000 + y2 : 1900 + y2;
+  }
+
+  if (mo < 1 || mo > 12 || dd < 1 || dd > 31 || hh > 23 || mi > 59 || ss > 59) return null;
+
+  return yyyy * 10_000_000_000 + mo * 100_000_000 + dd * 1_000_000 + hh * 10_000 + mi * 100 + ss;
+}
+
+/**
  * Applies regex-based token extraction and formula evaluation to raw
  * un-aggregated rows, then performs in-memory grouping and aggregation to
  * produce chart points.
@@ -207,6 +276,9 @@ export function applyLocalPreprocessing(
   interface ProcessedRow { x: string; y1: number; y2: number | null; }
   const processed: ProcessedRow[] = [];
 
+  // When xTimestampFormat is set, map each unique X key to its parsed sort key.
+  const sortKeyMap = new Map<string, number>();
+
   for (const r of rawRows) {
     // X: if xPreprocess is active, derive numeric key; otherwise use raw string.
     let xKey: string;
@@ -217,6 +289,12 @@ export function applyLocalPreprocessing(
     } else {
       xKey = r.x_val ?? '';
       if (xKey === '') continue;
+    }
+
+    // Record timestamp sort key on first occurrence of this X value.
+    if (config.xTimestampFormat && !sortKeyMap.has(xKey)) {
+      const ts = parseTimestamp(r.x_val ?? '', config.xTimestampFormat);
+      if (ts !== null) sortKeyMap.set(xKey, ts);
     }
 
     // Y1 is required.
@@ -259,7 +337,14 @@ export function applyLocalPreprocessing(
     points.push(pt);
   }
 
-  points.sort((a, b) => a.x.localeCompare(b.x));
+  points.sort((a, b) => {
+    if (config.xTimestampFormat) {
+      const ta = sortKeyMap.get(a.x);
+      const tb = sortKeyMap.get(b.x);
+      if (ta !== undefined && tb !== undefined) return ta - tb;
+    }
+    return a.x.localeCompare(b.x);
+  });
 
   return points;
 }

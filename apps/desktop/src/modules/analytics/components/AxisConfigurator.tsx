@@ -27,6 +27,9 @@ export interface AxisConfig {
   xPreprocess?: PreprocessConfig;
   y1Preprocess?: PreprocessConfig;
   y2Preprocess?: PreprocessConfig;
+  /** Date/time format string for chronological X-axis sorting (e.g. "DD.MM.YY").
+   *  Tokens: DD MM YY YYYY HH mm SS. Leave empty for lexicographic sort. */
+  xTimestampFormat?: string;
 }
 
 export const DEFAULT_AXIS_CONFIG: AxisConfig = {
@@ -38,6 +41,7 @@ export const DEFAULT_AXIS_CONFIG: AxisConfig = {
   xPreprocess: { ...DEFAULT_PREPROCESS_CONFIG },
   y1Preprocess: { ...DEFAULT_PREPROCESS_CONFIG },
   y2Preprocess: { ...DEFAULT_PREPROCESS_CONFIG },
+  xTimestampFormat: '',
 };
 
 interface AxisConfiguratorProps {
@@ -212,12 +216,79 @@ function PreprocessButton({
   );
 }
 
+// ── DateSortPanel ─────────────────────────────────────────────────────────────────────
+
+function DateSortPanel({
+  format,
+  onChange,
+}: {
+  format: string;
+  onChange: (fmt: string) => void;
+}): React.ReactElement {
+  return (
+    <div className="mt-1.5 rounded-md border border-border bg-background p-2.5 flex flex-col gap-2 shadow-sm">
+      <div className="flex flex-col gap-0.5">
+        <span className="text-[11px] font-medium text-foreground">Date / timestamp format</span>
+        <span className="text-[10px] text-muted-foreground">
+          Tokens: DD · MM · YY / YYYY · HH · mm · SS
+        </span>
+        <Input
+          className="h-7 text-xs font-mono px-2"
+          value={format}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="DD.MM.YY"
+          spellCheck={false}
+        />
+        <span className="text-[10px] text-muted-foreground mt-0.5">
+          e.g. DD.MM.YY · MM/DD/YYYY · YYYY-MM-DD · DD.MM.YYYY HH:mm:SS
+        </span>
+      </div>
+      {format && (
+        <p className="text-[10px] text-muted-foreground border-t border-border pt-1.5">
+          X values are parsed and sorted chronologically. Clear to sort alphabetically.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function DateSortButton({
+  active,
+  open,
+  onToggle,
+}: {
+  active: boolean;
+  open: boolean;
+  onToggle: () => void;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title="Configure date / time axis sorting"
+      className={[
+        'shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded border transition-colors',
+        'focus:outline-none focus:ring-1 focus:ring-ring',
+        active
+          ? 'border-primary/60 bg-primary/10 text-primary'
+          : open
+          ? 'border-border bg-muted text-foreground'
+          : 'border-border bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted',
+      ].join(' ')}
+    >
+      date
+    </button>
+  );
+}
+
 // ── AxisConfigurator ───────────────────────────────────────────────────────────────────
 
 /**
  * Renders three column-selector strips (X, Y1-primary, Y2-secondary).
  * Each strip has an f(x) button that reveals a collapsible PreprocessPanel
  * for configuring regex token extraction and formula evaluation.
+ * The X strip additionally exposes a `date` button for configuring a
+ * date/time format string that enables chronological X-axis sorting.
  * All state is lifted to the parent via `onChange`.
  */
 export function AxisConfigurator({
@@ -225,12 +296,12 @@ export function AxisConfigurator({
   value,
   onChange,
 }: AxisConfiguratorProps): React.ReactElement {
-  const [openPanel, setOpenPanel] = React.useState<'x' | 'y1' | 'y2' | null>(null);
+  const [openPanel, setOpenPanel] = React.useState<'x' | 'y1' | 'y2' | 'xdate' | null>(null);
 
   const set = <K extends keyof AxisConfig>(key: K, v: AxisConfig[K]) =>
     onChange({ ...value, [key]: v });
 
-  const togglePanel = (panel: 'x' | 'y1' | 'y2') =>
+  const togglePanel = (panel: 'x' | 'y1' | 'y2' | 'xdate') =>
     setOpenPanel((prev) => (prev === panel ? null : panel));
 
   const setPreprocess = (
@@ -266,11 +337,22 @@ export function AxisConfigurator({
               open={openPanel === 'x'}
               onToggle={() => togglePanel('x')}
             />
+            <DateSortButton
+              active={!!(value.xTimestampFormat)}
+              open={openPanel === 'xdate'}
+              onToggle={() => togglePanel('xdate')}
+            />
           </div>
           {openPanel === 'x' && (
             <PreprocessPanel
               config={xCfg}
               onChange={(cfg) => setPreprocess('xPreprocess', cfg)}
+            />
+          )}
+          {openPanel === 'xdate' && (
+            <DateSortPanel
+              format={value.xTimestampFormat ?? ''}
+              onChange={(fmt) => set('xTimestampFormat', fmt)}
             />
           )}
         </div>
