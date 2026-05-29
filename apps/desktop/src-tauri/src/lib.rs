@@ -57,6 +57,7 @@ pub fn run() {
             commands::copy_workspace_data,
             commands::clear_profile_data,
             commands::stream_csv_to_sqlite,
+            commands::stream_file_to_sqlite,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SyncroLWS");

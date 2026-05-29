@@ -439,3 +439,180 @@ pub async fn stream_csv_to_sqlite(
     .await
     .map_err(|e| format!("spawn_blocking failed: {e}"))?
 }
+
+// ── Analytics: unified multi-format file importer ────────────────────────────
+
+/// Shared batch-flush helper used by `stream_file_to_sqlite`.
+/// Wraps all pending `(row_index, cells_json)` pairs in a single
+/// `BEGIN` / `COMMIT` transaction and clears the buffer afterwards.
+fn flush_analytics_batch(
+    conn: &rusqlite::Connection,
+    dataset_id: &str,
+    pending: &mut Vec<(u64, String)>,
+) -> Result<(), String> {
+    if pending.is_empty() {
+        return Ok(());
+    }
+    conn.execute_batch("BEGIN;")
+        .map_err(|e| format!("[analytics] BEGIN failed: {e}"))?;
+    {
+        let mut stmt = conn
+            .prepare_cached(
+                "INSERT INTO analytics_raw_records \
+                 (dataset_id, row_index, cells) VALUES (?1, ?2, ?3)",
+            )
+            .map_err(|e| format!("[analytics] Failed to prepare INSERT: {e}"))?;
+        for (row_index, cells_json) in pending.iter() {
+            stmt.execute(rusqlite::params![dataset_id, row_index, cells_json])
+                .map_err(|e| format!("[analytics] Failed to insert row {row_index}: {e}"))?;
+        }
+    }
+    conn.execute_batch("COMMIT;")
+        .map_err(|e| format!("[analytics] COMMIT failed: {e}"))?;
+    pending.clear();
+    Ok(())
+}
+
+/// Imports any major tabular file format into the analytics sandbox SQLite tables.
+///
+/// Supported formats and their detected extensions:
+///   - CSV  (.csv)           — comma-separated
+///   - TSV  (.tsv / .tab)   — tab-separated
+///   - XLSX (.xlsx / .xlsm) — Excel Open XML
+///   - XLS  (.xls)          — Excel 97-2003 Binary
+///   - ODS  (.ods)          — OpenDocument Spreadsheet
+///
+/// The first row is always treated as column headers. Rows are inserted in
+/// batches of 5 000 inside explicit transactions. All I/O runs on a blocking
+/// thread — the JS/UI thread stays free throughout.
+///
+/// Returns the total number of data rows written (header row excluded).
+///
+/// Frontend: `invoke('stream_file_to_sqlite', { filePath, datasetId, dbPath })`
+#[tauri::command]
+pub async fn stream_file_to_sqlite(
+    file_path: String,
+    dataset_id: String,
+    db_path: String,
+) -> Result<u64, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = std::path::Path::new(&file_path);
+        if !path.exists() {
+            return Err(format!("[analytics] File not found: {file_path}"));
+        }
+
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        let dataset_name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Dataset")
+            .to_string();
+
+        // Open workspace SQLite connection
+        let conn = rusqlite::Connection::open(&db_path)
+            .map_err(|e| format!("[analytics] Failed to open DB ({db_path}): {e}"))?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
+            .map_err(|e| format!("[analytics] PRAGMA failed: {e}"))?;
+
+        const BATCH_SIZE: usize = 5_000;
+        let mut pending: Vec<(u64, String)> = Vec::with_capacity(BATCH_SIZE);
+        let mut total_rows: u64 = 0;
+        let headers_json: String;
+
+        match ext.as_str() {
+            // ── Delimited text (CSV / TSV) ─────────────────────────────────
+            "csv" | "tsv" | "tab" => {
+                let delimiter: u8 = if ext == "csv" { b',' } else { b'\t' };
+                let mut rdr = csv::ReaderBuilder::new()
+                    .delimiter(delimiter)
+                    .from_path(path)
+                    .map_err(|e| format!("[analytics] Failed to open file: {e}"))?;
+
+                let headers: Vec<String> = rdr
+                    .headers()
+                    .map_err(|e| format!("[analytics] Failed to read headers: {e}"))?
+                    .iter()
+                    .map(|h| h.to_string())
+                    .collect();
+                headers_json = serde_json::to_string(&headers)
+                    .map_err(|e| format!("[analytics] Serialise headers: {e}"))?;
+
+                for result in rdr.records() {
+                    let record = result.map_err(|e| {
+                        format!("[analytics] Parse error at row {total_rows}: {e}")
+                    })?;
+                    let cells: Vec<&str> = record.iter().collect();
+                    let cells_json = serde_json::to_string(&cells)
+                        .map_err(|e| format!("[analytics] Serialise row {total_rows}: {e}"))?;
+                    total_rows += 1;
+                    pending.push((total_rows, cells_json));
+                    if pending.len() >= BATCH_SIZE {
+                        flush_analytics_batch(&conn, &dataset_id, &mut pending)?;
+                    }
+                }
+            }
+
+            // ── Spreadsheet formats (Excel / ODS via calamine) ─────────────
+            "xlsx" | "xls" | "xlsm" | "ods" => {
+                use calamine::{open_workbook_auto, Reader};
+                let mut wb: calamine::Sheets<_> = open_workbook_auto(path)
+                    .map_err(|e| format!("[analytics] Failed to open workbook: {e}"))?;
+
+                let sheet = wb
+                    .worksheet_range_at(0)
+                    .ok_or_else(|| "[analytics] Workbook contains no sheets".to_string())?
+                    .map_err(|e| format!("[analytics] Failed to read sheet: {e}"))?;
+
+                let mut rows_iter = sheet.rows();
+
+                // First row → headers
+                let header_row = rows_iter
+                    .next()
+                    .ok_or_else(|| "[analytics] Sheet is empty — no header row found".to_string())?;
+                let headers: Vec<String> = header_row.iter().map(|c| c.to_string()).collect();
+                headers_json = serde_json::to_string(&headers)
+                    .map_err(|e| format!("[analytics] Serialise headers: {e}"))?;
+
+                for row in rows_iter {
+                    let cells: Vec<String> = row.iter().map(|c| c.to_string()).collect();
+                    let cells_json = serde_json::to_string(&cells)
+                        .map_err(|e| format!("[analytics] Serialise row {total_rows}: {e}"))?;
+                    total_rows += 1;
+                    pending.push((total_rows, cells_json));
+                    if pending.len() >= BATCH_SIZE {
+                        flush_analytics_batch(&conn, &dataset_id, &mut pending)?;
+                    }
+                }
+            }
+
+            other => {
+                return Err(format!(
+                    "[analytics] Unsupported file type: .{other}. \
+                     Supported: csv, tsv, tab, xlsx, xls, xlsm, ods"
+                ));
+            }
+        }
+
+        // Flush remaining partial batch
+        flush_analytics_batch(&conn, &dataset_id, &mut pending)?;
+
+        // Upsert dataset metadata row
+        conn.execute(
+            "INSERT OR REPLACE INTO analytics_datasets \
+             (id, name, row_count, headers, created_at) \
+             VALUES (?1, ?2, ?3, ?4, datetime('now'))",
+            rusqlite::params![dataset_id, dataset_name, total_rows as i64, headers_json],
+        )
+        .map_err(|e| format!("[analytics] Failed to upsert analytics_datasets: {e}"))?;
+
+        println!("[analytics] imported {total_rows} rows → dataset {dataset_id}");
+        Ok(total_rows)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking failed: {e}"))?
+}

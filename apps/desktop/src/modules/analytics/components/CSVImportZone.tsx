@@ -33,10 +33,15 @@ export function CSVImportZone({ onComplete }: CSVImportZoneProps): React.ReactEl
   const [state, setState] = useState<ImportState>({ status: 'idle' });
 
   const handleImport = useCallback(async () => {
-    // Open native OS file picker — restricted to CSV files, no multi-select
+    // Open native OS file picker — all supported tabular formats
     const selected = await open({
       multiple: false,
-      filters: [{ name: 'CSV Files', extensions: ['csv'] }],
+      filters: [
+        {
+          name: 'Tabular Data',
+          extensions: ['csv', 'tsv', 'tab', 'xlsx', 'xls', 'xlsm', 'ods'],
+        },
+      ],
     });
 
     // User cancelled or dialog returned nothing
@@ -73,8 +78,8 @@ export function CSVImportZone({ onComplete }: CSVImportZoneProps): React.ReactEl
       });
       const dbPath = `${workspacePath}/data.sqlite`;
 
-      // Hand the CSV streaming work off to the Rust thread — UI stays free
-      const rowCount = await invoke<number>('stream_csv_to_sqlite', {
+      // Hand the file streaming work off to the Rust thread — UI stays free
+      const rowCount = await invoke<number>('stream_file_to_sqlite', {
         filePath,
         datasetId,
         dbPath,
@@ -112,7 +117,7 @@ export function CSVImportZone({ onComplete }: CSVImportZoneProps): React.ReactEl
         ) : (
           <>
             <UploadIcon className="w-3 h-3" />
-            Import CSV
+            Import File
           </>
         )}
       </button>
