@@ -6,12 +6,16 @@ import { Switch } from '@/ui/components/switch';
 
 export type AggFn = 'AVG' | 'SUM' | 'COUNT';
 
+export type CategoryMapping = Record<string, number>;
+
 export interface YSeriesItem {
   colId: number | null;
   agg: AggFn;
   drawType: 'line' | 'bar' | 'area';
   fillHex: string;
   preprocess?: PreprocessConfig;
+  mode: 'numeric' | 'categorical';
+  mappingRules: CategoryMapping;
 }
 
 export interface PreprocessConfig {
@@ -347,7 +351,7 @@ export function AxisConfigurator({
   const addSeries = () => {
     set('ySeries', [
       ...value.ySeries,
-      { colId: null, agg: 'AVG', drawType: 'bar', fillHex: '#6366f1', preprocess: { ...DEFAULT_PREPROCESS_CONFIG } },
+      { colId: null, agg: 'AVG', drawType: 'bar', fillHex: '#6366f1', preprocess: { ...DEFAULT_PREPROCESS_CONFIG }, mode: 'numeric', mappingRules: {} },
     ]);
   };
 

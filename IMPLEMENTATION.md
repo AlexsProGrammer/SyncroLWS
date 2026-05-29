@@ -1,11 +1,11 @@
 # IMPLEMENTATION.md
 
 ## 1. Project Context & Architecture
-- **Goal:** Refactor the analytics workspace rendering subsystem from a rigid dual-axis configuration into an open, dynamic multi-series array architecture. This allows users to add an arbitrary number of quantitative metrics to a single chart timeline and overlay different polymorphic visual layout configurations (Bar, Line, Area) simultaneously.
+- **Goal:** Build a user-defined Categorical Encoder and String Enum Mapping Engine for the Analytics Suite. This system allows users to translate discrete qualitative text codes (e.g., `"H"` for Home, `"W"` for Workplace) from unstructured CSV files into continuous numeric scores directly inside the parameterized SQLite aggregation compiler via polymorphic `CASE` statement evaluation logic.
 - **Tech Stack & Dependencies:**
-  - **Core Frameworks:** Tauri 2.0, React, Vite, Drizzle ORM, TypeScript.
-  - **Charting Engine:** `recharts` (utilizing `ComposedChart`, `Bar`, `Line`, `Area`, `XAxis`, `YAxis`, `CartesianGrid`, `Tooltip`, `Legend`).
-  - **Commands:** No new packages are required; uses the existing project-wide Recharts charting installation.
+  - **Core Frameworks:** Tauri 2.0, React, Vite, TypeScript, Drizzle ORM, Tailwind CSS.
+  - **Dependencies:** Existing charting libraries (`recharts`) and state stores (`useWorkspaceStore`).
+  - **Commands:** No new package manager installations are required. Uses native SQL optimization layers and React state lifting.
 - **File Structure:**
   ```text
   └── apps/
@@ -13,98 +13,76 @@
           └── src/
               └── modules/
                   └── analytics/
-                      ├── AnalyticsDashboard.tsx # Modified: Update query execution and render loop
+                      ├── AnalyticsDashboard.tsx # Modified: Update reporting layout data binding
                       ├── components/
-                      │   └── AxisConfigurator.tsx # Modified: Redesign multi-series configuration panel
+                      │   ├── AxisConfigurator.tsx       # Modified: Integrate enum selector triggers into series items
+                      │   └── CategoryMappingEditor.tsx # Created: New inline dynamic dictionary mapping interface
                       └── utils/
-                          └── aggregationEngine.ts # Modified: Dynamic SQL generator and chart point mapper
+                          └── aggregationEngine.ts       # Modified: Inject polymorphic CASE statement injection logic
 
 ```
 
-* **Attention Points:** - Data mapping keys passed into Recharts elements must align exactly with the dynamic fields produced by the query parser to avoid rendering blank frames.
-* Predefined or custom color choices must be tracked safely within individual series objects to prevent index alignment issues when items are removed.
+* **Attention Points:** - The column encoder must generate safe SQL templates by restricting string-enum matching keys to validated lookups, guarding against injection profiles during `CASE WHEN` compilation blocks.
+* Ensure compatibility with the multi-series structure (`ySeries: YSeriesItem[]`) introduced in Part 3.2.
 
 
-* **DSGVO:** Chart configurations, dynamic series matrices, metric color variables, and visualization layouts live strictly in the on-device interface state memory and profile container, entirely free from third-party tracking pixels or telemetry engines.
+* **DSGVO:** String dictionary translations, encoding weights, text tokens, and relative frequencies are processed entirely inside the local SQLite database context and front-end state parameters. No data blocks or qualitative codebooks may be transmitted to cloud services.
 
 ---
 
 ## 2. Execution Phases
 
-#### Phase 1: Shared Configuration Interfaces & Type Refactoring
+#### Phase 1: Configuration Schema & TypeScript Extensions
 
-* [x] **Step 1.1:** In `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`, define and export a new `YSeriesItem` TypeScript interface:
-```typescript
-export interface YSeriesItem {
-  colId: number | null;
-  agg: AggFn;
-  drawType: 'line' | 'bar' | 'area';
-  fillHex: string;
-}
+* [x] **Step 1.1:** In `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`, define and export a `CategoryMapping` dictionary interface type: `export type CategoryMapping = Record<string, number>;`.
+* [x] **Step 1.2:** Update the `YSeriesItem` configuration interface structure to accommodate categorical mapping features. Add an option string selector `mode: 'numeric' | 'categorical';` along with an indexable container: `mappingRules: CategoryMapping;`.
+* [x] **Step 1.3:** Modify `DEFAULT_AXIS_CONFIG` within the configurator module to initialize the upgraded parameter boundaries inside default arrays safely (`mode: 'numeric'`, `mappingRules: {}`).
+* [x] **Verification:** Run type-checking suite `cd apps/desktop && npx tsc --noEmit` and verify the expanded type definition properties align with zero compile-time signature errors.
 
-```
+#### Phase 2: Category Mapping Interface Component
 
+* [x] **Step 2.1:** Create `apps/desktop/src/modules/analytics/components/CategoryMappingEditor.tsx` to handle dictionary matching values.
+* [x] **Step 2.2:** Build a configuration row interface matching the target selection schema. This component accepts a header token string name, displays a list layout tracking entries, and features an "Add Dynamic Key Value Pair" actionable trigger button.
+* [x] **Step 2.3:** Implement entry rows containing two paired inputs: a string input tracking matching text keys (e.g., target placeholder `"H"`) and a secondary numeric input tracking structural numeric destination weights (e.g., placeholder `1.0`).
+* [x] **Step 2.4:** Wire save events to immediately trigger lifted configuration callbacks up into the primary `AxisConfigurator` panel scope, updating the parent series item array rules index mapping context cleanly.
+* [x] **Verification:** Mount `<CategoryMappingEditor headers={['WorkLoc']} value={{}} onChange={console.log} />` inside a temporary view and confirm adding/removing key-value parameters works.
 
-* [x] **Step 1.2:** Refactor the `AxisConfig` interface to remove `y1Col`, `y1Agg`, `y2Col`, and `y2Agg`, replacing them with a strict array container: `ySeries: YSeriesItem[];`.
-* [x] **Step 1.3:** Update `DEFAULT_AXIS_CONFIG` to initialize with an empty `ySeries` array.
-* [x] **Step 1.4:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, update `AggRow` and `ChartPoint` to support indexable data maps:
-```typescript
-export interface AggRow {
-  x_val: string;
-  [key: string]: string | number | null;
-}
+#### Phase 3: Polymorphic CASE-Statement SQL Compiler
 
-```
+* [ ] **Step 3.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, write a dedicated macro generator helper method named `compileCategoricalExpr(colIndex: number, mapping: CategoryMapping): string`.
+* [ ] **Step 3.2:** Inside `compileCategoricalExpr`, map across user-defined dictionary pairs. Convert individual properties cleanly into sequential text condition parameters formatting string outputs using explicit query matching constraints: `WHEN '${key}' THEN ${weight}`.
+* [ ] **Step 3.3:** Construct the final inline conditional block string architecture, closing statements with explicit defaults: `CASE json_extract(cells, '$[${colIndex}]') [WHEN CLUSTER] ELSE 0.0 END`.
+* [ ] **Step 3.4:** Rework the core method `aggExpr` inside the aggregation engine file. Check if the series item configuration parameter `mode === 'categorical'` evaluates to true. If active, wrap the generated conditional block string container inside the designated mathematical function parameter wrapper (`AVG`, `SUM`, `COUNT`), casting variables directly to `REAL`.
+* [ ] **Verification:** Open a local test file context. Pass configuration parameters containing mapping definitions `{ 'H': 1, 'W': 0 }` into `buildAggregationQuery` and ensure the generated statement matches: `AVG(CASE json_extract(cells, '$[1]') WHEN 'H' THEN 1.0 WHEN 'W' THEN 0.0 ELSE 0.0 END)`.
 
+#### Phase 4: Axis Configurator Integration Panel
 
-* [x] **Verification:** Run `cd apps/desktop && npx tsc --noEmit` and confirm that type compilation errors are limited strictly to unused references in `AnalyticsDashboard.tsx`.
+* [ ] **Step 4.1:** Open `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`. Navigate to the rendering loop block that maps out individual `ySeries` form rows.
+* [ ] **Step 4.2:** Insert a selection choice dropdown picker element directly into the card rows layout allowing quick toggling options between `"Numeric Data"` and `"Categorical Data Encoders"`.
+* [ ] **Step 4.3:** Use conditional rendering logic to display the new `<CategoryMappingEditor />` component below the selected column select dropdown box only when the `mode` parameter is explicitly configured to `"categorical"`.
+* [ ] **Verification:** Open the Analytics Suite Dashboard workspace inside the application window layout. Add a new metric item, switch the tracking selection field to "Categorical Data Encoders", and confirm the encoder card panel elements expand on the interface smoothly.
 
-#### Phase 2: Dynamic SQL Generation & Record Mapping
+#### Phase 5: Dashboard Chart Aggregation Verification
 
-* [x] **Step 2.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, modify `buildAggregationQuery` to check if `config.xCol` is null or if `config.ySeries` is empty, returning `null` if true.
-* [x] **Step 2.2:** Inside `buildAggregationQuery`, replace the static `y1Expr` and `y2Expr` template strings. Map over the `config.ySeries` array where `colId !== null`, passing the individual metrics to `aggExpr()` and mapping them to dynamic projection aliases matching `y_val_${index}`.
-* [x] **Step 2.3:** Update the `SELECT` query statement to inject the dynamic aggregated column array string entries separated by clean comma tokens.
-* [x] **Step 2.4:** In `mapToChartPoints`, rewrite the mapping loop to dynamically scan the fields of `AggRow`. For each array entry found in the series template configuration, read `r[`y_val_${index}`]` and assign the numeric values directly into the result object using the charting index key `y_${index}`.
-* [x] **Verification:** Execute the type checking command `npx tsc --noEmit` within `apps/desktop` to confirm utility function signature compliance.
-
-#### Phase 3: Dynamic Multi-Series Axis Configurator UI
-
-* [x] **Step 3.1:** Open `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`. Retain the top single-column dropdown panel selector matching the coordinate X Axis structure.
-* [x] **Step 3.2:** Beneath the X Axis dropdown, build a dynamic vertical form collection panel mapping directly over the `value.ySeries` array list using a `.map()` layout expression.
-* [x] **Step 3.3:** For each configured item in the row loop, render a layout row containing:
-* A column picker component `<ColSelect />`.
-* An aggregation method selector `<AggSelect />`.
-* A chart visualization type dropdown selector containing options for `Line`, `Bar`, and `Area`.
-* A standard HTML inline hex color picker field `<input type="color" />` styled with a neat border template wrapper.
-* A click-action delete button to remove that specific element row index from the active configuration array.
-
-
-* [x] **Step 3.4:** Add an "Add Series Metric" icon button row component directly at the bottom boundary of the list tracker view. When clicked, append a fresh `YSeriesItem` object to the collection array with default values (`colId: null`, `agg: 'AVG'`, `drawType: 'bar'`, `fillHex: '#6366f1'`).
-* [x] **Verification:** Open the Analytics module dashboard workspace in the Tauri application window. Click the "Add Series Metric" selector multiple times and check that the configuration rows spawn independently in the control panel space.
-
-#### Phase 4: Polymorphic Visualization Layer Compilation
-
-* [x] **Step 4.1:** Open `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx`. Update the view validation conditions to ensure a dataset is selected and `axisConfig.ySeries.some(s => s.colId !== null)` evaluates to true before attempting chart compilation.
-* [x] **Step 4.2:** Import the component token item `Area` from the local `recharts` package workspace at the top header area of the file.
-* [x] **Step 4.3:** Inside the `<ComposedChart>` node, delete the hardcoded single `<Bar />` and secondary `<Line />` layout components.
-* [x] **Step 4.4:** Replace them with a runtime loop mapping directly over `axisConfig.ySeries`. For each item where `colId !== null`, inspect the `drawType` property and conditionally mount the corresponding `<Bar />`, `<Line />`, or `<Area />` component dynamically.
-* [x] **Step 4.5:** Bind the Recharts configuration properties for each mapped element: set `dataKey` to `y_${index}`, set the name attribute to match `${s.agg}(${headers[s.colId]})`, and apply `fill={s.fillHex}` or `stroke={s.fillHex}` fields based on the selected drawing style.
-* [x] **Verification:** Run a full project-wide code verification trace via `npm run build` or `npx tsc --noEmit` from the desktop repository root to ensure type safety.
+* [ ] **Step 5.1:** Open `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx`. Locate the background execution callback routine `runQuery`.
+* [ ] **Step 5.2:** Ensure that when a column configuration features dynamic data enum configurations, queries run cleanly through the updated `buildAggregationQuery` flow to pass matching query statement string builders onto the SQLite execution pipeline proxy.
+* [ ] **Step 5.3:** Validate that if the returned dataset contains non-numeric inputs originally, the runtime query maps strings smoothly into quantitative points to populate chart timelines without breaking layout layers or generating chart errors.
+* [ ] **Verification:** Run a final full workspace compilation step using `npm run build` or `npx tsc --noEmit` from the root repository workspace directories to confirm complete integration type compliance.
 
 ---
 
 ## 3. Global Testing Strategy
 
-* **Polymorphic Layer Overlay Rendering Verification:**
-* *Action:* Import a multi-column numerical dataset. Configure three distinct tracking parameters: add Metric 1 as a `Bar` styled in blue, Metric 2 as a `Line` styled in gold, and Metric 3 as an `Area` chart colored in emerald green.
-* *Expected:* The rendering container displays all three statistical layers on the timeline area simultaneously without clipping data points or dropping visualization dimensions.
+* **Polymorphic Code Mapping Ingestion Verification:**
+* *Action:* Import a performance tracking timesheet dataset containing qualitative location entries categorized under string attributes `"H"` and `"W"`. Configure an explicit code encoder assigning `"H" -> 100.0` and `"W" -> 20.0`, computing a running metric average over the collection timeline.
+* *Expected:* The rendering graph container handles raw non-numeric rows natively, outputting statistical value curves displaying performance metrics precisely matching mapped calculations.
 
 
-* **Dynamic Series Element Deletion Safety:**
-* *Action:* Configure 4 concurrent data series panels on the interface. Click the remove button row component targeting the middle metric item layout index (Index position 1) while a query is computing.
-* *Expected:* The system deletes the selected row, dynamically collapses the tracking index maps smoothly, updates data pointers, and refreshes the chart visualization instantly without throwing layout pointer runtime faults.
+* **SQL Protection Boundary Sanity Test:**
+* *Action:* Type string injection strings inside the code matching key field boxes on the editor component area to mimic malicious validation inputs (e.g., `' OR 1=1; --`).
+* *Expected:* The SQL compiler sanitizes configuration keys or formats variables cleanly inside literal parameter wrappers, dropping compile errors safely to the error panel without running bad query profiles.
 
 
-* **Empty Array State Fallback Verification:**
-* *Action:* Select an active tracking file dataset from the sidebar column, but clear or delete all series rows inside the axis configurator panel layout area.
-* *Expected:* The visualization container transitions into a clean fallback display window showing an informative descriptive prompt message: `"Select at least one Y series metric above to render a chart."`
+* **Airgapped Relative Frequency Tracking Validation:**
+* *Action:* Disconnect all active internet adapters entirely from the local machine runtime environment. Input mapping configs and calculate a running tracking total distribution chart.
+* *Expected:* String tracking configurations and numerical chart vectors process on-device with zero interface lag and complete airgap security.
