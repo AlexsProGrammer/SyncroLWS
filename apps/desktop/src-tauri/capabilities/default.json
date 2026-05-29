@@ -48,6 +48,7 @@
     "sql:allow-execute",
     "sql:allow-select",
     "sql:allow-close",
-    "deep-link:default"
+    "deep-link:default",
+    "dialog:allow-open"
   ]
 }

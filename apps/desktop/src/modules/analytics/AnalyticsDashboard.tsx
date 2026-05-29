@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { getWorkspaceDB } from '@/core/db';
 import { cn } from '@/lib/utils';
 import { useWorkspaceStore } from '@/store/workspaceStore';
+import { CSVImportZone } from './components/CSVImportZone';
 import type { ToolViewProps } from '@/registry/ToolRegistry';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -100,15 +101,12 @@ export function AnalyticsDashboardView({ toolInstanceId: _toolInstanceId }: Tool
         )}
 
         {/*
-          Import zone anchor — CSVImportZone is mounted here in Phase 4.
-          The id attr lets Phase 4 render the component without structural
-          changes to this file.
+          Import zone — CSVImportZone triggers native file picker and
+          streams the CSV via the Rust command off the UI thread.
         */}
-        <div
-          id="analytics-import-zone"
-          className="border-t border-border p-3"
-          data-testid="analytics-import-zone"
-        />
+        <div className="border-t border-border p-3">
+          <CSVImportZone onComplete={() => void loadDatasets()} />
+        </div>
       </aside>
 
       {/* ── Main panel ───────────────────────────────────────────────────── */}
