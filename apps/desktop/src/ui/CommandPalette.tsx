@@ -1,16 +1,26 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Command } from 'cmdk';
+import { Clock, BarChart2, Tag } from 'lucide-react';
 import { eventBus } from '@/core/events';
 import { ftsSearch } from '@/core/db';
 import { getToolByEntityType, getAllAspectPlugins } from '@/registry/ToolRegistry';
 import { getEntity } from '@/core/entityStore';
 import type { AspectType, BaseEntity, HybridEntity } from '@syncrohws/shared-types';
+import { getBucketSummary, getProjectTotals } from '@/modules/time-intelligence/utils/metricsCalculator';
 
 interface SearchResult {
   entity: HybridEntity;
   primaryAspectType: AspectType | 'general';
   title: string;
   subtitle?: string;
+}
+
+interface AnalyticsCard {
+  id: string;
+  label: string;
+  value: string;
+  sub?: string;
+  icon: React.ComponentType<{ className?: string }>;
 }
 
 export function CommandPalette(): React.ReactElement {
@@ -21,6 +31,7 @@ export function CommandPalette(): React.ReactElement {
   const [currentEntityId, setCurrentEntityId] = useState<string | null>(null);
   const [currentEntityTypes, setCurrentEntityTypes] = useState<string[]>([]);
   const [currentEntityTitle, setCurrentEntityTitle] = useState<string>('');
+  const [analyticsCards, setAnalyticsCards] = useState<AnalyticsCard[]>([]);
 
   // Open / close via Event Bus
   useEffect(() => {
@@ -58,10 +69,70 @@ export function CommandPalette(): React.ReactElement {
   }, []);
 
   const search = useCallback(async (q: string): Promise<void> => {
-    if (!q.trim()) {
+    const trimmed = q.trim();
+    if (!trimmed) {
       setResults([]);
+      setAnalyticsCards([]);
       return;
     }
+
+    // Phase 5 — Analytics token router: intercept :time and :stats prefixes
+    if (trimmed.startsWith(':time') || trimmed.startsWith(':stats')) {
+      setResults([]);
+      try {
+        const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        if (trimmed.startsWith(':time')) {
+          const buckets = await getBucketSummary(from);
+          const totalSec = buckets.reduce((s, b) => s + b.total_seconds, 0);
+          const cards: AnalyticsCard[] = [
+            {
+              id: 'ti-total',
+              label: 'Total Hours (30 days)',
+              value: `${(totalSec / 3600).toFixed(1)} h`,
+              sub: `${buckets.reduce((s, b) => s + b.entry_count, 0)} sessions across all buckets`,
+              icon: Clock,
+            },
+            ...buckets.map((b) => {
+              const raw = b.bucket.replace('bucket:', '').replace(/_/g, ' ');
+              const label = raw.charAt(0).toUpperCase() + raw.slice(1);
+              return {
+                id: `ti-${b.bucket}`,
+                label,
+                value: `${(b.total_seconds / 3600).toFixed(1)} h`,
+                sub: `${b.entry_count} sessions`,
+                icon: Tag,
+              } satisfies AnalyticsCard;
+            }),
+          ];
+          setAnalyticsCards(cards);
+        } else {
+          const projects = await getProjectTotals(from);
+          const totalSec = projects.reduce((s, p) => s + p.total_seconds, 0);
+          const cards: AnalyticsCard[] = [
+            {
+              id: 'st-total',
+              label: 'Total Hours (30 days)',
+              value: `${(totalSec / 3600).toFixed(1)} h`,
+              sub: `${projects.length} project${projects.length !== 1 ? 's' : ''} tracked`,
+              icon: BarChart2,
+            },
+            ...projects.slice(0, 8).map((p) => ({
+              id: `st-${p.project}`,
+              label: p.project || '(No project)',
+              value: `${(p.total_seconds / 3600).toFixed(1)} h`,
+              sub: `${p.entry_count} sessions · ${(p.billable_ratio * 100).toFixed(0)}% billable`,
+              icon: BarChart2,
+            } satisfies AnalyticsCard)),
+          ];
+          setAnalyticsCards(cards);
+        }
+      } catch (err) {
+        console.error('[analytics] query error:', err);
+      }
+      return;
+    }
+
+    setAnalyticsCards([]);
     try {
       const ids = await ftsSearch(q);
       if (!ids.length) {
@@ -150,7 +221,37 @@ export function CommandPalette(): React.ReactElement {
               </Command.Group>
             );
           })()}
-          {results.length === 0 && query.trim() && (
+          {/* Phase 5 — Analytics overlay for :time and :stats prefixes */}
+          {analyticsCards.length > 0 && (
+            <Command.Group
+              heading="Time Intelligence"
+              className="mb-1 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground"
+            >
+              {analyticsCards.map((card) => {
+                const CardIcon = card.icon;
+                return (
+                  <Command.Item
+                    key={card.id}
+                    value={card.id}
+                    onSelect={() => { setOpen(false); setQuery(''); }}
+                    className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-accent aria-selected:bg-accent"
+                  >
+                    <CardIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate">{card.label}</span>
+                      {card.sub && (
+                        <span className="truncate text-xs text-muted-foreground">{card.sub}</span>
+                      )}
+                    </div>
+                    <span className="shrink-0 font-mono text-sm font-semibold tabular-nums">
+                      {card.value}
+                    </span>
+                  </Command.Item>
+                );
+              })}
+            </Command.Group>
+          )}
+          {results.length === 0 && query.trim() && analyticsCards.length === 0 && (
             <Command.Empty className="py-6 text-center text-sm text-muted-foreground">
               No results for "{query}"
             </Command.Empty>

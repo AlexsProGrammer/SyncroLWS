@@ -79,9 +79,9 @@
 
 #### Phase 5: Global Command Palette Analytics Overlay
 
-* [ ] **Step 5.1:** Open `apps/desktop/src/ui/CommandPalette.tsx`. Locate input string change listener blocks.
-* [ ] **Step 5.2:** Add a custom analytical token router block. When input fields are populated with targeted prefix arguments (such as typing `:time` or `:stats`), intercept standard FTS database lookups.
-* [ ] **Step 5.3:** Direct execution flows to run immediate queries against the custom statistical window methods inside `metricsCalculator.ts`. Display real-time hour counters and category tags as active search card options right inside the launcher layout area.
+* [x] **Step 5.1:** Open `apps/desktop/src/ui/CommandPalette.tsx`. Locate input string change listener blocks.
+* [x] **Step 5.2:** Add a custom analytical token router block. When input fields are populated with targeted prefix arguments (such as typing `:time` or `:stats`), intercept standard FTS database lookups.
+* [x] **Step 5.3:** Direct execution flows to run immediate queries against the custom statistical window methods inside `metricsCalculator.ts`. Display real-time hour counters and category tags as active search card options right inside the launcher layout area.
 * [ ] **Verification:** Press `Ctrl+K`/`Cmd+K` to toggle the global search view layout container open. Enter the analytical syntax string `:time`. Verify the search modal presents running category counters instead of standard record results.
 
 ---
