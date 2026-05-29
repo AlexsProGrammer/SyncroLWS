@@ -61,10 +61,10 @@ export interface AggRow {
 
 #### Phase 2: Dynamic SQL Generation & Record Mapping
 
-* [ ] **Step 2.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, modify `buildAggregationQuery` to check if `config.xCol` is null or if `config.ySeries` is empty, returning `null` if true.
-* [ ] **Step 2.2:** Inside `buildAggregationQuery`, replace the static `y1Expr` and `y2Expr` template strings. Map over the `config.ySeries` array where `colId !== null`, passing the individual metrics to `aggExpr()` and mapping them to dynamic projection aliases matching `y_val_${index}`.
-* [ ] **Step 2.3:** Update the `SELECT` query statement to inject the dynamic aggregated column array string entries separated by clean comma tokens.
-* [ ] **Step 2.4:** In `mapToChartPoints`, rewrite the mapping loop to dynamically scan the fields of `AggRow`. For each array entry found in the series template configuration, read `r[`y_val_${index}`]` and assign the numeric values directly into the result object using the charting index key `y_${index}`.
+* [x] **Step 2.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, modify `buildAggregationQuery` to check if `config.xCol` is null or if `config.ySeries` is empty, returning `null` if true.
+* [x] **Step 2.2:** Inside `buildAggregationQuery`, replace the static `y1Expr` and `y2Expr` template strings. Map over the `config.ySeries` array where `colId !== null`, passing the individual metrics to `aggExpr()` and mapping them to dynamic projection aliases matching `y_val_${index}`.
+* [x] **Step 2.3:** Update the `SELECT` query statement to inject the dynamic aggregated column array string entries separated by clean comma tokens.
+* [x] **Step 2.4:** In `mapToChartPoints`, rewrite the mapping loop to dynamically scan the fields of `AggRow`. For each array entry found in the series template configuration, read `r[`y_val_${index}`]` and assign the numeric values directly into the result object using the charting index key `y_${index}`.
 * [ ] **Verification:** Execute the type checking command `npx tsc --noEmit` within `apps/desktop` to confirm utility function signature compliance.
 
 #### Phase 3: Dynamic Multi-Series Axis Configurator UI

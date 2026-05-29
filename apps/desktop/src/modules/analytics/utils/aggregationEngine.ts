@@ -68,16 +68,51 @@ function aggExpr(fn: AggFn, colIndex: number): string {
  * Results are capped at 500 groups (aggregated) or 10 000 rows (raw) to keep
  * chart rendering snappy.
  *
- * Returns `null` when X is unset or all Y series have no column selected.
- * Full dynamic SQL generation is implemented in Phase 2.
+ * Returns `null` when X is unset or no Y series has a column selected.
+ *
+ * Column indices are non-negative integers bounded by the dataset header
+ * count, so embedding them directly in the SQL template is safe — they are
+ * never user-supplied strings.
+ *
+ * Results are capped at 500 groups to keep chart rendering snappy.
  */
 export function buildAggregationQuery(
-  _datasetId: string,
+  datasetId: string,
   config: AxisConfig,
 ): QueryDescriptor | null {
+  // Step 2.1: guard — nothing to query without an X column or any Y series.
   if (config.xCol === null || config.ySeries.length === 0) return null;
-  // Phase 2 will implement multi-series SQL generation.
-  return null;
+
+  // Step 2.2: build one aggregated expression per non-null series,
+  // aliased as y_val_${index} so mapToChartPoints can read them by index.
+  const yAggEntries = config.ySeries
+    .map((s, i) =>
+      s.colId !== null
+        ? `  ${aggExpr(s.agg, s.colId)} AS y_val_${i}`
+        : null,
+    )
+    .filter((e): e is string => e !== null);
+
+  // If every series still has colId === null there is nothing to aggregate.
+  if (yAggEntries.length === 0) return null;
+
+  const xExpr = `json_extract(cells, '$[${config.xCol}]')`;
+
+  // Step 2.3: inject the dynamic column list into the SELECT statement.
+  const sql = [
+    'SELECT',
+    `  ${xExpr} AS x_val,`,
+    yAggEntries.join(',\n'),
+    'FROM analytics_raw_records',
+    'WHERE dataset_id = ?',
+    `  AND ${xExpr} IS NOT NULL`,
+    `  AND ${xExpr} != ''`,
+    `GROUP BY ${xExpr}`,
+    `ORDER BY ${xExpr}`,
+    'LIMIT 500',
+  ].join('\n');
+
+  return { mode: 'aggregated', sql, params: [datasetId] };
 }
 
 // ── Data mapping ───────────────────────────────────────────────────────────────
