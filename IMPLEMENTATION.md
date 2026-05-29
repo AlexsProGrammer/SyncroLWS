@@ -1,104 +1,100 @@
-```markdown
 # IMPLEMENTATION.md
 
 ## 1. Project Context & Architecture
-- **Goal:** Create an isolated, high-performance local analytics sandbox workspace inside SyncroLWS capable of ingestion and aggregation of large historical CSV datasets. This architecture passes raw flat-file processing onto Tauri's Rust core to run heavy I/O operations asynchronously in transactional batches, bypassing front-end single-threaded rendering bottlenecks.
-- **Tech Stack & Dependencies:**
-  - **Core Frameworks:** Tauri 2.0, React, Vite, Drizzle ORM, Tailwind CSS.
-  - **Rust Crates (src-tauri):** `csv = "1.3"`, `serde_json = "1.0"`, `rusqlite = { version = "*", features = ["bundled"] }` (or corresponding Tauri plugin sql engine driver).
-  - **Frontend Libraries:** `lucide-react` (Local icons), `recharts` or local SVG chart primitives for data rendering.
-  - **Commands:** - `cd apps/desktop/src-tauri && cargo add csv serde_json`
-    - `cd apps/desktop && npm install recharts`
-- **File Structure:**
-  ```text
-  ├── apps/
-  │   └── desktop/
-  │       ├── src-tauri/
-  │       │   └── src/
-  │       │       └── commands.rs   # Modified: Register native CSV batch parsing command
-  │       └── src/
-  │           ├── core/
-  │           │   └── db.ts         # Modified: Extend workspace schema migrations
-  │           ├── registry/
-  │           │   └── ToolRegistry.tsx # Modified: Register analytics tool icon map
-  │           └── modules/
-  │               └── analytics/    # Created: New business analytics module
-  │                   ├── manifest.json # Created: Tool discovery config
-  │                   ├── index.ts      # Created: Entrypoint initialization
-  │                   ├── AnalyticsDashboard.tsx # Created: High-performance dashboard container
-  │                   ├── components/
-  │                   │   ├── CSVImportZone.tsx   # Created: File picker & Rust thread invoker
-  │                   │   └── AxisConfigurator.tsx # Created: Field mapper selection interface
-  │                   └── utils/
-  │                       └── aggregationEngine.ts # Created: Dynamic SQL generator
+
+* **Goal:** Build a robust, offline-first Tokenized Preprocessing Engine and Dynamic Expression Formula Parser for the Analytics Suite. This system intercepts unstructured data fields (e.g., `"1h 30min"` or `"12v"`) from raw CSV datasets, utilizes capturing regex patterns to extract key variables, and evaluates mathematical formulas (e.g., `hour + (minutes / 60)`) to generate clean numerical charts via local JavaScript pre-aggregation pipelines before rendering.
+* **Tech Stack & Dependencies:**
+* **Core Infrastructure:** Tauri 2.0, React, Vite, TypeScript, Tailwind CSS, Recharts.
+* **Ecosystem Libraries:** Existing workspace dependencies (`lucide-react`, `recharts`, `drizzle-orm`).
+* **Commands:** No new package installations required. Employs native JavaScript `RegExp` engines and sandboxed token arithmetic parsing.
+
+
+* **File Structure:**
+```text
+└── apps/
+    └── desktop/
+        └── src/
+            └── modules/
+                └── analytics/
+                    ├── AnalyticsDashboard.tsx # Modified: Integrated pre-aggregation workflow
+                    ├── components/
+                    │   └── AxisConfigurator.tsx # Modified: Dynamic token extraction setup controls
+                    └── utils/
+                        └── aggregationEngine.ts # Modified: Regex evaluator and JS aggregation reducer
 
 ```
 
-* **Attention Points:** - Large tabular records must live exclusively inside the dedicated analytical sandbox tables. Do not mix un-indexed arbitrary datasets into the primary `base_entities` table to protect global search index performance.
-* Raw imports must happen via native streaming layers. Front-end memory allocation arrays must never hold raw multi-megabyte CSV strings.
+
+* **Attention Points:** - Because core SQLite lacks standard regular expression capture-group capabilities natively, data transformations must occur inside a highly optimized JavaScript pre-aggregation engine when preprocessing rules are active.
+* The expression evaluator must use a secure mathematical tokenizer to isolate operations, explicitly banning arbitrary string executions (`eval`, `Function`) to preserve application safety.
 
 
-* **DSGVO:** Dataset evaluations, computed statistics, file paths, and column values must reside strictly on the local sandbox instance. Transmitting analytical parameters, tracking values, metric headers, or record content to external calculation or modeling cloud instances is strictly prohibited.
+* **DSGVO:** Preprocessing rule strings, custom regular expressions, extracted string tokens, and computed results are completely contained within the local UI thread memory and workspace databases. No telemetry blocks, configuration sync parameters, or payload samples may be logged to cloud analytics nodes.
 
 ---
 
 ## 2. Execution Phases
 
-#### Phase 1: Isolated Sandbox Schema Migrations
+#### Phase 1: Preprocessing Configuration Schema Expansion
 
-* [x] **Step 1.1:** In `apps/desktop/src/core/db.ts`, locate the `WORKSPACE_MIGRATION` constant query string block.
-* [x] **Step 1.2:** Append table definition instructions to create `analytics_datasets` (id TEXT PK, name TEXT, row_count INTEGER, headers TEXT, created_at TEXT).
-* [x] **Step 1.3:** Append table definition instructions to create `analytics_raw_records` (id INTEGER PK AUTOINCREMENT, dataset_id TEXT, row_index INTEGER, cells TEXT). Ensure the `cells` column accepts stringified raw layout arrays.
-* [x] **Step 1.4:** Append explicit indexing commands to create a fast composite index named `idx_raw_records_dataset` tracking the `dataset_id` foreign field key.
-* [x] **Verification:** Restart the application environment. Verify using a database client or log query trace that both sandbox tables exist in the underlying active workspace file with indices initialized.
+* [x] **Step 1.1:** In `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`, define and export a `PreprocessConfig` TypeScript interface:
+```typescript
+export interface PreprocessConfig {
+  enabled: boolean;
+  regexPattern: string;      // e.g. "(?<hour>\\d+)h\\s*(?<minutes>\\d+)min"
+  formulaExpression: string; // e.g. "hour + (minutes / 60)"
+}
 
-#### Phase 2: Rust-Powered Background CSV Stream Importer
+```
 
-* [x] **Step 2.1:** In `apps/desktop/src-tauri/src/commands.rs`, introduce a new cross-platform command function `stream_csv_to_sqlite(file_path: String, dataset_id: String, db_path: String) -> Result<u64, String>`.
-* [x] **Step 2.2:** Inside this function, open a streaming reader pointing to `file_path` using the native Rust `csv::Reader` crate interface. Extract the first row automatically to map collection headers.
-* [x] **Step 2.3:** Open a connection directly to the profile workspace database matching `db_path`. Build a chunk collection loop that aggregates parsed entries into discrete vectorized record slots.
-* [x] **Step 2.4:** Every 5,000 row intervals, wrap database writes inside an explicit transaction execution block (`BEGIN TRANSACTION` / `COMMIT`). Format individual cell blocks as clean stringified arrays before pushing them to the SQLite statement engine. Update `analytics_datasets` upon stream exhaustion to reflect total rows and headers.
-* [x] **Step 2.5:** Ensure the command is correctly bound to the execution harness setup within `apps/desktop/src-tauri/src/main.rs`.
-* [x] **Verification:** Run `cd apps/desktop/src-tauri && cargo check` to confirm compiling integrity of your native background workers.
 
-#### Phase 3: Module Assembly & Dynamic Tool Registration
+* [x] **Step 1.2:** Update the `AxisConfig` interface to include optional preprocessing configuration properties for all dimensions: `xPreprocess?: PreprocessConfig;`, `y1Preprocess?: PreprocessConfig;`, and `y2Preprocess?: PreprocessConfig;`.
+* [x] **Step 1.3:** Update the `DEFAULT_AXIS_CONFIG` object to populate these fields with default unconfigured values (`enabled: false`, `regexPattern: ""`, `formulaExpression: ""`).
+* [x] **Verification:** Run `npm run tauri dev` inside `apps/desktop` and confirm that type compilation passes with zero configuration interface mismatch exceptions.
 
-* [x] **Step 3.1:** Create `apps/desktop/src/modules/analytics/manifest.json`. Configure the registry file metadata with id `"analytics"`, name `"Analytics Suite"`, icon key `"analytics"`, and define layout permissions.
-* [x] **Step 3.2:** In `apps/desktop/src/registry/ToolRegistry.tsx`, create and export an inline SVG renderer called `IconAnalytics`. Map the key `"analytics"` to this custom asset inside the global configuration block.
-* [x] **Step 3.3:** Create `apps/desktop/src/modules/analytics/index.ts` to register the main tool view reference components, linking it directly into the system auto-discovery lookup cycle.
-* [x] **Step 3.4:** Create `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx` to handle the primary view architecture, rendering a stateful framework structure using local workspace contexts.
-* [x] **Verification:** Launch the environment suite via `npm run tauri dev`. Navigate onto the workspace dashboard view shell and check if the layout responds with correct routing headers.
+#### Phase 2: Axis Configurator Dropdown & UI Controls
 
-#### Phase 4: Stream Ingestion UI Component Interface
+* [ ] **Step 2.1:** In `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`, build a collapsible subcomponent `<PreprocessModal />` or `<PreprocessPanel />` styled using local `shadcn` and Tailwind container primitives.
+* [ ] **Step 2.2:** Add an interactive inline button label (e.g., `"f(x) Clean Data"`) directly adjacent to the X Axis, Y1 Primary, and Y2 Secondary dropdown column selection elements.
+* [ ] **Step 2.3:** Map input fields inside this interface to update the `regexPattern` string and `formulaExpression` validation fields on the active column configurations via the existing lifted `onChange` handler. Include clear placeholder help descriptions showing sample regex parameters (`(?<val>\d+)`) and arithmetic examples.
+* [ ] **Verification:** Open the Analytics Dashboard in the application UI view. Click the preprocessing toggle links and verify the inputs reveal layout inputs cleanly, updating the configuration states successfully.
 
-* [x] **Step 4.1:** Create `apps/desktop/src/modules/analytics/components/CSVImportZone.tsx`. Integrate Tauri's system-level file picker dialog component (`@tauri-apps/plugin-dialog`).
-* [x] **Step 4.2:** On file resolution path selection, generate a deterministic UUID string tracking parameter to identify the newly created tracking asset collection.
-* [x] **Step 4.3:** Fetch the absolute file location path strings and invoke the native Rust back-end operation handler via `invoke('stream_csv_to_sqlite', { ... })`, feeding execution updates through custom application tracking states.
-* [x] **Verification:** Trigger the file select action dialog box from the front-end interface dashboard. Confirm it correctly identifies standard desktop files and prints path updates to your browser console logs.
+#### Phase 3: Sandboxed Mathematical Expression Evaluator
 
-#### Phase 5: Dynamic Aggregation Query Generation Setup
+* [ ] **Step 3.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, create a secure helper function `evaluateSafeFormula(formula: string, tokens: Record<string, number>): number`.
+* [ ] **Step 3.2:** Implement a localized scanning parser within `evaluateSafeFormula`. Replace string match variables corresponding to the extracted token naming definitions with their concrete floating-point numbers.
+* [ ] **Step 3.3:** Parse the basic arithmetic string operators strictly by separating inputs sequentially against addition, subtraction, multiplication, and division characters (`+`, `-`, `*`, `/`). Block any script block injection vectors by refusing to route evaluations through runtime string executes (`eval`). Return `0` if fields are invalid or formatting parameters fail.
+* [ ] **Verification:** Open a temporary debug log file or add a console check trace. Pass formula statement strings such as `"h + (m / 60)"` paired with values `{ h: 1, m: 30 }` and confirm the calculation engine correctly registers a numeric value output of `1.5`.
 
-* [x] **Step 5.1:** Create `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`. Render dropdown fields allowing interactive column selector states mapping parameters into coordinate axis references.
-* [x] **Step 5.2:** Create `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`. Implement a dynamic SQL string compiler utility method that generates native SQLite query definitions.
-* [x] **Step 5.3:** Leverage raw `json_extract()` operators inside your generated queries to extract arrays stored in the `cells` text property, computing statistical fields (`AVG`, `SUM`, `COUNT`) grouped exactly by the selected coordinate values.
-* [x] **Step 5.4:** Map raw query execution datasets from the local database proxy layer into separate left and right Recharts Y-axis plotting collections (`yAxisId="primary"`, `yAxisId="secondary"`).
-* [ ] **Verification:** Run a project-wide type compilation verification step via `npm run build` or `npx tsc --noEmit` and confirm all module integrations complete with zero interface warnings.
+#### Phase 4: JavaScript In-Memory Aggregation Pipeline
+
+* [ ] **Step 4.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, adjust `buildAggregationQuery` behavior. If no preprocessing flags are toggled active, return the existing query format. If any preprocessing configuration is set to true, alter the query compilation to pull the unaggregated text contents (`json_extract(cells, '$[N]')`) directly from the table database blocks up to a strict window limit of 10,000 records.
+* [ ] **Step 4.2:** Build an internal row transformation worker function named `applyLocalPreprocessing(rawRows: any[], config: AxisConfig, headers: string[])`.
+* [ ] **Step 4.3:** Inside this mapping loop, apply the configured regular expressions using native JavaScript matching routines (`new RegExp()`). Extract capturing group parameters, feed them to `evaluateSafeFormula`, and compute calculated numeric numbers for each coordinate index row.
+* [ ] **Step 4.4:** Process the resulting preprocessed arrays using in-memory JavaScript array reductions to perform the active aggregation routines (`AVG`, `SUM`, `COUNT`) grouped uniformly by the computed X value strings, sorting data points to feed directly into the chart display loops.
+* [ ] **Verification:** Load a testing file dataset containing raw un-formatted time intervals. Configure preprocessor filters on the active columns. Verify that the application prints properly grouped clean dataset points to the terminal stream.
+
+#### Phase 5: Dashboard Processing Pipeline Integration
+
+* [ ] **Step 5.1:** Open `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx`. Locate the internal callback trigger function `runQuery`.
+* [ ] **Step 5.2:** Intercept the execution path where `db.select` fetches data points. Check if any preprocessing rules are checked active inside the `axisConfig` object.
+* [ ] **Step 5.3:** If processing rules apply, map the raw input array records directly through `applyLocalPreprocessing` before passing the computed points to `setChartPoints()`, updating application error display windows gracefully if bad regex boundaries throw syntax errors.
+* [ ] **Verification:** Run a workspace-wide type verification sweep using `npx tsc --noEmit` from the workspace root to confirm all layout components connect with type safety.
 
 ---
 
 ## 3. Global Testing Strategy
 
-* **UI Thread UI Un-lock Verification:**
-* *Action:* Provision a flat mock data file container holding 150,000 dense accounting records. Initiate ingestion via `CSVImportZone.tsx` while clicking high-frequency UI interactions across unrelated sidebar modules.
-* *Expected:* Front-end animation framing stays lock-free at 60fps throughout ingestion execution phases. No scripting timeouts may occur.
+* **Complex Regex Extraction Verification:**
+* *Action:* Import an operational logs list dataset holding text attributes patterned as `"Duration: 4h 15m"`. Apply a capturing string expression `Duration:\s*(?<hours>\d+)h\s*(?<mins>\d+)m` matched to formula `hours + (mins / 60)`.
+* *Expected:* The rendering container parses text cells cleanly, computing coordinate positions precisely matching float outputs equal to `4.25`.
 
 
-* **Dynamic Extracted Mapping Correctness:**
-* *Action:* Change visual chart configuration selectors to map an integer dataset row to X, a revenue calculation row to Y1 (average compilation), and volume weights to Y2 (sum calculation).
-* *Expected:* Ensure the raw query compiles with correct database dialect filters and the dual-axis graph renders without errors.
+* **Malicious Formula Injection Rejection:**
+* *Action:* Input a malicious tracking string expression inside the application configuration UI formula input box designed to steal local records or execute arbitrary logic (e.g., `window.alert(1)` or `alert(document.cookie)`).
+* *Expected:* The tokenized formula parsing utility safely catches the invalid parameter layout format, drops processing execution instantly, and reports a clear query format alert to the dashboard notification window.
 
 
-* **Airgapped Storage Sandbox Check:**
-* *Action:* Block outgoing interfaces completely. Load large records containing metric metrics and look up local data directory trace paths.
-* *Expected:* The dataset processes flawlessly, writing variables exclusively to the local tracking structures without external network requirements.
-
+* **Airgapped Calculation Boundary Check:**
+* *Action:* Completely disconnect all networking options from the desktop testing machine. Enter data cleaning filters across a 5,000 row analytics report layer.
+* *Expected:* In-memory calculations and statistical chart layers render instantly without crashing the interface or attempting external script downloads.

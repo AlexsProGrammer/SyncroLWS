@@ -4,12 +4,27 @@ import React from 'react';
 
 export type AggFn = 'AVG' | 'SUM' | 'COUNT';
 
+export interface PreprocessConfig {
+  enabled: boolean;
+  regexPattern: string;      // e.g. "(?<hour>\\d+)h\\s*(?<minutes>\\d+)min"
+  formulaExpression: string; // e.g. "hour + (minutes / 60)"
+}
+
+const DEFAULT_PREPROCESS_CONFIG: PreprocessConfig = {
+  enabled: false,
+  regexPattern: '',
+  formulaExpression: '',
+};
+
 export interface AxisConfig {
   xCol: number | null;
   y1Col: number | null;
   y1Agg: AggFn;
   y2Col: number | null;
   y2Agg: AggFn;
+  xPreprocess?: PreprocessConfig;
+  y1Preprocess?: PreprocessConfig;
+  y2Preprocess?: PreprocessConfig;
 }
 
 export const DEFAULT_AXIS_CONFIG: AxisConfig = {
@@ -18,6 +33,9 @@ export const DEFAULT_AXIS_CONFIG: AxisConfig = {
   y1Agg: 'AVG',
   y2Col: null,
   y2Agg: 'SUM',
+  xPreprocess: { ...DEFAULT_PREPROCESS_CONFIG },
+  y1Preprocess: { ...DEFAULT_PREPROCESS_CONFIG },
+  y2Preprocess: { ...DEFAULT_PREPROCESS_CONFIG },
 };
 
 interface AxisConfiguratorProps {
