@@ -54,10 +54,10 @@ export interface PreprocessConfig {
 
 #### Phase 2: Axis Configurator Dropdown & UI Controls
 
-* [ ] **Step 2.1:** In `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`, build a collapsible subcomponent `<PreprocessModal />` or `<PreprocessPanel />` styled using local `shadcn` and Tailwind container primitives.
-* [ ] **Step 2.2:** Add an interactive inline button label (e.g., `"f(x) Clean Data"`) directly adjacent to the X Axis, Y1 Primary, and Y2 Secondary dropdown column selection elements.
-* [ ] **Step 2.3:** Map input fields inside this interface to update the `regexPattern` string and `formulaExpression` validation fields on the active column configurations via the existing lifted `onChange` handler. Include clear placeholder help descriptions showing sample regex parameters (`(?<val>\d+)`) and arithmetic examples.
-* [ ] **Verification:** Open the Analytics Dashboard in the application UI view. Click the preprocessing toggle links and verify the inputs reveal layout inputs cleanly, updating the configuration states successfully.
+* [x] **Step 2.1:** In `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`, build a collapsible subcomponent `<PreprocessModal />` or `<PreprocessPanel />` styled using local `shadcn` and Tailwind container primitives.
+* [x] **Step 2.2:** Add an interactive inline button label (e.g., `"f(x) Clean Data"`) directly adjacent to the X Axis, Y1 Primary, and Y2 Secondary dropdown column selection elements.
+* [x] **Step 2.3:** Map input fields inside this interface to update the `regexPattern` string and `formulaExpression` validation fields on the active column configurations via the existing lifted `onChange` handler. Include clear placeholder help descriptions showing sample regex parameters (`(?<val>\d+)`) and arithmetic examples.
+* [x] **Verification:** Open the Analytics Dashboard in the application UI view. Click the preprocessing toggle links and verify the inputs reveal layout inputs cleanly, updating the configuration states successfully.
 
 #### Phase 3: Sandboxed Mathematical Expression Evaluator
 

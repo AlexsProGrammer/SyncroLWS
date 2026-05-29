@@ -1,4 +1,6 @@
 import React from 'react';
+import { Input } from '@/ui/components/input';
+import { Switch } from '@/ui/components/switch';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -124,20 +126,121 @@ function AggSelect({
   );
 }
 
-// ── AxisConfigurator ───────────────────────────────────────────────────────────
+// ── PreprocessPanel ──────────────────────────────────────────────────────────────────
+
+function PreprocessPanel({
+  config,
+  onChange,
+}: {
+  config: PreprocessConfig;
+  onChange: (cfg: PreprocessConfig) => void;
+}): React.ReactElement {
+  return (
+    <div className="mt-1.5 rounded-md border border-border bg-background p-2.5 flex flex-col gap-2 shadow-sm">
+      {/* Enable toggle */}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-medium text-foreground">Enable preprocessing</span>
+        <Switch
+          checked={config.enabled}
+          onCheckedChange={(v) => onChange({ ...config, enabled: v })}
+        />
+      </div>
+
+      {config.enabled && (
+        <>
+          {/* Regex pattern */}
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[10px] text-muted-foreground">
+              Regex pattern — named groups become formula variables
+            </span>
+            <Input
+              className="h-7 text-xs font-mono px-2"
+              value={config.regexPattern}
+              onChange={(e) => onChange({ ...config, regexPattern: e.target.value })}
+              placeholder="(?<hour>\\d+)h\\s*(?<minutes>\\d+)min"
+              spellCheck={false}
+            />
+          </div>
+
+          {/* Formula expression */}
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[10px] text-muted-foreground">
+              Formula expression — use captured group names, e.g. hour + (minutes / 60)
+            </span>
+            <Input
+              className="h-7 text-xs font-mono px-2"
+              value={config.formulaExpression}
+              onChange={(e) => onChange({ ...config, formulaExpression: e.target.value })}
+              placeholder="hour + (minutes / 60)"
+              spellCheck={false}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── PreprocessButton ──────────────────────────────────────────────────────────────
+
+function PreprocessButton({
+  active,
+  open,
+  onToggle,
+}: {
+  active: boolean;
+  open: boolean;
+  onToggle: () => void;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      title="Configure data preprocessing"
+      className={[
+        'shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded border transition-colors',
+        'focus:outline-none focus:ring-1 focus:ring-ring',
+        active
+          ? 'border-primary/60 bg-primary/10 text-primary'
+          : open
+          ? 'border-border bg-muted text-foreground'
+          : 'border-border bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted',
+      ].join(' ')}
+    >
+      f(x)
+    </button>
+  );
+}
+
+// ── AxisConfigurator ───────────────────────────────────────────────────────────────────
 
 /**
  * Renders three column-selector strips (X, Y1-primary, Y2-secondary).
- * Each Y strip pairs a column dropdown with an aggregation function selector.
- * All selections are lifted to the parent via `onChange`.
+ * Each strip has an f(x) button that reveals a collapsible PreprocessPanel
+ * for configuring regex token extraction and formula evaluation.
+ * All state is lifted to the parent via `onChange`.
  */
 export function AxisConfigurator({
   headers,
   value,
   onChange,
 }: AxisConfiguratorProps): React.ReactElement {
+  const [openPanel, setOpenPanel] = React.useState<'x' | 'y1' | 'y2' | null>(null);
+
   const set = <K extends keyof AxisConfig>(key: K, v: AxisConfig[K]) =>
     onChange({ ...value, [key]: v });
+
+  const togglePanel = (panel: 'x' | 'y1' | 'y2') =>
+    setOpenPanel((prev) => (prev === panel ? null : panel));
+
+  const setPreprocess = (
+    key: 'xPreprocess' | 'y1Preprocess' | 'y2Preprocess',
+    cfg: PreprocessConfig,
+  ) => set(key, cfg);
+
+  const xCfg = value.xPreprocess ?? { ...DEFAULT_PREPROCESS_CONFIG };
+  const y1Cfg = value.y1Preprocess ?? { ...DEFAULT_PREPROCESS_CONFIG };
+  const y2Cfg = value.y2Preprocess ?? { ...DEFAULT_PREPROCESS_CONFIG };
 
   return (
     <div className="flex flex-col gap-2 px-6 py-3 border-b border-border bg-muted/30">
@@ -149,18 +252,33 @@ export function AxisConfigurator({
         {/* X Axis */}
         <div className="flex flex-col gap-1">
           <span className="text-xs font-medium text-foreground">X Axis</span>
-          <ColSelect
-            headers={headers}
-            value={value.xCol}
-            onChange={(v) => set('xCol', v)}
-            placeholder="Select column…"
-          />
+          <div className="flex gap-1 items-center">
+            <div className="flex-1 min-w-0">
+              <ColSelect
+                headers={headers}
+                value={value.xCol}
+                onChange={(v) => set('xCol', v)}
+                placeholder="Select column…"
+              />
+            </div>
+            <PreprocessButton
+              active={xCfg.enabled}
+              open={openPanel === 'x'}
+              onToggle={() => togglePanel('x')}
+            />
+          </div>
+          {openPanel === 'x' && (
+            <PreprocessPanel
+              config={xCfg}
+              onChange={(cfg) => setPreprocess('xPreprocess', cfg)}
+            />
+          )}
         </div>
 
         {/* Y1 — Primary */}
         <div className="flex flex-col gap-1">
           <span className="text-xs font-medium text-foreground">Y1 — Primary</span>
-          <div className="flex gap-1">
+          <div className="flex gap-1 items-center">
             <div className="flex-1 min-w-0">
               <ColSelect
                 headers={headers}
@@ -170,13 +288,24 @@ export function AxisConfigurator({
               />
             </div>
             <AggSelect value={value.y1Agg} onChange={(v) => set('y1Agg', v)} />
+            <PreprocessButton
+              active={y1Cfg.enabled}
+              open={openPanel === 'y1'}
+              onToggle={() => togglePanel('y1')}
+            />
           </div>
+          {openPanel === 'y1' && (
+            <PreprocessPanel
+              config={y1Cfg}
+              onChange={(cfg) => setPreprocess('y1Preprocess', cfg)}
+            />
+          )}
         </div>
 
         {/* Y2 — Secondary (optional) */}
         <div className="flex flex-col gap-1">
           <span className="text-xs font-medium text-foreground">Y2 — Secondary</span>
-          <div className="flex gap-1">
+          <div className="flex gap-1 items-center">
             <div className="flex-1 min-w-0">
               <ColSelect
                 headers={headers}
@@ -186,7 +315,18 @@ export function AxisConfigurator({
               />
             </div>
             <AggSelect value={value.y2Agg} onChange={(v) => set('y2Agg', v)} />
+            <PreprocessButton
+              active={y2Cfg.enabled}
+              open={openPanel === 'y2'}
+              onToggle={() => togglePanel('y2')}
+            />
           </div>
+          {openPanel === 'y2' && (
+            <PreprocessPanel
+              config={y2Cfg}
+              onChange={(cfg) => setPreprocess('y2Preprocess', cfg)}
+            />
+          )}
         </div>
       </div>
     </div>
