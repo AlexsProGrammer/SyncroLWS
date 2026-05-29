@@ -551,3 +551,61 @@ export async function runSelfTest(): Promise<void> {
     console.error('[time-intelligence] self-test FAILED', err);
   }
 }
+
+// ── Step 4.3 — Client milestone aggregator ────────────────────────────────────
+
+/** Accumulated billable income per client used by the milestone daemon. */
+export interface ClientMilestone {
+  /** Client/project name extracted from [ProjectName] bracket notation. */
+  project: string;
+  /** Total earned cents: Σ(duration_h × hourly_rate_cents) for billable entries. */
+  earned_cents: number;
+  /** Number of billable entries contributing to this total. */
+  entry_count: number;
+}
+
+/**
+ * Computes per-client accumulated billable income over the last `days` days.
+ * Only entries where `billable = 1` AND `hourly_rate_cents > 0` are included.
+ * Called periodically by the threshold daemon in IntelligenceDashboard.
+ */
+export async function getClientMilestones(days = 365): Promise<ClientMilestone[]> {
+  const db = getWorkspaceDB();
+  const fromDate = new Date(Date.now() - days * 86_400_000).toISOString();
+
+  const sql = `
+    SELECT
+      COALESCE(NULLIF(TRIM(json_extract(ea.data, '$.project')), ''), '(no project)') AS project,
+      COUNT(*)                                                                         AS entry_count,
+      CAST(
+        SUM(
+          CAST(json_extract(ea.data, '$.duration_seconds') AS REAL) *
+          CAST(COALESCE(json_extract(ea.data, '$.hourly_rate_cents'), 0) AS REAL) / 3600.0
+        ) AS INTEGER
+      )                                                                                AS earned_cents
+    FROM base_entities be
+    JOIN entity_aspects ea ON ea.entity_id = be.id
+    WHERE ea.aspect_type = 'time_log'
+      AND be.deleted_at IS NULL
+      AND ea.deleted_at IS NULL
+      AND json_extract(ea.data, '$.billable') = 1
+      AND CAST(COALESCE(json_extract(ea.data, '$.hourly_rate_cents'), 0) AS REAL) > 0
+      AND json_extract(ea.data, '$.duration_seconds') IS NOT NULL
+      AND json_extract(ea.data, '$.start') >= ?
+    GROUP BY LOWER(json_extract(ea.data, '$.project'))
+    HAVING earned_cents > 0
+    ORDER BY earned_cents DESC
+  `;
+
+  const rows = await db.select<{
+    project: string;
+    entry_count: number | string | null;
+    earned_cents: number | string | null;
+  }[]>(sql, [fromDate]);
+
+  return rows.map((r) => ({
+    project: r.project,
+    earned_cents: n(r.earned_cents),
+    entry_count: n(r.entry_count),
+  }));
+}

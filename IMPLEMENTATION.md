@@ -71,10 +71,10 @@
 
 #### Phase 4: Predictive Inference Engine & Milestone Alerts
 
-* [ ] **Step 4.1:** Create `apps/desktop/src/modules/time-intelligence/components/ForecastPredictor.tsx`. Implement a predictive text input change controller designed to wrap basic description input boxes.
-* [ ] **Step 4.2:** Build an analytical lookup hook `useTimePredictor(inputVal: string)`. As a user types, match partial inputs against historical descriptions. If standard text pairings exist, auto-suggest the historical baseline project and suggest expected time allocations using calculated average deviations.
-* [ ] **Step 4.3:** Implement a local threshold calculation daemon thread loop inside `IntelligenceDashboard.tsx`. Compute the accumulated unbilled value totals (`duration_seconds * hourly_rate_cents`) grouped per unique client identifier.
-* [ ] **Step 4.4:** Check active billable totals against target milestone settings. When metrics exceed configuration limits, invoke Tauri's native platform notification system (`@tauri-apps/api/notification`) to fire immediate on-device desktop alert frames.
+* [x] **Step 4.1:** Create `apps/desktop/src/modules/time-intelligence/components/ForecastPredictor.tsx`. Implement a predictive text input change controller designed to wrap basic description input boxes.
+* [x] **Step 4.2:** Build an analytical lookup hook `useTimePredictor(inputVal: string)`. As a user types, match partial inputs against historical descriptions. If standard text pairings exist, auto-suggest the historical baseline project and suggest expected time allocations using calculated average deviations.
+* [x] **Step 4.3:** Implement a local threshold calculation daemon thread loop inside `IntelligenceDashboard.tsx`. Compute the accumulated unbilled value totals (`duration_seconds * hourly_rate_cents`) grouped per unique client identifier.
+* [x] **Step 4.4:** Check active billable totals against target milestone settings. When metrics exceed configuration limits, invoke Tauri's native platform notification system (`@tauri-apps/api/notification`) to fire immediate on-device desktop alert frames.
 * [ ] **Verification:** Type an initial sequence matching past input tracking strings (e.g., `"Dev"`) inside the input layout. Confirm the interface responds by displaying expected duration suggestion tags underneath the layout container.
 
 #### Phase 5: Global Command Palette Analytics Overlay

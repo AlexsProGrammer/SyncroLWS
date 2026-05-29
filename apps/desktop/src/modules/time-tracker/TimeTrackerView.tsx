@@ -22,6 +22,7 @@ import type { TimeLogAspectData } from '@syncrohws/shared-types';
 import { ManualEntryForm } from './ManualEntryForm';
 import { TimeTrackerReports } from './TimeTrackerReports';
 import { parseTimeLogDescription } from '../time-intelligence/utils/logParser';
+import { ForecastPredictor } from '../time-intelligence/components/ForecastPredictor';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -295,46 +296,49 @@ export function TimeTrackerView({ toolInstanceId }: { toolInstanceId?: string })
           </section>
 
           <section className="rounded-xl border-2 border-border bg-card p-6">
-            <div className="flex items-center gap-4">
-              <input
-                type="text"
-                placeholder="What are you working on?"
+            <div className="flex flex-col gap-3">
+              <ForecastPredictor
                 value={activeDesc}
-                onChange={(e) => setActiveDesc(e.target.value)}
+                onChange={setActiveDesc}
                 disabled={isTracking}
-                className="flex-1 rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                onAccept={(project) => {
+                  if (project && !activeDesc.startsWith(`[${project}]`)) {
+                    setActiveDesc(`[${project}] ${activeDesc}`.trim());
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !isTracking) void startTracking();
                 }}
               />
+              <div className="flex items-center justify-end gap-4">
+                <div className="min-w-[100px] text-center">
+                  <p className="font-mono text-2xl font-bold tabular-nums text-foreground">
+                    {formatDuration(elapsed)}
+                  </p>
+                </div>
 
-              <div className="min-w-[100px] text-center">
-                <p className="font-mono text-2xl font-bold tabular-nums text-foreground">
-                  {formatDuration(elapsed)}
-                </p>
+                <Button
+                  onClick={isTracking ? () => void stopTracking() : () => void startTracking()}
+                  size="lg"
+                  className={
+                    isTracking
+                      ? 'min-w-[80px] bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                      : 'min-w-[80px] bg-green-600 text-white hover:bg-green-700'
+                  }
+                >
+                  {isTracking ? (
+                    <span className="flex items-center gap-1.5">
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
+                      Stop
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1.5">
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21" /></svg>
+                      Start
+                    </span>
+                  )}
+                </Button>
               </div>
-
-              <Button
-                onClick={isTracking ? () => void stopTracking() : () => void startTracking()}
-                size="lg"
-                className={
-                  isTracking
-                    ? 'min-w-[80px] bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                    : 'min-w-[80px] bg-green-600 text-white hover:bg-green-700'
-                }
-              >
-                {isTracking ? (
-                  <span className="flex items-center gap-1.5">
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
-                    Stop
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1.5">
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21" /></svg>
-                    Start
-                  </span>
-                )}
-              </Button>
             </div>
 
             {isTracking && (

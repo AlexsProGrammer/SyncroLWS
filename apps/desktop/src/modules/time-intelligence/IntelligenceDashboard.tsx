@@ -4,7 +4,7 @@
  * Renders multi-scale statistical metrics computed natively from the local
  * SQLite workspace database. No data leaves the device (DSGVO compliant).
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   AreaChart,
   Area,
@@ -26,7 +26,9 @@ import { Button } from '@/ui/components/button';
 import type { ToolViewProps } from '@/registry/ToolRegistry';
 import {
   getTimeWindowStats,
+  getClientMilestones,
   type TimeWindowStats,
+  type ClientMilestone,
 } from './utils/metricsCalculator';
 import { LiveRegexTerminal } from './components/LiveRegexTerminal';
 
@@ -121,12 +123,43 @@ function IconRefresh({ className }: { className?: string }): React.ReactElement 
   );
 }
 
+// ── Notification helper (Web Notifications API — no cloud, DSGVO compliant) ─
+
+async function fireMilestoneNotification(project: string, earnedCents: number): Promise<void> {
+  if (!('Notification' in window)) return;
+  const title = `Billing Milestone: ${project}`;
+  const body = `Accumulated $${(earnedCents / 100).toFixed(0)} — time to invoice!`;
+  const doSend = (): void => {
+    new Notification(title, {
+      body,
+      tag: `ti-milestone-${project}`, // OS deduplication key
+      silent: false,
+    });
+  };
+  if (Notification.permission === 'granted') {
+    doSend();
+  } else if (Notification.permission !== 'denied') {
+    const perm = await Notification.requestPermission();
+    if (perm === 'granted') doSend();
+  }
+}
+
+// ── Milestone threshold default ($500 = 50 000 cents) ────────────────────────
+
+const DEFAULT_MILESTONE_CENTS = 50_000;
+/** Polling interval for the milestone daemon (5 minutes). */
+const MILESTONE_POLL_MS = 5 * 60 * 1000;
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function IntelligenceDashboardView({ toolInstanceId: _ }: ToolViewProps): React.ReactElement {
   const [stats, setStats] = useState<TimeWindowStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Milestone daemon state
+  const [milestones, setMilestones] = useState<ClientMilestone[]>([]);
+  const [milestoneTargetCents, setMilestoneTargetCents] = useState(DEFAULT_MILESTONE_CENTS);
+  const firedRef = useRef<Set<string>>(new Set());
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
 
   const loadStats = useCallback(async () => {
@@ -147,6 +180,34 @@ export function IntelligenceDashboardView({ toolInstanceId: _ }: ToolViewProps):
   useEffect(() => {
     void loadStats();
   }, [loadStats]);
+
+  // ── Milestone daemon (Step 4.3 / 4.4) ──────────────────────────────────────
+
+  const checkMilestones = useCallback(async () => {
+    if (!activeWorkspaceId) return;
+    try {
+      const data = await getClientMilestones();
+      setMilestones(data);
+      // Fire a desktop notification for each newly exceeded project
+      for (const client of data) {
+        if (
+          client.earned_cents >= milestoneTargetCents &&
+          !firedRef.current.has(client.project)
+        ) {
+          firedRef.current.add(client.project);
+          void fireMilestoneNotification(client.project, client.earned_cents);
+        }
+      }
+    } catch (err) {
+      console.error('[time-intelligence] milestone check failed:', err);
+    }
+  }, [activeWorkspaceId, milestoneTargetCents]);
+
+  useEffect(() => {
+    void checkMilestones();
+    const id = setInterval(() => void checkMilestones(), MILESTONE_POLL_MS);
+    return () => clearInterval(id);
+  }, [checkMilestones]);
 
   // ── Derived values ──────────────────────────────────────────────────────────
 
@@ -205,6 +266,7 @@ export function IntelligenceDashboardView({ toolInstanceId: _ }: ToolViewProps):
             <TabsTrigger value="overview" className="text-xs">Overview</TabsTrigger>
             <TabsTrigger value="projects" className="text-xs">Projects</TabsTrigger>
             <TabsTrigger value="patterns" className="text-xs">Patterns</TabsTrigger>
+            <TabsTrigger value="milestones" className="text-xs">Milestones</TabsTrigger>
             <TabsTrigger value="regex" className="text-xs">Regex Lab</TabsTrigger>
           </TabsList>
           <div className="flex items-center gap-2 pr-1 pb-1">
@@ -503,6 +565,86 @@ export function IntelligenceDashboardView({ toolInstanceId: _ }: ToolViewProps):
                 </div>
               )}
             </>
+          )}
+        </TabsContent>
+
+        {/* ── Milestones ───────────────────────────────────────────── */}
+        <TabsContent
+          value="milestones"
+          className="data-[state=active]:flex flex-1 min-h-0 flex-col overflow-auto p-4 gap-4"
+        >
+          {/* Threshold configurator */}
+          <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+            <div className="flex-1">
+              <p className="text-xs font-medium text-foreground">Alert threshold per client</p>
+              <p className="text-[11px] text-muted-foreground">Fire a desktop notification when accumulated billable earnings exceed this amount.</p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-sm font-medium text-muted-foreground">$</span>
+              <input
+                type="number"
+                min={1}
+                step={50}
+                value={milestoneTargetCents / 100}
+                onChange={(e) => {
+                  const v = Math.max(1, parseFloat(e.target.value) || 1);
+                  firedRef.current.clear(); // reset fired set on threshold change
+                  setMilestoneTargetCents(Math.round(v * 100));
+                }}
+                className="w-24 rounded-lg border border-border bg-background px-2 py-1.5 text-right text-sm tabular-nums text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+          </div>
+
+          {/* Client milestone list */}
+          {milestones.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
+                Billable Earnings — last 365 days
+              </p>
+              {milestones.map((m) => {
+                const pct = Math.min(100, (m.earned_cents / milestoneTargetCents) * 100);
+                const exceeded = m.earned_cents >= milestoneTargetCents;
+                return (
+                  <div
+                    key={m.project}
+                    className={`flex items-center gap-3 rounded-lg border bg-card px-4 py-2.5 ${
+                      exceeded ? 'border-green-500/40' : 'border-border'
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="truncate text-sm font-medium text-foreground">{m.project}</p>
+                        {exceeded && (
+                          <span className="shrink-0 rounded-full bg-green-500/15 px-1.5 py-0.5 text-[10px] font-medium text-green-500">
+                            MILESTONE
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            exceeded ? 'bg-green-500' : 'bg-primary/60'
+                          }`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-sm font-semibold tabular-nums text-foreground">
+                        ${(m.earned_cents / 100).toFixed(0)}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">{m.entry_count} entries</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex flex-1 items-center justify-center py-16 text-center text-sm text-muted-foreground">
+              No billable data yet.<br />
+              Mark time entries as billable and set an hourly rate to track milestones.
+            </div>
           )}
         </TabsContent>
 
