@@ -57,10 +57,10 @@
 
 #### Phase 4: Axis Configurator Integration Panel
 
-* [ ] **Step 4.1:** Open `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`. Navigate to the rendering loop block that maps out individual `ySeries` form rows.
-* [ ] **Step 4.2:** Insert a selection choice dropdown picker element directly into the card rows layout allowing quick toggling options between `"Numeric Data"` and `"Categorical Data Encoders"`.
-* [ ] **Step 4.3:** Use conditional rendering logic to display the new `<CategoryMappingEditor />` component below the selected column select dropdown box only when the `mode` parameter is explicitly configured to `"categorical"`.
-* [ ] **Verification:** Open the Analytics Suite Dashboard workspace inside the application window layout. Add a new metric item, switch the tracking selection field to "Categorical Data Encoders", and confirm the encoder card panel elements expand on the interface smoothly.
+* [x] **Step 4.1:** Open `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`. Navigate to the rendering loop block that maps out individual `ySeries` form rows.
+* [x] **Step 4.2:** Insert a selection choice dropdown picker element directly into the card rows layout allowing quick toggling options between `"Numeric Data"` and `"Categorical Data Encoders"`.
+* [x] **Step 4.3:** Use conditional rendering logic to display the new `<CategoryMappingEditor />` component below the selected column select dropdown box only when the `mode` parameter is explicitly configured to `"categorical"`.
+* [x] **Verification:** Open the Analytics Suite Dashboard workspace inside the application window layout. Add a new metric item, switch the tracking selection field to "Categorical Data Encoders", and confirm the encoder card panel elements expand on the interface smoothly.
 
 #### Phase 5: Dashboard Chart Aggregation Verification
 

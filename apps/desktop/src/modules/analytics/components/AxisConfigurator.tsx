@@ -1,6 +1,7 @@
 import React from 'react';
 import { Input } from '@/ui/components/input';
 import { Switch } from '@/ui/components/switch';
+import { CategoryMappingEditor } from './CategoryMappingEditor';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -417,6 +418,22 @@ export function AxisConfigurator({
                 />
               </div>
 
+              {/* Mode selector — Numeric vs Categorical */}
+              <div className="relative shrink-0">
+                <select
+                  className={SELECT_CLS}
+                  value={s.mode}
+                  onChange={(e) =>
+                    updateSeries(i, { mode: e.target.value as 'numeric' | 'categorical' })
+                  }
+                  title="Data encoding mode"
+                >
+                  <option value="numeric">Numeric Data</option>
+                  <option value="categorical">Categorical Data Encoders</option>
+                </select>
+                <ChevronDown />
+              </div>
+
               {/* Draw-type selector */}
               <DrawTypeSelect
                 value={s.drawType}
@@ -464,6 +481,15 @@ export function AxisConfigurator({
               <PreprocessPanel
                 config={s.preprocess ?? { enabled: false, regexPattern: '', formulaExpression: '' }}
                 onChange={(cfg) => updateSeries(i, { preprocess: cfg })}
+              />
+            )}
+
+            {/* Categorical mapping editor — shown only when mode is categorical */}
+            {s.mode === 'categorical' && (
+              <CategoryMappingEditor
+                header={s.colId !== null ? (headers[s.colId] ?? `Column ${s.colId}`) : 'Select a column'}
+                value={s.mappingRules}
+                onChange={(mapping) => updateSeries(i, { mappingRules: mapping })}
               />
             )}
           </div>
