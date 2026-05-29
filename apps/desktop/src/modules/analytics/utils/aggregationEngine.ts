@@ -89,3 +89,165 @@ export function mapToChartPoints(rows: AggRow[]): ChartPoint[] {
     return pt;
   });
 }
+
+// ── Safe formula evaluator ─────────────────────────────────────────────────────
+
+type ArithToken =
+  | { kind: 'num'; val: number }
+  | { kind: 'op'; ch: '+' | '-' | '*' | '/' | '(' | ')' }
+  | { kind: 'eof' };
+
+/**
+ * Converts an arithmetic string into a flat token array.
+ * Returns `null` when any character is not a digit, dot, operator, paren, or
+ * whitespace — this signals an invalid / injected expression to the caller.
+ */
+function tokenizeArith(expr: string): ArithToken[] | null {
+  const out: ArithToken[] = [];
+  let i = 0;
+  while (i < expr.length) {
+    const ch = expr.charAt(i); // charAt always returns a string, never undefined
+    if (ch === ' ' || ch === '\t') { i++; continue; }
+    if ((ch >= '0' && ch <= '9') || ch === '.') {
+      let raw = '';
+      while (i < expr.length) {
+        const c = expr.charAt(i);
+        if ((c >= '0' && c <= '9') || c === '.') { raw += c; i++; } else break;
+      }
+      const v = Number(raw);
+      if (!isFinite(v)) return null;
+      out.push({ kind: 'num', val: v });
+    } else if (
+      ch === '+' || ch === '-' || ch === '*' || ch === '/' ||
+      ch === '(' || ch === ')'
+    ) {
+      out.push({ kind: 'op', ch });
+      i++;
+    } else {
+      return null; // unrecognised character — reject the expression
+    }
+  }
+  out.push({ kind: 'eof' });
+  return out;
+}
+
+/**
+ * Recursive-descent parser for basic arithmetic: `+  −  *  /  ( )  unary −`
+ *
+ * Operator precedence (standard):
+ *   lowest  → addition / subtraction      (expr)
+ *   higher  → multiplication / division   (term)
+ *   highest → unary sign, parens, literal (factor)
+ *
+ * Never calls `eval`, `Function`, or any dynamic code execution path.
+ * Division by zero safely yields 0 instead of throwing.
+ * Throws `Error` on malformed input so the caller can return 0.
+ */
+class ArithParser {
+  private pos = 0;
+  constructor(private readonly toks: ArithToken[]) {}
+
+  /** Returns the token at the current position, throwing on out-of-bounds. */
+  private current(): ArithToken {
+    const t = this.toks[this.pos];
+    if (t === undefined) throw new Error('Unexpected end of token stream');
+    return t;
+  }
+
+  parse(): number {
+    const v = this.expr();
+    if (this.current().kind !== 'eof') throw new Error('Unexpected token after expression');
+    return v;
+  }
+
+  // addition / subtraction — left-associative, lowest precedence
+  private expr(): number {
+    let v = this.term();
+    for (;;) {
+      const t = this.current();
+      if (t.kind === 'op' && (t.ch === '+' || t.ch === '-')) {
+        this.pos++;
+        const r = this.term();
+        v = t.ch === '+' ? v + r : v - r;
+      } else break;
+    }
+    return v;
+  }
+
+  // multiplication / division — left-associative, higher precedence
+  private term(): number {
+    let v = this.factor();
+    for (;;) {
+      const t = this.current();
+      if (t.kind === 'op' && (t.ch === '*' || t.ch === '/')) {
+        this.pos++;
+        const r = this.factor();
+        v = t.ch === '*' ? v * r : r === 0 ? 0 : v / r;
+      } else break;
+    }
+    return v;
+  }
+
+  // unary sign, parenthesised sub-expression, numeric literal
+  private factor(): number {
+    const t = this.current();
+    if (t.kind === 'op' && t.ch === '-') { this.pos++; return -this.factor(); }
+    if (t.kind === 'op' && t.ch === '+') { this.pos++; return  this.factor(); }
+    if (t.kind === 'op' && t.ch === '(') {
+      this.pos++;
+      const v = this.expr();
+      const close = this.current();
+      this.pos++;
+      if (close.kind !== 'op' || close.ch !== ')') throw new Error('Expected closing )');
+      return v;
+    }
+    if (t.kind === 'num') { this.pos++; return t.val; }
+    throw new Error('Unexpected token in factor');
+  }
+}
+
+/**
+ * Evaluates a simple arithmetic formula string with named token substitution.
+ *
+ * Steps:
+ *  1. Token names are substituted with their concrete float values (longest
+ *     name first to prevent partial clobbering, e.g. "minutes" before "min").
+ *  2. After substitution the expression must consist solely of digits, dots,
+ *     arithmetic operators, parentheses, and whitespace — any remaining letter
+ *     or foreign character returns 0 immediately (injection guard).
+ *  3. The numeric expression is parsed by `ArithParser`, a hand-written
+ *     recursive-descent parser. No `eval` or `Function` constructor is used.
+ *  4. Non-finite results (Infinity, NaN) are clamped to 0.
+ *
+ * Returns `0` on any parse error, invalid character, or division by zero.
+ *
+ * @example
+ *   evaluateSafeFormula("h + (m / 60)", { h: 1, m: 30 }) // → 1.5
+ */
+export function evaluateSafeFormula(
+  formula: string,
+  tokens: Record<string, number>,
+): number {
+  if (!formula.trim()) return 0;
+
+  // Substitute named tokens longest-first to avoid partial replacements.
+  let expr = formula;
+  const keys = Object.keys(tokens).sort((a, b) => b.length - a.length);
+  for (const key of keys) {
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    expr = expr.replace(new RegExp(`\\b${escaped}\\b`, 'g'), String(tokens[key]));
+  }
+
+  // Injection guard: after substitution only arithmetic primitives may remain.
+  if (/[^0-9.\s+\-*/()]/.test(expr)) return 0;
+
+  const toks = tokenizeArith(expr);
+  if (!toks || toks.length <= 1) return 0; // empty or tokenizer rejected input
+
+  try {
+    const result = new ArithParser(toks).parse();
+    return isFinite(result) ? result : 0;
+  } catch {
+    return 0;
+  }
+}

@@ -61,10 +61,10 @@ export interface PreprocessConfig {
 
 #### Phase 3: Sandboxed Mathematical Expression Evaluator
 
-* [ ] **Step 3.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, create a secure helper function `evaluateSafeFormula(formula: string, tokens: Record<string, number>): number`.
-* [ ] **Step 3.2:** Implement a localized scanning parser within `evaluateSafeFormula`. Replace string match variables corresponding to the extracted token naming definitions with their concrete floating-point numbers.
-* [ ] **Step 3.3:** Parse the basic arithmetic string operators strictly by separating inputs sequentially against addition, subtraction, multiplication, and division characters (`+`, `-`, `*`, `/`). Block any script block injection vectors by refusing to route evaluations through runtime string executes (`eval`). Return `0` if fields are invalid or formatting parameters fail.
-* [ ] **Verification:** Open a temporary debug log file or add a console check trace. Pass formula statement strings such as `"h + (m / 60)"` paired with values `{ h: 1, m: 30 }` and confirm the calculation engine correctly registers a numeric value output of `1.5`.
+* [x] **Step 3.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, create a secure helper function `evaluateSafeFormula(formula: string, tokens: Record<string, number>): number`.
+* [x] **Step 3.2:** Implement a localized scanning parser within `evaluateSafeFormula`. Replace string match variables corresponding to the extracted token naming definitions with their concrete floating-point numbers.
+* [x] **Step 3.3:** Parse the basic arithmetic string operators strictly by separating inputs sequentially against addition, subtraction, multiplication, and division characters (`+`, `-`, `*`, `/`). Block any script block injection vectors by refusing to route evaluations through runtime string executes (`eval`). Return `0` if fields are invalid or formatting parameters fail.
+* [x] **Verification:** Open a temporary debug log file or add a console check trace. Pass formula statement strings such as `"h + (m / 60)"` paired with values `{ h: 1, m: 30 }` and confirm the calculation engine correctly registers a numeric value output of `1.5`.
 
 #### Phase 4: JavaScript In-Memory Aggregation Pipeline
 
