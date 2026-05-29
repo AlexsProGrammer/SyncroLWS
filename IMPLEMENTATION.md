@@ -1,88 +1,103 @@
-# IMPLEMENTATION.md
+# IMPLEMENTATION.md for SyncroLWS Part 4
 
 ## 1. Project Context & Architecture
-- **Goal:** Build a user-defined Categorical Encoder and String Enum Mapping Engine for the Analytics Suite. This system allows users to translate discrete qualitative text codes (e.g., `"H"` for Home, `"W"` for Workplace) from unstructured CSV files into continuous numeric scores directly inside the parameterized SQLite aggregation compiler via polymorphic `CASE` statement evaluation logic.
-- **Tech Stack & Dependencies:**
-  - **Core Frameworks:** Tauri 2.0, React, Vite, TypeScript, Drizzle ORM, Tailwind CSS.
-  - **Dependencies:** Existing charting libraries (`recharts`) and state stores (`useWorkspaceStore`).
-  - **Commands:** No new package manager installations are required. Uses native SQL optimization layers and React state lifting.
-- **File Structure:**
-  ```text
-  └── apps/
-      └── desktop/
-          └── src/
-              └── modules/
-                  └── analytics/
-                      ├── AnalyticsDashboard.tsx # Modified: Update reporting layout data binding
-                      ├── components/
-                      │   ├── AxisConfigurator.tsx       # Modified: Integrate enum selector triggers into series items
-                      │   └── CategoryMappingEditor.tsx # Created: New inline dynamic dictionary mapping interface
-                      └── utils/
-                          └── aggregationEngine.ts       # Modified: Inject polymorphic CASE statement injection logic
+
+* **Goal:** Build the Premium Time Intelligence & Life-Bucket Automation Studio module for SyncroLWS. This module elevates basic time logs into structured data through an automated regex tokenization pipeline, computes multi-scale sliding/tumbling statistical windows locally, and delivers predictive text entry suggestions and active billing milestones without cloud-based computation platforms.
+* **Tech Stack & Dependencies:**
+* **Core Frameworks:** Tauri 2.0, React, Vite, Drizzle ORM, Zod.
+* **Libraries:** `lucide-react` (Local icons), `recharts` (Metric graphs), `@tauri-apps/api` (Native notifications).
+* **Package Commands:** - `cd apps/desktop && npm install recharts`
+
+
+* **File Structure:**
+```text
+├── packages/
+│   └── shared-types/
+│       └── src/
+│           └── base-entity.ts    # Modified: Verify time_log aspect data compatibility
+└── apps/
+    └── desktop/
+        └── src/
+            ├── ui/
+            │   └── CommandPalette.tsx # Modified: Inject custom analytical search syntax
+            └── modules/
+                ├── time-tracker/
+                │   └── TimeTrackerView.tsx # Modified: Wire automated tokenization hooks
+                └── time-intelligence/    # Created: New intelligence analytics root
+                    ├── manifest.json     # Created: Tool registry declaration
+                    ├── index.ts          # Created: Module initialization entrypoint
+                    ├── IntelligenceDashboard.tsx # Created: Premium reporting container
+                    ├── components/
+                    │   ├── LiveRegexTerminal.tsx  # Created: Dynamic pattern validator
+                    │   └── ForecastPredictor.tsx  # Created: Predictive modeling interface
+                    └── utils/
+                        ├── logParser.ts          # Created: Tokenizer execution engine
+                        └── metricsCalculator.ts  # Created: Advanced SQLite aggregate windows
 
 ```
 
-* **Attention Points:** - The column encoder must generate safe SQL templates by restricting string-enum matching keys to validated lookups, guarding against injection profiles during `CASE WHEN` compilation blocks.
-* Ensure compatibility with the multi-series structure (`ySeries: YSeriesItem[]`) introduced in Part 3.2.
+
+* **Attention Points:** - Automated category parsing must write macro life buckets directly into the core entity `tags` array field using strict prefixes (`"bucket:work"`, `"bucket:life"`, `"bucket:school_uni"`) to remain fully searchable by the global FTS5 indexing engine.
+* Statistical summaries must be calculated natively using raw window function strings compiled across local SQLite datasets.
 
 
-* **DSGVO:** String dictionary translations, encoding weights, text tokens, and relative frequencies are processed entirely inside the local SQLite database context and front-end state parameters. No data blocks or qualitative codebooks may be transmitted to cloud services.
+* **DSGVO:** All regular expression configurations, raw description strings, hours tracked, financial earnings metrics, and academic study schedules must reside safely within the isolated profile SQLite container. No parsing steps, tracking telemetry, or computed summaries may be uploaded to third-party endpoints.
 
 ---
 
 ## 2. Execution Phases
 
-#### Phase 1: Configuration Schema & TypeScript Extensions
+#### Phase 1: Regex Tokenization & Bucket Classification Pipeline
 
-* [x] **Step 1.1:** In `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`, define and export a `CategoryMapping` dictionary interface type: `export type CategoryMapping = Record<string, number>;`.
-* [x] **Step 1.2:** Update the `YSeriesItem` configuration interface structure to accommodate categorical mapping features. Add an option string selector `mode: 'numeric' | 'categorical';` along with an indexable container: `mappingRules: CategoryMapping;`.
-* [x] **Step 1.3:** Modify `DEFAULT_AXIS_CONFIG` within the configurator module to initialize the upgraded parameter boundaries inside default arrays safely (`mode: 'numeric'`, `mappingRules: {}`).
-* [x] **Verification:** Run type-checking suite `cd apps/desktop && npx tsc --noEmit` and verify the expanded type definition properties align with zero compile-time signature errors.
+* [x] **Step 1.1:** Create `apps/desktop/src/modules/time-intelligence/utils/logParser.ts`. Implement a tokenization function `parseTimeLogDescription(rawStr: string)` that extracts project anchors enclosed in brackets `^\[(.*?)\]` and trailing label sequences marked by `#(\w+)`.
+* [x] **Step 1.2:** Implement a classification scoring routine inside `logParser.ts`. If the token string matches configurable array keywords (e.g., `"lecture"`, `"study"`, `"assignment"`), map it to the `school_uni` bucket; if it hits tracking values containing billable client codes, map it to `work`; otherwise, route to `life`.
+* [x] **Step 1.3:** Modify `apps/desktop/src/modules/time-tracker/TimeTrackerView.tsx`. Intercept text input submission hooks. Run incoming descriptions through `parseTimeLogDescription`, extract the mapped project field metadata, and append the appropriate classification labels (`bucket:work`, `bucket:life`, `bucket:school_uni`) directly onto the core entity `tags` payload before saving. And fix in TimeTrackerView currently only uses the bottom half of screen, insteaf of the full height.
+* [x] **Step 1.4:** Create `apps/desktop/src/modules/time-intelligence/components/LiveRegexTerminal.tsx`. Build an interactive administration settings control container using `shadcn` inputs to let users test custom regex criteria patterns with matching colors against sample text arrays.
+* [ ] **Verification:** Open the browser developer tools console inside the Tauri runtime. Submit a mock entry text `"[CompanyAlpha] Implemented api schema #refactor"`. Verify the logged save payload automatically populates `project: "CompanyAlpha"`, isolates clean text, and attaches tags `["bucket:work", "refactor"]`.
 
-#### Phase 2: Category Mapping Interface Component
+#### Phase 2: Sliding/Tumbling Window Statistical Aggregators
 
-* [x] **Step 2.1:** Create `apps/desktop/src/modules/analytics/components/CategoryMappingEditor.tsx` to handle dictionary matching values.
-* [x] **Step 2.2:** Build a configuration row interface matching the target selection schema. This component accepts a header token string name, displays a list layout tracking entries, and features an "Add Dynamic Key Value Pair" actionable trigger button.
-* [x] **Step 2.3:** Implement entry rows containing two paired inputs: a string input tracking matching text keys (e.g., target placeholder `"H"`) and a secondary numeric input tracking structural numeric destination weights (e.g., placeholder `1.0`).
-* [x] **Step 2.4:** Wire save events to immediately trigger lifted configuration callbacks up into the primary `AxisConfigurator` panel scope, updating the parent series item array rules index mapping context cleanly.
-* [x] **Verification:** Mount `<CategoryMappingEditor headers={['WorkLoc']} value={{}} onChange={console.log} />` inside a temporary view and confirm adding/removing key-value parameters works.
+* [x] **Step 2.1:** Create `apps/desktop/src/modules/time-intelligence/utils/metricsCalculator.ts`. Implement advanced metrics computation methods that consume raw database client references via `getWorkspaceDB()`.
+* [x] **Step 2.2:** Build a multi-scale analytical tracking query utilizing native SQLite window functions (`avg(daily) OVER (ORDER BY day ROWS BETWEEN 30 PRECEDING AND CURRENT ROW)`) to extract true sliding/tumbling tracking behaviors (daily profiles, rolling weekly velocities, monthly bounds, and yearly variances).
+* [x] **Step 2.3:** Integrate custom SQL operators inside the query strings to evaluate string searches against descriptions, calculating precise project-level time totals, billable ratios, and tag concentrations across targeted date ranges.
+* [ ] **Verification:** Write a basic automated unit test harness or trigger a data retrieval execution directly within `metricsCalculator.ts`. Confirm it outputs structural statistical arrays in under 50ms without blocking UI interactions.
 
-#### Phase 3: Polymorphic CASE-Statement SQL Compiler
+#### Phase 3: Dynamic Module Infrastructure & Premium Interface
 
-* [x] **Step 3.1:** In `apps/desktop/src/modules/analytics/utils/aggregationEngine.ts`, write a dedicated macro generator helper method named `compileCategoricalExpr(colIndex: number, mapping: CategoryMapping): string`.
-* [x] **Step 3.2:** Inside `compileCategoricalExpr`, map across user-defined dictionary pairs. Convert individual properties cleanly into sequential text condition parameters formatting string outputs using explicit query matching constraints: `WHEN '${key}' THEN ${weight}`.
-* [x] **Step 3.3:** Construct the final inline conditional block string architecture, closing statements with explicit defaults: `CASE json_extract(cells, '$[${colIndex}]') [WHEN CLUSTER] ELSE 0.0 END`.
-* [x] **Step 3.4:** Rework the core method `aggExpr` inside the aggregation engine file. Check if the series item configuration parameter `mode === 'categorical'` evaluates to true. If active, wrap the generated conditional block string container inside the designated mathematical function parameter wrapper (`AVG`, `SUM`, `COUNT`), casting variables directly to `REAL`.
-* [x] **Verification:** Open a local test file context. Pass configuration parameters containing mapping definitions `{ 'H': 1, 'W': 0 }` into `buildAggregationQuery` and ensure the generated statement matches: `AVG(CASE json_extract(cells, '$[1]') WHEN 'H' THEN 1.0 WHEN 'W' THEN 0.0 ELSE 0.0 END)`.
+* [ ] **Step 3.1:** Create `apps/desktop/src/modules/time-intelligence/manifest.json`. Configure module discovery specifications with structural properties (id: `"time-intelligence"`, name: `"Time Intelligence Suite"`, icon mapping pointer: `"timer"`).
+* [ ] **Step 3.2:** Create `apps/desktop/src/modules/time-intelligence/index.ts` to register tool entrypoints and connect view routers cleanly into the system module lookup loop.
+* [ ] **Step 3.3:** Create `apps/desktop/src/modules/time-intelligence/IntelligenceDashboard.tsx`. Build a modern visual analytics reporting dashboard layout featuring grid metric indicators, split bucket summaries, and interactive chart panels utilizing Recharts components.
+* [ ] **Verification:** Start the runtime client environment package via `npm run tauri dev`. Confirm the new "Time Intelligence" module acts as a valid sidebar target, routing cleanly to an empty metrics dashboard view.
 
-#### Phase 4: Axis Configurator Integration Panel
+#### Phase 4: Predictive Inference Engine & Milestone Alerts
 
-* [x] **Step 4.1:** Open `apps/desktop/src/modules/analytics/components/AxisConfigurator.tsx`. Navigate to the rendering loop block that maps out individual `ySeries` form rows.
-* [x] **Step 4.2:** Insert a selection choice dropdown picker element directly into the card rows layout allowing quick toggling options between `"Numeric Data"` and `"Categorical Data Encoders"`.
-* [x] **Step 4.3:** Use conditional rendering logic to display the new `<CategoryMappingEditor />` component below the selected column select dropdown box only when the `mode` parameter is explicitly configured to `"categorical"`.
-* [x] **Verification:** Open the Analytics Suite Dashboard workspace inside the application window layout. Add a new metric item, switch the tracking selection field to "Categorical Data Encoders", and confirm the encoder card panel elements expand on the interface smoothly.
+* [ ] **Step 4.1:** Create `apps/desktop/src/modules/time-intelligence/components/ForecastPredictor.tsx`. Implement a predictive text input change controller designed to wrap basic description input boxes.
+* [ ] **Step 4.2:** Build an analytical lookup hook `useTimePredictor(inputVal: string)`. As a user types, match partial inputs against historical descriptions. If standard text pairings exist, auto-suggest the historical baseline project and suggest expected time allocations using calculated average deviations.
+* [ ] **Step 4.3:** Implement a local threshold calculation daemon thread loop inside `IntelligenceDashboard.tsx`. Compute the accumulated unbilled value totals (`duration_seconds * hourly_rate_cents`) grouped per unique client identifier.
+* [ ] **Step 4.4:** Check active billable totals against target milestone settings. When metrics exceed configuration limits, invoke Tauri's native platform notification system (`@tauri-apps/api/notification`) to fire immediate on-device desktop alert frames.
+* [ ] **Verification:** Type an initial sequence matching past input tracking strings (e.g., `"Dev"`) inside the input layout. Confirm the interface responds by displaying expected duration suggestion tags underneath the layout container.
 
-#### Phase 5: Dashboard Chart Aggregation Verification
+#### Phase 5: Global Command Palette Analytics Overlay
 
-* [x] **Step 5.1:** Open `apps/desktop/src/modules/analytics/AnalyticsDashboard.tsx`. Locate the background execution callback routine `runQuery`.
-* [x] **Step 5.2:** Ensure that when a column configuration features dynamic data enum configurations, queries run cleanly through the updated `buildAggregationQuery` flow to pass matching query statement string builders onto the SQLite execution pipeline proxy.
-* [x] **Step 5.3:** Validate that if the returned dataset contains non-numeric inputs originally, the runtime query maps strings smoothly into quantitative points to populate chart timelines without breaking layout layers or generating chart errors.
-* [x] **Verification:** Run a final full workspace compilation step using `npm run build` or `npx tsc --noEmit` from the root repository workspace directories to confirm complete integration type compliance.
+* [ ] **Step 5.1:** Open `apps/desktop/src/ui/CommandPalette.tsx`. Locate input string change listener blocks.
+* [ ] **Step 5.2:** Add a custom analytical token router block. When input fields are populated with targeted prefix arguments (such as typing `:time` or `:stats`), intercept standard FTS database lookups.
+* [ ] **Step 5.3:** Direct execution flows to run immediate queries against the custom statistical window methods inside `metricsCalculator.ts`. Display real-time hour counters and category tags as active search card options right inside the launcher layout area.
+* [ ] **Verification:** Press `Ctrl+K`/`Cmd+K` to toggle the global search view layout container open. Enter the analytical syntax string `:time`. Verify the search modal presents running category counters instead of standard record results.
 
 ---
 
 ## 3. Global Testing Strategy
 
-* **Polymorphic Code Mapping Ingestion Verification:**
-* *Action:* Import a performance tracking timesheet dataset containing qualitative location entries categorized under string attributes `"H"` and `"W"`. Configure an explicit code encoder assigning `"H" -> 100.0` and `"W" -> 20.0`, computing a running metric average over the collection timeline.
-* *Expected:* The rendering graph container handles raw non-numeric rows natively, outputting statistical value curves displaying performance metrics precisely matching mapped calculations.
+* **Polymorphic Search Accuracy Verification:**
+* *Action:* Log an engineering track item with the string description value `"[ProjectX] Core Refactoring #uni-exam"`. Execute a global command menu lookup search query targeting the token text `"exam"`.
+* *Expected:* The record must appear instantly in search results, demonstrating that automated tag tokenization maps correctly to the FTS5 virtual shadow table.
 
 
-* **SQL Protection Boundary Sanity Test:**
-* *Action:* Type string injection strings inside the code matching key field boxes on the editor component area to mimic malicious validation inputs (e.g., `' OR 1=1; --`).
-* *Expected:* The SQL compiler sanitizes configuration keys or formats variables cleanly inside literal parameter wrappers, dropping compile errors safely to the error panel without running bad query profiles.
+* **Airgapped Mathematical Boundary Consistency:**
+* *Action:* Disconnect all network adapter endpoints entirely. Log multiple hours of performance tracker records spread unevenly across historical logging intervals.
+* *Expected:* Metric calculations, window trends, and Dual-Y Recharts aggregations compute accurately on-device. No outbound network requests may exit the sandbox environment.
 
 
-* **Airgapped Relative Frequency Tracking Validation:**
-* *Action:* Disconnect all active internet adapters entirely from the local machine runtime environment. Input mapping configs and calculate a running tracking total distribution chart.
-* *Expected:* String tracking configurations and numerical chart vectors process on-device with zero interface lag and complete airgap security.
+* **High-Frequency Suggester Lag Mitigation:**
+* *Action:* Input text entries inside the description container at high characters-per-second typing speeds to simulate high-frequency baseline data access requests.
+* *Expected:* Auto-suggestion loops must debounce lookups gracefully, rendering prediction results with less than 16ms of UI rendering frame delay.

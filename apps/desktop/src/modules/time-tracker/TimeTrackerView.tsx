@@ -21,6 +21,7 @@ import { EntityRowContextMenu } from '@/ui/components/EntityRowContextMenu';
 import type { TimeLogAspectData } from '@syncrohws/shared-types';
 import { ManualEntryForm } from './ManualEntryForm';
 import { TimeTrackerReports } from './TimeTrackerReports';
+import { parseTimeLogDescription } from '../time-intelligence/utils/logParser';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -154,7 +155,9 @@ export function TimeTrackerView({ toolInstanceId }: { toolInstanceId?: string })
 
   const startTracking = useCallback(async (): Promise<void> => {
     const now = new Date();
-    const desc = activeDesc.trim() || `Working on: ${currentWindow}`;
+    const rawDesc = activeDesc.trim() || `Working on: ${currentWindow}`;
+    const parsed = parseTimeLogDescription(rawDesc);
+    const resolvedTitle = parsed.cleanText || rawDesc;
     const data: TimeLogAspectData = {
       start: now.toISOString(),
       end: null,
@@ -162,14 +165,14 @@ export function TimeTrackerView({ toolInstanceId }: { toolInstanceId?: string })
       window_title: currentWindow,
       billable: false,
       hourly_rate_cents: 0,
-      project: '',
+      project: parsed.project,
       manual: false,
     };
 
     try {
       const { createEntity } = await import('@/core/entityStore');
       const created = await createEntity({
-        core: { title: desc, tags: [] },
+        core: { title: resolvedTitle, tags: parsed.tags },
         aspects: [{ aspect_type: 'time_log', data, tool_instance_id: toolInstanceId ?? null }],
       });
       const aspect = created.aspects.find((a) => a.aspect_type === 'time_log');
@@ -178,7 +181,7 @@ export function TimeTrackerView({ toolInstanceId }: { toolInstanceId?: string })
       setActiveAspectId(aspect.id);
       setActiveStart(now);
       setIsTracking(true);
-      eventBus.emit('tracker:start', { description: desc });
+      eventBus.emit('tracker:start', { description: resolvedTitle });
     } catch (err) {
       console.error('[time-tracker] start failed:', err);
     }
@@ -264,7 +267,7 @@ export function TimeTrackerView({ toolInstanceId }: { toolInstanceId?: string })
   }, []);
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
       <Tabs defaultValue="timer" className="flex flex-1 flex-col overflow-hidden">
         <div className="flex items-center justify-between border-b border-border px-4 pt-3 pb-0">
           <TabsList className="h-9">
@@ -283,7 +286,7 @@ export function TimeTrackerView({ toolInstanceId }: { toolInstanceId?: string })
         </div>
 
         {/* ── Timer Tab ──────────────────────────────────────────────── */}
-        <TabsContent value="timer" className="flex flex-1 flex-col gap-4 overflow-auto p-4">
+        <TabsContent value="timer" className="data-[state=active]:flex flex-1 flex-col gap-4 overflow-auto p-4">
           <section className="rounded-lg border border-border bg-card px-4 py-3">
             <p className="mb-1 text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
               Active Window
@@ -371,11 +374,11 @@ export function TimeTrackerView({ toolInstanceId }: { toolInstanceId?: string })
           </section>
         </TabsContent>
 
-        <TabsContent value="manual" className="flex-1 overflow-auto p-4">
+        <TabsContent value="manual" className="data-[state=active]:flex flex-1 flex-col overflow-auto p-4">
           <ManualEntryForm onSaved={loadLogs} />
         </TabsContent>
 
-        <TabsContent value="reports" className="flex-1 overflow-auto p-4">
+        <TabsContent value="reports" className="data-[state=active]:flex flex-1 flex-col overflow-auto p-4">
           <TimeTrackerReports logs={logs} />
         </TabsContent>
       </Tabs>
